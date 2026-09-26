@@ -21,6 +21,11 @@ function isProtected(part: string): boolean {
   return /^(?:\.git(?:$|\.)|\.env|\.ssh$|\.aws$|\.azure$|\.docker$|\.kube$|application_default_credentials\.json$|\.config$|\.gnupg$|\.npmrc$|\.netrc$|\.pypirc$|\.gitconfig$|credentials(?:$|\.)|secrets?(?:$|\.)|id_(?:rsa|dsa|ecdsa|ed25519)(?:$|\.))/i.test(part) || /\.(?:pem|key|p12|pfx|keystore)$/i.test(part);
 }
 export function allowed(input: string): boolean { try { safeRelative(input); return true; } catch { return false; } }
+export function rootPathSync(root: string): string {
+  const resolved = realpathSync(root);
+  if (!lstatSync(resolved).isDirectory()) throw new ToolError('Workspace root must be a directory.');
+  return resolved;
+}
 export async function rootPath(root: string): Promise<string> {
   const resolved = await realpath(root);
   if (!(await lstat(resolved)).isDirectory()) throw new ToolError('Workspace root must be a directory.');

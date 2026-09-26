@@ -3,11 +3,12 @@ import { createTwoFilesPatch } from 'diff';
 import { z } from 'zod';
 import type { Action, FileSnapshot, ToolContext, ToolInspection, ToolResult, ToolService, TestReport } from '../../shared/types.js';
 import { WorkspaceFiles, type FileOptions } from './files.js';
-import { allowed, key, rootPath, scoped, ToolError } from './paths.js';
+import { allowed, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
 import { ShellPool, gitCommand, type ShellOptions, type CommandResult } from './shell.js';
 import { parseJUnit, unavailableReport } from './junit.js';
 export { ToolError } from './paths.js';
 
+const busyReports = new Set<string>();
 const pathArg = z.string().max(4096);
 const timeout = z.number().int().min(1).max(600_000).optional();
 const schemas: Record<string, z.ZodType> = {
@@ -69,7 +70,7 @@ export class WorkspaceTools implements ToolService {
     try {
       this.check(); const args = validate(action);
       if (context.signal?.aborted) return { ok: false, output: 'Cancelled before execution.' };
-      const root = await rootPath(context.projectRoot);
+      const root = rootPathSync(context.projectRoot);
       switch (action.name) {
         case 'read_file': { const file = await this.read(root, args.path); return { ok: file.hash !== null, output: file.hash === null ? `File not found: ${file.path}` : file.content, data: file }; }
         case 'list_files': { const entries = await this.list(root, args.path); return { ok: true, output: JSON.stringify(entries), data: entries }; }
@@ -134,13 +135,15 @@ export class WorkspaceTools implements ToolService {
   }
   private async runTests(context: ToolContext, args: Record<string, any>): Promise<ToolResult> {
     const reportPath = args.reportPath ?? '.react-harness-test-results.xml';
-    const target = await scoped(context.projectRoot, reportPath);
+    const target = { absolute: leasePath(context.projectRoot, reportPath) };
     const signature = async () => {
       await scoped(context.projectRoot, reportPath);
       try { const s = await lstat(target.absolute, { bigint: true }); return `${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; }
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
     };
     let before: string | null = null;
+    let acquired = false;
+    const releaseReport = () => { if (acquired) busyReports.delete(target.absolute); acquired = false; };
     let result: CommandResult;
     let report: TestReport | undefined;
     const captureReport = async (outcome: CommandResult) => {
@@ -152,9 +155,14 @@ export class WorkspaceTools implements ToolService {
         if (snapshot.hash === null) throw new ToolError('JUnit report is missing.');
         report = parseJUnit(snapshot.content, args.command, outcome, this.maxReportBytes);
       } catch (error) { report = unavailableReport(args.command, outcome, error instanceof Error ? error.message : 'JUnit report unavailable.'); }
+      finally { releaseReport(); }
     };
-    try { result = await this.shells.run(context, args.command, args.timeoutMs, async () => { before = await signature(); }, captureReport); }
+    try { result = await this.shells.run(context, args.command, args.timeoutMs, async () => {
+      if (busyReports.has(target.absolute)) throw new ToolError('Another test run is writing this report. Use a distinct reportPath or wait for it to finish.');
+      busyReports.add(target.absolute); acquired = true; before = await signature();
+    }, captureReport); }
     catch (error) { result = { output: '', error: error instanceof Error ? error.message : 'Test runner could not start.' }; }
+    finally { releaseReport(); }
     report ??= unavailableReport(args.command, result, result.error ?? 'Test command was not executed.');
     return { ok: report.status === 'passed', output: report.output, data: { ...result, reportPath, testReport: report } };
   }

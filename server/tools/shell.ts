@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { IPty } from 'node-pty';
 import type { ToolContext } from '../../shared/types.js';
-import { rootPath, ToolError } from './paths.js';
+import { rootPathSync, ToolError } from './paths.js';
 
 export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const result: Record<string, string> = {};
@@ -132,7 +132,7 @@ export class ShellPool {
   constructor(readonly options: ShellOptions) {}
   async run(context: ToolContext, command: string, timeoutMs = this.options.defaultTimeoutMs, beforeRun?: () => Promise<void>, afterRun?: (result: CommandResult) => Promise<void>): Promise<CommandResult> {
     if (this.disposed) throw new ToolError('Tool service has been disposed.');
-    const root = await rootPath(context.projectRoot), id = JSON.stringify([root, context.chatId, context.agentId]);
+    const root = rootPathSync(context.projectRoot), id = JSON.stringify([root, context.chatId, context.agentId]);
     if (!this.queues.has(id) && this.queues.size >= this.options.maxSessions) throw new ToolError('Persistent shell session limit reached.');
     const queue = this.queues.get(id) ?? { tail: Promise.resolve(), count: 0, generation: 0 };
     this.queues.set(id, queue);

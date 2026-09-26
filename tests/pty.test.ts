@@ -22,9 +22,11 @@ describe.skipIf(process.platform !== 'linux')('Linux persistent PTY integration'
     expect((await tools.execute(context, shell('false'))).ok).toBe(false);
   });
   it('serializes commands and executes Python in the persistent working directory', async () => {
-    const first = tools.execute(context, shell('sleep 0.1; export SERIAL=ready'));
-    const second = tools.execute(context, shell('printf "%s" "$SERIAL"'));
-    expect((await first).ok).toBe(true); expect((await second).output).toContain('ready');
+    for (let i = 0; i < 10; i++) {
+      const first = tools.execute(context, shell(`export SERIAL=ready${i}`));
+      const second = tools.execute(context, shell('printf "%s" "$SERIAL"'));
+      expect((await first).ok).toBe(true); expect((await second).output).toContain(`ready${i}`);
+    }
     const python = await tools.execute(context, { name: 'execute_python', args: { code: 'from pathlib import Path\nPath("python.txt").write_text("actual")\nprint("python works")' } });
     expect(python.ok).toBe(true); expect(await readFile(path.join(root, 'python.txt'), 'utf8')).toBe('actual');
   });
@@ -64,6 +66,15 @@ describe.skipIf(process.platform !== 'linux')('Linux persistent PTY integration'
   it('handles shell exit as uncertain rather than successful', async () => {
     const result = await tools.execute(context, shell('exit 0'));
     expect(result.ok).toBe(false); expect(result.output).toContain('uncertain');
+  });
+  it('does not allow two sessions to attribute the same active test report', async () => {
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const first = tools.execute({ ...context, onOutput: () => started() }, { name: 'run_tests', args: { command: `printf ready; sleep 0.2; printf '<testsuite><testcase name="first"/></testsuite>' > shared.xml`, reportPath: 'shared.xml' } });
+    await ready;
+    const conflict = await tools.execute({ ...context, agentId: 'other' }, { name: 'run_tests', args: { command: 'true', reportPath: 'shared.xml' } });
+    expect(conflict.ok).toBe(false); expect(conflict.output).toContain('Another test run');
+    expect((await first).ok).toBe(true);
   });
   it('parses a freshly generated JUnit artifact and rejects stale or absent artifacts', async () => {
     const report = '<testsuite><testcase name="actual"/></testsuite>';
