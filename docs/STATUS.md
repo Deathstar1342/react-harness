@@ -40,3 +40,9 @@ Dark charcoal, flat navigation, fewer outlined controls, contextual actions, cha
 5. Coder delegation is serial. Parallel worktrees/coders remain a later extension after verified baseline, as stated in milestones. Finish release audit and tracker updates before completion.
 
 Keep the full requested product scope and recent UI feedback. Do not mistake a passing synthetic test or screenshot for live-provider acceptance.
+
+## Latest integration evidence
+
+- Linux CI for b90a093 passed: https://github.com/Deathstar1342/react-harness/actions/runs/36225220402 (npm ci, typecheck, full tests including PTY, production build).
+- Runner/run/case grouping was added to the test drawer to match the original requested hierarchy; targeted UI checks and rebuilt preview passed. Final follow-up CI is pending the next push.
+- All milestone chats are idle. M6 delivered independent regression tests and M7 delivered the integrated dark UI. Human visual/interaction feedback and live STARK validation remain open; goal not complete and heartbeat remains paused.

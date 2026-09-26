@@ -133,6 +133,17 @@ it("renders runner cancellation, collection errors, skipped cases and tracebacks
   expect(html).toContain("Runner was cancelled");
 });
 
+it("groups reports into collapsed runner, run and individual test levels",async()=>{
+  const { TestReports } = await import("../client/Panels");
+  const reports = ['first','second'].map(id=>({id,runner:'pytest',command:'pytest',status:'passed' as const,output:'',createdAt:'2026-09-26T00:00:00Z',tests:[{name:id,status:'passed' as const}]}));
+  const html = renderToStaticMarkup(createElement(TestReports,{reports}));
+  expect(html.match(/class="test-runner"/g)).toHaveLength(1);
+  expect(html).toContain('2 runs');
+  expect(html.match(/class="test-run"/g)).toHaveLength(2);
+  expect(html.match(/class="test-case passed"/g)).toHaveLength(2);
+  expect(html).not.toContain('open=""');
+});
+
 it("uses distinct pass, failure and error icons while retaining text and case disclosure", async () => {
   const { TestRun } = await import("../client/Panels");
   const html = renderToStaticMarkup(createElement(TestRun, {

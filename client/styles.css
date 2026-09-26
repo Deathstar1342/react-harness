@@ -1938,3 +1938,16 @@ option {
 .test-status-icon.passed { color: #86c99b; }
 .test-status-icon.failed, .test-status-icon.error { color: #ef9199; }
 .test-status-icon.running { color: #aaa; }
+
+.test-runner > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px;
+  cursor: pointer;
+  list-style: none;
+}
+.test-runner > summary::before { content: '›'; width: 12px; }
+.test-runner[open] > summary::before { transform: rotate(90deg); }
+.test-runner > summary::-webkit-details-marker { display: none; }
+.test-runner-body { padding-left: 18px; }

@@ -257,6 +257,15 @@ export function TestRun({ report }: { report: TestReport }) {
   );
 }
 
+export function TestReports({ reports }: { reports: TestReport[] }) {
+  const runners = new Map<string,TestReport[]>();
+  for (const report of reports) runners.set(report.runner,[...(runners.get(report.runner) ?? []),report]);
+  return <>{[...runners].map(([runner,runs])=><details className="test-runner" key={runner}>
+    <summary><TestTube2 size={15} /><strong>{runner}</strong><span className="muted">{runs.length} {runs.length===1?'run':'runs'}</span></summary>
+    <div className="test-runner-body">{runs.map(report=><TestRun key={report.id} report={report} />)}</div>
+  </details>)}</>;
+}
+
 export function ActivityDrawer({
   events,
   tests,
@@ -309,7 +318,7 @@ export function ActivityDrawer({
         <div className="drawer-content">
           {tab === "tests" ? (
             tests.length ? (
-              tests.map((report) => <TestRun key={report.id} report={report} />)
+              <TestReports reports={tests} />
             ) : (
               <p className="muted compact">
                 No structured test results yet. Results appear when a runner
