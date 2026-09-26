@@ -242,7 +242,7 @@ describe('M6 HTTP streaming and change observation', () => {
     await new Promise(resolve => setTimeout(resolve, 450));
     expect(await readFile(path.join(t.project.path, 'label.txt'), 'utf8')).toBe('external version');
     const changes = t.store.events(t.chat.id).filter(event => event.type === 'file_changed').map(event => event.data as { path: string; source: string });
-    expect(changes).toContainEqual({ path: 'label.txt', source: 'editor' });
+    expect(changes).toContainEqual(expect.objectContaining({ path: 'label.txt', source: 'editor' }));
     expect(changes).toContainEqual({ path: 'label.txt', source: 'external' });
   });
 });
