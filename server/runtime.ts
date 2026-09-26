@@ -69,6 +69,7 @@ export class Runtime {
       this.store.invalidateApprovals(chat.id);
       this.save(chat.id,state);
       // A paused task stays paused; active tasks consume this at the next safe boundary.
+      if (chat.status === 'awaiting_approval' && !this.active.has(chat.id)) this.launch(chat.id);
     }
   }
   async control(chatId: string, action: 'pause'|'resume'|'interrupt') {
@@ -129,7 +130,12 @@ export class Runtime {
       let response: AgentResponse | undefined;
       for (let attempt = 0; attempt < 2; attempt++) {
         signal.throwIfAborted();
-        const input = { model:this.config.models[frame.role],messages,signal,maxTokens:this.config.maxOutputTokens,onDelta:(text:string)=>this.store.event(chatId,'delta',{role:frame.role,text}) };
+        let announced = false;
+        const input = { model:this.config.models[frame.role],messages,signal,maxTokens:this.config.maxOutputTokens,onDelta:(_text:string)=> {
+          // Stream transport stays incremental, but provisional JSON is neither an
+          // executable action nor a durable chat message. Persist one activity event.
+          if (!announced) {announced=true;this.store.event(chatId,'delta',{role:frame.role,text:''});}
+        } };
         const completion = this.hooks.complete ? await this.hooks.complete(frame.role,input) : await this.provider.complete(input);
         signal.throwIfAborted();
         if (state.generation !== generation) break;

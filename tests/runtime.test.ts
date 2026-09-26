@@ -110,7 +110,7 @@ describe('durable architect orchestration',()=> {
     const approval = t.store.approvals(t.chat.id)[0];
     t.runtime.notifyFileChange(t.chat.projectId,'label.txt','editor');
     expect(t.store.getApproval(approval.id).status).toBe('stale');
-    await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
+    await t.runtime.wait(t.chat.id);
     expect(t.executed).toEqual([]);
     expect(t.store.chat(t.chat.id).status).toBe('idle');
     expect(t.store.events(t.chat.id).some(event=>event.type==='steering')).toBe(true);
