@@ -26,11 +26,11 @@ monaco.editor.defineTheme("harness", {
   inherit: true,
   rules: [],
   colors: {
-    "editor.background": "#10151e",
-    "editor.lineHighlightBackground": "#19212d",
-    "editorLineNumber.foreground": "#596779",
-    "editor.selectionBackground": "#245658",
-    "editorGutter.background": "#10151e",
+    "editor.background": "#1e1e1e",
+    "editor.lineHighlightBackground": "#282828",
+    "editorLineNumber.foreground": "#858585",
+    "editor.selectionBackground": "#454545",
+    "editorGutter.background": "#1e1e1e",
   },
 });
 loader.config({ monaco });

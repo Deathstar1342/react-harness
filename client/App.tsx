@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Sparkles,
   Square,
+  Settings,
   X,
 } from "lucide-react";
 import type {
@@ -28,6 +29,7 @@ import type {
 import { errorText, formatTime, id, post, request } from "./api";
 import { FilePanel } from "./FilePanel";
 import { ActivityDrawer, ApprovalCard, PlanPanel } from "./Panels";
+import { ProjectDialog, SettingsDialog } from "./WorkspaceDialogs";
 import { useConversation } from "./useConversation";
 
 const approvalNames: Record<ApprovalMode, string> = {
@@ -35,132 +37,6 @@ const approvalNames: Record<ApprovalMode, string> = {
   review: "Review every change",
   autonomous: "Full workspace autonomy",
 };
-
-function ProjectDialog({
-  onCreated,
-  onClose,
-}: {
-  onCreated: (project: Project) => void;
-  onClose: () => void;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [mode, setMode] = useState<"create" | "import">("create");
-  const [name, setName] = useState("");
-  const [path, setPath] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!name.trim() || !path.trim() || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      onCreated(
-        await post<Project>("/projects", {
-          name: name.trim(),
-          path: path.trim(),
-          mode,
-        }),
-      );
-    } catch (e) {
-      setError(errorText(e));
-      setBusy(false);
-    }
-  };
-  return (
-    <dialog
-      ref={dialog}
-      className="project-dialog"
-      onCancel={(event) => {
-        if (busy) event.preventDefault();
-        else onClose();
-      }}
-      aria-labelledby="project-dialog-title"
-    >
-      <form onSubmit={(event) => void submit(event)}>
-        <div className="dialog-heading">
-          <span className="brand-mark">
-            <FolderPlus size={20} />
-          </span>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            disabled={busy}
-            aria-label="Close project dialog"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <h2 id="project-dialog-title">Make room for your next idea.</h2>
-        <p className="muted">Choose a workspace on the backend machine.</p>
-        <div className="segmented mode-selector">
-          <button
-            type="button"
-            className={mode === "create" ? "active" : ""}
-            onClick={() => setMode("create")}
-          >
-            New project
-          </button>
-          <button
-            type="button"
-            className={mode === "import" ? "active" : ""}
-            onClick={() => setMode("import")}
-          >
-            Import existing
-          </button>
-        </div>
-        <label>
-          Project name
-          <input
-            autoFocus
-            required
-            maxLength={120}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="My project"
-          />
-        </label>
-        <label>
-          Workspace path
-          <input
-            required
-            value={path}
-            onChange={(event) => setPath(event.target.value)}
-            placeholder="/home/you/projects/my-project"
-            spellCheck={false}
-          />
-        </label>
-        <p className="field-help">
-          {mode === "create"
-            ? "Creates a new project and Git repository at this path."
-            : "Opens an existing directory and preserves its files and Git history."}{" "}
-          For WSL, use a Linux path.
-        </p>
-        {error && (
-          <p className="inline-error" role="alert">
-            {error}
-          </p>
-        )}
-        <button
-          type="submit"
-          className="button primary dialog-submit"
-          disabled={busy || !path.trim() || !name.trim()}
-        >
-          {busy
-            ? "Opening workspace…"
-            : mode === "create"
-              ? "Create project"
-              : "Import project"}
-          <ArrowUp size={15} />
-        </button>
-      </form>
-    </dialog>
-  );
-}
 
 function Conversation({
   chatId,
@@ -323,9 +199,8 @@ function Conversation({
             <span />
             {connection === "connected" ? "Live" : "Connecting"}
           </span>
-          <button className="button small" onClick={onFiles}>
+          <button className="icon-button" onClick={onFiles} aria-label="Toggle files" title="Files">
             <FileCode2 size={15} />
-            <span>Files</span>
           </button>
         </div>
       </header>
@@ -347,7 +222,7 @@ function Conversation({
               <span className="welcome-mark">
                 <Sparkles size={27} />
               </span>
-              <div className="eyebrow">A clear space to build</div>
+              <div className="eyebrow">Your architect</div>
               <h2>What are we working on?</h2>
               <p>
                 Bring a question, a rough idea, or a specific change.
@@ -684,6 +559,7 @@ export function App() {
   const [chatId, setChatId] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [showProject, setShowProject] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [sidebar, setSidebar] = useState(false);
   const [files, setFiles] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -830,7 +706,7 @@ export function App() {
           <ChevronsUpDown size={14} />
         </div>
         <button
-          className="new-chat button"
+          className="new-chat navigation-row"
           onClick={() => void newChat()}
           disabled={!project || creating}
         >
@@ -871,9 +747,12 @@ export function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
-          <button className="text-button" onClick={() => setShowProject(true)}>
+          <button className="navigation-row" onClick={() => setShowProject(true)}>
             <FolderPlus size={16} />
             Add project
+          </button>
+          <button className="navigation-row" onClick={() => setShowSettings(true)}>
+            <Settings size={16} />Settings
           </button>
           <details className="backend-info">
             <summary>
@@ -962,11 +841,11 @@ export function App() {
                 </div>
                 {project && (
                   <button
-                    className="button small"
+                    className="icon-button"
+                    aria-label="Toggle files" title="Files"
                     onClick={() => setFiles((old) => !old)}
                   >
                     <FileCode2 size={15} />
-                    Files
                   </button>
                 )}
               </header>
@@ -974,7 +853,7 @@ export function App() {
                 <span className="welcome-mark">
                   <Sparkles size={30} />
                 </span>
-                <div className="eyebrow">Ideas into working code</div>
+                <div className="eyebrow">Harness</div>
                 <h2>
                   {loading
                     ? "Opening your workspace…"
@@ -1013,6 +892,7 @@ export function App() {
           )}
         </div>
       </div>
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {showProject && (
         <ProjectDialog
           onClose={() => setShowProject(false)}

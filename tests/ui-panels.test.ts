@@ -132,3 +132,26 @@ it("renders runner cancellation, collection errors, skipped cases and tracebacks
   expect(html).toContain("captured output");
   expect(html).toContain("Runner was cancelled");
 });
+
+it("uses distinct pass, failure and error icons while retaining text and case disclosure", async () => {
+  const { TestRun } = await import("../client/Panels");
+  const html = renderToStaticMarkup(createElement(TestRun, {
+    report: {
+      id: "icons", runner: "pytest", command: "pytest", status: "failed", output: "",
+      createdAt: "2026-09-26T00:00:00Z",
+      tests: [
+        { name: "passes", status: "passed" },
+        { name: "fails", status: "failed", error: "AssertionError" },
+        { name: "collection", status: "error" },
+        { name: "optional", status: "skipped" },
+      ],
+    },
+  }));
+  expect(html).toMatch(/lucide-check[^>]*test-status-icon passed/);
+  expect(html).toMatch(/lucide-x[^>]*test-status-icon failed/);
+  expect(html).toMatch(/lucide-circle-alert[^>]*test-status-icon error/);
+  expect(html).toMatch(/lucide-minus[^>]*test-status-icon skipped/);
+  expect(html).toContain('<details class="test-case passed">');
+  expect(html).toContain('<span class="test-status">failed</span>');
+  expect(html).toContain("AssertionError");
+});
