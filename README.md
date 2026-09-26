@@ -67,6 +67,8 @@ Default roles are configurable in `.env`:
 | Coder | `gemini-3.8-flash` |
 | Critic | `gemini-3.6-flash` |
 
+To customize role guidance without editing code, create local UTF-8 text files and set `ARCHITECT_PROMPT_FILE`, `CODER_PROMPT_FILE`, or `CRITIC_PROMPT_FILE` in `.env`. Relative paths resolve from the backend working directory; `.harness/prompts/` is ignored by Git. Each file must be nonempty and at most 32,000 bytes. Restart after edits. Guidance is appended to the fixed JSON instructions; schema validation, approvals and file checks still apply. Prompt contents and filenames are excluded from frontend settings.
+
 The current implementation delegates to one coder at a time. Parallel coders/worktree integration remain a later extension.
 
 Ordinary streamed text carries a strict JSON action proposal. Only a complete, validated proposal can execute. Model-written continuation summaries preserve original transcripts and reattach authoritative state separately. Conservative token estimates and a persistent account ledger coordinate requests across roles and chats; the scheduler reserves headroom for architect/critic work and counts compaction calls. Configure context, output, minute, and daily limits in `.env`. These budgets cover this backend database, not other clients using the same API account.

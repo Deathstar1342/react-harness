@@ -3,7 +3,7 @@
 - Coordinator: 01a0dc0a-8866-7182-acd2-da997779962d
 - Repository: https://github.com/Deathstar1342/react-harness
 - Integration branch: main. User authorization for public commits/pushes persists.
-- ACTIVE: M7 integrated; final Linux validation and user visual feedback pending.
+- ACTIVE: M7 integrated; Linux validation passed for the UI; user visual feedback and live provider acceptance pending.
 - Heartbeat react-harness-milestone-check-in remains PAUSED while browser permission assistance is unresolved; independent implementation continues.
 
 ## Milestones
@@ -23,7 +23,7 @@ M6 owns tests/release.test.ts and docs/reports/milestone-6.md only. M7 owns clie
 
 ## Latest local validation
 
-Node 24.16 on Windows: npm run typecheck; npm test (237 passed, ten skipped); npm run build all passed. Includes M6 Git literal-path credential exclusion, /plan on active runs, sibling-chat notifications, editor conflict protection and scheduler role accounting. Four new M7 API tests cover unique name-only project creation, persisted workspace settings across restart, folder browsing/import preservation, and invalid/cross-origin requests.
+Node 24.16 on Windows: npm run typecheck; npm test (245 passed, ten skipped); npm run build all passed. Includes M6 Git literal-path credential exclusion, /plan on active runs, sibling-chat notifications, editor conflict protection and scheduler role accounting. Four new M7 API tests cover unique name-only project creation, persisted workspace settings across restart, folder browsing/import preservation, and invalid/cross-origin requests.
 
 Tool implementation fixes include dirty leases surviving a save, historical approval preservation, recent activity pagination, post-commit event publication, SSE shutdown, cross-chat write notifications, active /plan enforcement, and literal Git pathspecs. Revalidate exact integrated SHA on Linux CI.
 
@@ -33,7 +33,7 @@ Dark charcoal, flat navigation, fewer outlined controls, contextual actions, cha
 
 ## Remaining delivery work
 
-1. Review/integrate M7 UI and further M6 findings; run integrated tests/build and Linux CI. Update README from in-progress M7 to actual acceptance only after integration.
+1. M7 UI and M6 review fixes are integrated. UI Linux CI passed at 02342fe (run 36225306950). Validate the prompt-file follow-up on Linux and use docs/acceptance.md for remaining gates.
 2. Automated visual acceptance remains pending. Prior Browser tool could not verify saved localhost permissions, and the current tool catalog no longer lists the Browser skill. Do not bypass its security failure with another automation path. User manually viewed old UI and supplied M7 direction. Preview server is running at http://127.0.0.1:3000 in exec session 48392. User visual feedback requested.
 3. Ordinary WSL is unavailable locally; detected distribution belongs to Podman. Do not alter unrelated container services. Linux CI covers real PTY behavior.
 4. STARK credentials are absent; no live-provider validation claimed. Synthetic HTTP tests cover actual runtime/provider/tools/SQLite with restart, but do not prove provider prompt compatibility.
@@ -44,5 +44,7 @@ Keep the full requested product scope and recent UI feedback. Do not mistake a p
 ## Latest integration evidence
 
 - Linux CI for b90a093 passed: https://github.com/Deathstar1342/react-harness/actions/runs/36225220402 (npm ci, typecheck, full tests including PTY, production build).
-- Runner/run/case grouping was added to the test drawer to match the original requested hierarchy; targeted UI checks and rebuilt preview passed. Final follow-up CI is pending the next push.
+- Runner/run/case grouping was added to the test drawer to match the original requested hierarchy; targeted UI checks and rebuilt preview passed. Follow-up CI passed at 02342fe (run 36225306950).
 - All milestone chats are idle. M6 delivered independent regression tests and M7 delivered the integrated dark UI. Human visual/interaction feedback and live STARK validation remain open; goal not complete and heartbeat remains paused.
+
+Prompt customization audit: optional role-specific local files are now configurable in .env and loaded by server/prompts.ts at startup. Full portable suite: 245 passed, ten skipped; typecheck/build passed. The running preview predates this startup-only extension and remains healthy with default prompts. Acceptance evidence is mapped in docs/acceptance.md. STARK configured=false verified without reading or printing a secret. No browser-control capability is currently available in the active tool catalog; existing security block has not been bypassed.

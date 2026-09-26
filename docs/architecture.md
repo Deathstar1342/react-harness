@@ -13,7 +13,7 @@ This is a fresh implementation. There is no dependency on the previous Streamlit
 - Use only `/models` and `/chat/completions` on a configurable STARK-compatible base URL.
 - Keep the API key in backend environment configuration; never expose it to the browser, logs, or child shell environments.
 - Use streaming ordinary text and a versioned JSON action protocol. Do not require native `tools` or `response_format` support.
-- Keep prompts configurable and validate actual provider behavior early.
+- Keep prompts configurable and validate actual provider behavior early. Optional ARCHITECT_PROMPT_FILE, CODER_PROMPT_FILE and CRITIC_PROMPT_FILE settings load bounded local UTF-8 guidance at startup, appended to the fixed JSON instructions. Prompt files never alter runtime permissions or parser validation and are not exposed through frontend settings.
 - Buffer complete actions before schema validation and authorization. Partial streamed JSON cannot execute.
 - Distinguish malformed output, refusals, truncation, transport errors, and valid actions. Bound retries and avoid duplicate execution.
 - Persist execution identifiers and outcomes. Reconcile uncertain side effects after interruption rather than blindly replaying them.
