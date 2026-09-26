@@ -5,6 +5,25 @@ import type { CommandResult } from './shell.js';
 import { ToolError } from './paths.js';
 const array = (value: unknown): any[] => value === undefined ? [] : Array.isArray(value) ? value : [value];
 const text = (value: any): string => typeof value === 'string' || typeof value === 'number' ? String(value) : value && typeof value === 'object' ? [value['@_message'], value['#text']].filter(v => v !== undefined).join('\n') : '';
+// Presentation metadata only; this never authorizes a command or infers test success.
+function runnerFor(command: string): string {
+  const tokens = command.match(/"(?:[^"\\]|\\.)*"|'[^']*'|&&|\|\||[;|&\n]|[^\s;|&]+/g) ?? [];
+  const commands: string[][] = [[]];
+  for (const token of tokens) {
+    if (/^(?:&&|\|\||[;|&\n])$/.test(token)) commands.push([]);
+    else commands.at(-1)!.push(token.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2'));
+  }
+  for (const words of commands) {
+    while (/^[A-Za-z_][A-Za-z_0-9]*=/.test(words[0] ?? '')) words.shift();
+    const executable = (words[0] ?? '').replaceAll('\\', '/').split('/').at(-1)!;
+    if (/^pytest(?:\.exe)?$/.test(executable)) return 'pytest';
+    if (/^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(executable)) {
+      const module = words.indexOf('-m');
+      if (module > 0 && words[module + 1] === 'pytest' && words.slice(1, module).every(word => /^-[bBdEIOPqRsSuvVx]+$/.test(word))) return 'pytest';
+    }
+  }
+  return 'junit';
+}
 export function parseJUnit(xml: string, command: string, result: CommandResult, maxBytes = 2_000_000): TestReport {
   if (Buffer.byteLength(xml) > maxBytes || /<!DOCTYPE|<!ENTITY/i.test(xml)) throw new ToolError('JUnit report is oversized or contains a prohibited XML declaration.');
   if (XMLValidator.validate(xml) !== true) throw new ToolError('Malformed JUnit XML report.');
@@ -28,8 +47,8 @@ export function parseJUnit(xml: string, command: string, result: CommandResult, 
   }
   for (const suite of [...array(doc.testsuite), ...array(doc.testsuites)]) visit(suite);
   const status: TestReport['status'] = result.cancelled ? 'cancelled' : result.timedOut || result.error || !tests.length || tests.some(t => t.status === 'error') ? 'error' : tests.some(t => t.status === 'failed') ? 'failed' : suiteErrors || result.exitCode !== 0 ? 'error' : 'passed';
-  return { id: randomUUID(), runner: 'junit', command, createdAt: new Date().toISOString(), status, tests, output: result.output, ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}) };
+  return { id: randomUUID(), runner: runnerFor(command), command, createdAt: new Date().toISOString(), status, tests, output: result.output, ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}) };
 }
 export function unavailableReport(command: string, result: CommandResult, error: string): TestReport {
-  return { id: randomUUID(), runner: 'junit', command, createdAt: new Date().toISOString(), status: result.cancelled ? 'cancelled' : 'error', tests: [], output: [result.output, error].filter(Boolean).join('\n'), ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}) };
+  return { id: randomUUID(), runner: runnerFor(command), command, createdAt: new Date().toISOString(), status: result.cancelled ? 'cancelled' : 'error', tests: [], output: [result.output, error].filter(Boolean).join('\n'), ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}) };
 }
