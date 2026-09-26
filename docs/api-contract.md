@@ -42,8 +42,11 @@ Tool action argument contracts:
 - delegate: { objective: string, acceptanceCriteria: string[], paths?: string[] }
 - review: { focus: string }
 - ask_user: { question: string }
+- review_result: { verdict: 'pass' | 'changes_requested', findings: string[] }
 
-set_plan/delegate/review/ask_user are runtime actions, not workspace tool actions. Restrict delegate to architect, avoid recursive delegation. Critic only gets read tools plus final review output; runtime enforces it.
+set_plan/delegate/review/ask_user/review_result are runtime actions, not workspace tool actions. Restrict delegate to architect, avoid recursive delegation. Critic only gets read tools and concludes with review_result; runtime enforces it. Bound repair cycles.
+
+SSE payloads: delta {role, text} is provisional JSON text; tool_output {agentId, output}; steering {content, delivered}; file_changed {path, source:'agent'|'editor'|'external'}. Message/status/plan/approval/tests carry their shared type directly. tool carries {agentId,action,result?}; error carries {message}. Editor owner is a stable per-tab random UUID.
 
 ## Workspace module (M3)
 
