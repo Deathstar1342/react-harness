@@ -3,7 +3,7 @@
 - Coordinator: 01a0dc0a-8866-7182-acd2-da997779962d
 - Repository: https://github.com/Deathstar1342/react-harness
 - Integration branch: main. User authorization for public commits/pushes persists.
-- ACTIVE: M7 integrated; Linux validation passed for the UI; user visual feedback and live provider acceptance pending.
+- BLOCKED on user input: STARK configuration and visual/interaction acceptance. Implementation and automated checks are saved; no automatic work should continue until an actionable reply or environment change.
 - Heartbeat react-harness-milestone-check-in remains PAUSED while browser permission assistance is unresolved; independent implementation continues.
 
 ## Milestones
@@ -48,3 +48,11 @@ Keep the full requested product scope and recent UI feedback. Do not mistake a p
 - All milestone chats are idle. M6 delivered independent regression tests and M7 delivered the integrated dark UI. Human visual/interaction feedback and live STARK validation remain open; goal not complete and heartbeat remains paused.
 
 Prompt customization audit: optional role-specific local files are now configurable in .env and loaded by server/prompts.ts at startup. Full portable suite: 245 passed, ten skipped; typecheck/build passed. The running preview predates this startup-only extension and remains healthy with default prompts. Acceptance evidence is mapped in docs/acceptance.md. STARK configured=false verified without reading or printing a secret. No browser-control capability is currently available in the active tool catalog; existing security block has not been bypassed.
+
+## Blocked audit (2026-09-26)
+
+The same two acceptance blockers remain after three consecutive resumed goal turns. A fresh dotenv presence check returned starkConfigured=false, the active tool catalog contains no browser-control tool, and the heartbeat file confirms PAUSED. User requests for local .env readiness and revised UI feedback remain unanswered. Do not repeatedly poll or invent more feature work to avoid this gate.
+
+Code candidate 11b1b2caeb2b60b5bb0438d63c855856cbe9d8b8 passed Linux CI run 36225704259. Preview health is OK on localhost:3000. GitHub M1/M2/M3/M5 implementation issues/milestones are closed with evidence; M4/M6/M7 remain open for acceptance. All child chats are idle.
+
+Unblock by configuring STARK_BASE_URL and STARK_API_KEY locally in .env (never paste/publish credentials), then confirming readiness; and by supplying UI feedback plus restored browser-control access or explicit acceptance-scope direction. Restart the backend to load configuration before live checks. The goal is blocked, not complete. The 15-minute heartbeat remains paused.

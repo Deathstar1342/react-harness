@@ -25,7 +25,7 @@ This is an evidence map for the requested application, not a declaration of comp
 ## Validation
 
 - Local Node 24.16 on Windows: typecheck, full suite **245 passed / 10 skipped**, production build passed after prompt configuration.
-- Exact earlier integrated Linux candidate 02342fe1ce87552c10486305eaa56bed0cc4e7b9 passed [CI run 36225306950](https://github.com/Deathstar1342/react-harness/actions/runs/36225306950), including real PTY tests. A new Linux run validates the prompt-file follow-up.
+- Exact earlier integrated Linux candidate 02342fe1ce87552c10486305eaa56bed0cc4e7b9 passed [CI run 36225306950](https://github.com/Deathstar1342/react-harness/actions/runs/36225306950), including real PTY tests. The final prompt-file candidate 11b1b2caeb2b60b5bb0438d63c855856cbe9d8b8 also passed [CI run 36225704259](https://github.com/Deathstar1342/react-harness/actions/runs/36225704259).
 - Ten independent M6 regressions pass. Two code reviews led to fixes for Git pathspec handling, active /plan enforcement, cross-chat notifications, historical context growth and rapid external saves.
 - Browser automation remains unavailable following saved-localhost-permission verification failure; do not bypass it with another automation path. User has viewed the earlier UI and requested the implemented M7 changes; revised visual feedback is pending.
 - Running preview reports configured=false. Set STARK_BASE_URL and STARK_API_KEY in local .env, never in chat or Git. Restart before live checks. No live STARK success is claimed.
