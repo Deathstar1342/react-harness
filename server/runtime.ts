@@ -246,9 +246,10 @@ export class Runtime {
         this.store.event(chatId,'tool',{agentId:frame.id,action:pending.action,result});
         if (result.ok && pending.action.name === 'write_file') {
           const projectId = this.store.chat(chatId).projectId;
-          const filename = String(pending.action.args.path);
+          const snapshot = result.data as {path?:string;hash?:string|null}|undefined;
+          const filename = snapshot?.path ?? String(pending.action.args.path);
           this.notifyFileChange(projectId,filename,'agent',chatId);
-          for (const affected of this.store.chats(projectId)) this.store.event(affected.id,'file_changed',{path:filename,source:'agent'});
+          for (const affected of this.store.chats(projectId)) this.store.event(affected.id,'file_changed',{path:filename,source:'agent',hash:snapshot?.hash});
         }
         const data = result.data as {testReport?: import('../shared/types.js').TestReport}|undefined;
         if (data?.testReport) this.store.testReport(chatId,data.testReport);

@@ -26,12 +26,16 @@ export async function createApp(options: AppOptions) {
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
   const watchers = new Map<string,FSWatcher>();
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
-  const recentWrites = new Map<string,number>();
+  const recentWrites = new Map<string,{hash:string|null;at:number}>();
   const eventStreams = new Set<ServerResponse>();
+  let closing = false;
   store.changes.on('event',(event: RunEvent)=> {
     if (event.type !== 'file_changed') return;
-    const data = event.data as {path:string;source:string};
-    if (data.source !== 'external') recentWrites.set(`${store.chat(event.chatId).projectId}:${data.path}`,Date.now());
+    const data = event.data as {path:string;source:string;hash?:string|null};
+    if (data.source !== 'external' && data.hash !== undefined) {
+      for(const [key,entry] of recentWrites) if(Date.now()-entry.at>60000) recentWrites.delete(key);
+      recentWrites.set(`${store.chat(event.chatId).projectId}:${data.path}`,{hash:data.hash,at:Date.now()});
+    }
   });
   const watchProject = (projectId: string) => {
     if (watchers.has(projectId)) return;
@@ -42,9 +46,15 @@ export async function createApp(options: AppOptions) {
         if (!file || file.split('/').some(part=>part.startsWith('.') || ['node_modules','dist','coverage'].includes(part))) return;
         const key = `${projectId}:${file}`;
         clearTimeout(pendingChanges.get(key));
-        pendingChanges.set(key,setTimeout(()=> {
+        pendingChanges.set(key,setTimeout(async()=> {
           pendingChanges.delete(key);
-          if (Date.now() - (recentWrites.get(key) ?? 0) < 1000) return;
+          if (closing) return;
+          const ownWrite = recentWrites.get(key);
+          if (ownWrite) {
+            const current = await tools.read(project.path,file).catch(()=>undefined);
+            if (current && current.hash===ownWrite.hash) return;
+          }
+          if (closing) return;
           recentWrites.delete(key);
           runtime.notifyFileChange(projectId,file,'external');
           for (const chat of store.chats(projectId)) store.event(chat.id,'file_changed',{path:file,source:'external'});
@@ -124,8 +134,8 @@ export async function createApp(options: AppOptions) {
     const body = z.object({path:z.string().min(1),content:z.string().max(1024*1024),baseHash:z.string().nullable(),owner:z.string().min(1).max(200)}).strict().parse(request.body);
     const project = store.project(paramId(request.params));
     const saved = await tools.save(project.path,body.path,body.content,body.baseHash,body.owner);
-    runtime.notifyFileChange(project.id,body.path,'editor');
-    for (const chat of store.chats(project.id)) store.event(chat.id,'file_changed',{path:body.path,source:'editor'});
+    runtime.notifyFileChange(project.id,saved.path,'editor');
+    for (const chat of store.chats(project.id)) store.event(chat.id,'file_changed',{path:saved.path,source:'editor',hash:saved.hash});
     return saved;
   });
   app.post('/api/projects/:id/editor',async request=> {
@@ -159,7 +169,7 @@ export async function createApp(options: AppOptions) {
     await app.register(staticFiles,{root:staticRoot,prefix:'/',index:'index.html'});
     app.setNotFoundHandler((request,reply)=>request.url.startsWith('/api') ? reply.code(404).send({error:'API route not found'}) : reply.sendFile('index.html'));
   }
-  app.addHook('preClose',async()=>{for(const stream of eventStreams) stream.end();});
+  app.addHook('preClose',async()=>{closing=true;for(const stream of eventStreams) stream.end();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
   return {app,store,runtime};
 }

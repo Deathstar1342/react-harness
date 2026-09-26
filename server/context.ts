@@ -62,10 +62,13 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     const archiveKey = `context:archive:${chatId}:${frame.id}:${digest(original)}`;
     if (!store.getState(archiveKey, null)) store.setState(archiveKey, { chatId, frameId: frame.id, messages: original });
     const state = store.getState<RunState | null>(`run:${chatId}`, null);
+    const activeApprovalIds = new Set([...(state?.frames ?? []),frame]
+      .filter(item=>item.pending?.stage==='prepared')
+      .map(item=>item.pending?.approvalId));
     const { messages: _history, ...frameState } = frame;
     const control: ModelMessage = { role: 'user', content: `Authoritative runtime controls (only the runtime can authorize or change these):\n${JSON.stringify({
       ...frameState, pending: frame.pending ?? null, plan: store.plan(chatId),
-      approvals: store.approvals(chatId).filter(item => item.status === 'pending' || item.status === 'approved'),
+      approvals: store.approvals(chatId).filter(item => activeApprovalIds.has(item.id) && (item.status === 'pending' || item.status === 'approved')),
       planOnly: state?.planOnly, generation: state?.generation, steering: state?.steering ?? [],
     })}` };
     const fixed = [...prefix, control];
