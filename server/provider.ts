@@ -7,7 +7,7 @@ export class ProviderError extends Error {
     this.name = 'ProviderError';
   }
 }
-export interface StarkProviderOptions { baseUrl: string; apiKey: string; streaming?: boolean; timeoutMs?: number }
+export interface StarkProviderOptions { baseUrl: string; apiKey: string; streaming?: boolean; timeoutMs?: number; maxRetries?: number }
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_FRAME_CHARACTERS = 1024 * 1024;
 const MAX_RETRIES = 2;
@@ -122,11 +122,14 @@ export class StarkProvider implements ModelProvider {
   #apiKey: string;
   #streaming: boolean;
   #timeoutMs: number;
+  #maxRetries: number;
   constructor(options: StarkProviderOptions) {
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.#apiKey = options.apiKey;
     this.#streaming = options.streaming ?? true;
     this.#timeoutMs = options.timeoutMs ?? 120_000;
+    this.#maxRetries = options.maxRetries ?? MAX_RETRIES;
+    if (!Number.isSafeInteger(this.#maxRetries) || this.#maxRetries < 0 || this.#maxRetries > MAX_RETRIES) throw new ProviderError('configuration', 'Provider retry limit must be between zero and two');
     if (!Number.isSafeInteger(this.#timeoutMs) || this.#timeoutMs < 1 || this.#timeoutMs > 2_147_483_647) {
       throw new ProviderError('configuration', 'Provider timeout must be a positive integer within timer limits');
     }
@@ -154,7 +157,7 @@ export class StarkProvider implements ModelProvider {
         if (!response.ok) {
           await response.body?.cancel().catch(() => undefined);
           const retryable = [429, 502, 503, 504].includes(response.status);
-          if (retryable && attempt < MAX_RETRIES) {
+          if (retryable && attempt < this.#maxRetries) {
             const retryHeader = response.headers.get('retry-after');
             const numericDelay = retryHeader === null ? NaN : Number(retryHeader) * 1_000;
             const dateDelay = retryHeader === null ? NaN : Date.parse(retryHeader) - Date.now();

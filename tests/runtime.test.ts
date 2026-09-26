@@ -70,7 +70,7 @@ describe('durable architect orchestration',()=> {
     expect(t.store.events(t.chat.id).filter(event=>event.type==='steering').map(event=>(event.data as {delivered:boolean}).delivered)).toEqual([false,true]);
   });
   it('recovers an uncertain action without executing it again',async()=> {
-    const t = setup([final('Inspected remaining work'),verdict(),final()]);
+    const t = setup([verdict(),final('Inspected remaining work'),verdict(),final()]);
     const state: RunState = {planOnly:false,steps:1,generation:0,steering:[],frames:[
       {id:'architect',role:'architect',messages:[],repairs:0},
       {id:'coder',role:'coder',messages:[],repairs:0,pending:{id:'operation',stage:'executing',action:{name:'run_shell',args:{command:'a modifying command'}}}},
@@ -79,6 +79,7 @@ describe('durable architect orchestration',()=> {
     await t.runtime.control(t.chat.id,'resume'); await t.runtime.wait(t.chat.id);
     expect(t.executed).toEqual([]);
     expect(t.store.messages(t.chat.id).some(message=>message.role==='tool' && message.content.includes('NOT been rerun'))).toBe(true);
+    expect(t.store.chat(t.chat.id).status).toBe('idle');
   });
   it('can resume a persisted pending approval in a new runtime',async()=> {
     const t = setup([delegate(),action('write_file',{path:'x',content:'new',baseHash:null}),final(),verdict(),final()]);
@@ -94,5 +95,24 @@ describe('durable architect orchestration',()=> {
     expect(t.store.chat(t.chat.id).status).toBe('idle');
     expect(t.store.events(t.chat.id).filter(event=>event.type==='review')).toHaveLength(3);
     expect(t.store.messages(t.chat.id).at(-1)?.content).toBe('Unresolved verification remains');
+  });
+  it('reviews a newly completed plan step before accepting its status',async()=> {
+    const plan = {phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement',status:'done'}]}]};
+    const t = setup([action('set_plan',plan),action('review_result',{verdict:'changes_requested',findings:['No implementation evidence']}),final('Work remains')]);
+    await t.runtime.submit(t.chat.id,'Build it');await t.runtime.wait(t.chat.id);
+    expect(t.store.plan(t.chat.id)).toEqual({phases:[]});
+    expect(t.store.events(t.chat.id).filter(event=>event.type==='review')).toHaveLength(1);
+    expect(t.store.chat(t.chat.id).status).toBe('idle');
+  });
+  it('notifies active agents of manual file edits and invalidates pending approvals',async()=> {
+    const t = setup([delegate(),action('write_file',{path:'label.txt',content:'new',baseHash:'old'}),final('Preserved manual edit'),verdict(),final()]);
+    await t.runtime.submit(t.chat.id,'Build it');await t.runtime.wait(t.chat.id);
+    const approval = t.store.approvals(t.chat.id)[0];
+    t.runtime.notifyFileChange(t.chat.projectId,'label.txt','editor');
+    expect(t.store.getApproval(approval.id).status).toBe('stale');
+    await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
+    expect(t.executed).toEqual([]);
+    expect(t.store.chat(t.chat.id).status).toBe('idle');
+    expect(t.store.events(t.chat.id).some(event=>event.type==='steering')).toBe(true);
   });
 });

@@ -4,7 +4,7 @@ import type { Config } from './config.js';
 import { Store } from './store.js';
 
 interface PendingAction { id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult }
-export interface Frame { id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number }
+export interface Frame { id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'phase'; proposedPlan?: import('../shared/types.js').Plan }
 export interface RunState { frames: Frame[]; steering: string[]; planOnly: boolean; steps: number; generation: number }
 export interface RuntimeHooks {
   parse(text: string): AgentResponse;
@@ -97,7 +97,7 @@ export class Runtime {
   }
   private toolContext(chatId: string, frame: Frame, signal: AbortSignal): ToolContext {
     const chat = this.store.chat(chatId);
-    return { projectRoot:this.store.project(chat.projectId).path, chatId, agentId:frame.id, signal,
+    return { projectRoot:this.store.project(chat.projectId).path, chatId, agentId:frame.shellId ?? frame.id, signal,
       onOutput:output=>this.store.event(chatId,'tool_output',{agentId:frame.id,output:output.slice(-16000)}) };
   }
   private deliverSteering(chatId: string, state: RunState) {
@@ -154,12 +154,18 @@ export class Runtime {
         }
         if (action.name === 'set_plan') {
           if (frame.role !== 'architect') throw new Error('Only the architect can revise the plan');
-          this.store.setPlan(chatId,{phases:action.args.phases as never});
-          frame.messages.push({role:'user',content:'Tool result: plan saved.'});
+          const proposedPlan = {phases:action.args.phases as import('../shared/types.js').PlanPhase[]};
+          const previous = this.store.plan(chatId);
+          const completed = new Set(previous.phases.flatMap(phase=>phase.steps.filter(step=>step.status==='done').map(step=>step.id)));
+          if (!state.planOnly && proposedPlan.phases.some(phase=>phase.steps.some(step=>step.status==='done' && !completed.has(step.id)))) {
+            const review = this.frame('critic',[{role:'user',content:`Verify this proposed phase/step completion against actual work and evidence before accepting it.\nProposed plan: ${JSON.stringify(proposedPlan)}\nConversation evidence: ${JSON.stringify(frame.messages).slice(-100000)}`}]);
+            review.reviewKind = 'phase';review.proposedPlan = proposedPlan;state.frames.push(review);
+          } else {this.store.setPlan(chatId,proposedPlan);frame.messages.push({role:'user',content:'Tool result: plan saved.'});}
         } else if (action.name === 'delegate') {
           if (frame.role !== 'architect' || state.planOnly) throw new Error('Delegation is only available to the architect outside plan-only mode');
           const objective = String(action.args.objective);
-          state.frames.push(this.frame('coder',[{role:'user',content:`Assigned task: ${objective}\nAcceptance criteria: ${JSON.stringify(action.args.acceptanceCriteria)}\nSuggested file scope: ${JSON.stringify(action.args.paths ?? [])}\nUser request and constraints:\n${frame.messages.filter(m=>m.role==='user').map(m=>m.content).join('\n').slice(-64000)}`}],objective));
+          const coder = this.frame('coder',[{role:'user',content:`Assigned task: ${objective}\nAcceptance criteria: ${JSON.stringify(action.args.acceptanceCriteria)}\nFile scope: ${JSON.stringify(action.args.paths ?? [])}\nUser request and constraints:\n${frame.messages.filter(m=>m.role==='user').map(m=>m.content).join('\n').slice(-64000)}`}],objective);
+          coder.scope = action.args.paths as string[]|undefined;coder.shellId = 'coder-primary';state.frames.push(coder);
           this.store.event(chatId,'delegation',{objective});
         } else if (action.name === 'review') {
           if (frame.role !== 'architect') throw new Error('Only the architect can request an independent review');
@@ -170,6 +176,10 @@ export class Runtime {
         } else {
           if (!workspaceTools.has(action.name)) throw new Error('Unknown workspace action');
           if ((frame.role === 'critic' || frame.role === 'architect' || state.planOnly) && !readTools.has(action.name)) throw new Error('This agent or plan-only task may only use read tools; implementation belongs to the coder');
+          if (action.name === 'write_file' && frame.scope?.length) {
+            const target = String(action.args.path).replaceAll('\\','/').replace(/^\.\//,'');
+            if (!frame.scope.some(item=>{const scope=item.replaceAll('\\','/').replace(/\/$/,'').replace(/^\.\//,'');return target===scope || target.startsWith(scope+'/');})) throw new Error('This edit exceeds the assigned file scope. Report the scope expansion to the architect before proceeding.');
+          }
           const inspection = await this.tools.inspect(this.toolContext(chatId,frame,signal),action);
           signal.throwIfAborted();
           if (state.generation !== generation) { this.deliverSteering(chatId,state); continue; }
@@ -182,7 +192,12 @@ export class Runtime {
             this.store.approval(approval);
           }
         }
-      } catch (error) { if (signal.aborted) throw error; frame.messages.push({role:'user',content:`Tool result: ${JSON.stringify(safeResult(error))}`}); this.store.event(chatId,'tool',{agentId:frame.id,action,result:safeResult(error)}); }
+      } catch (error) {
+        if (signal.aborted) throw error;
+        frame.messages.push({role:'user',content:`Tool result: ${JSON.stringify(safeResult(error))}`}); this.store.event(chatId,'tool',{agentId:frame.id,action,result:safeResult(error)});
+        frame.failures = (frame.failures ?? 0) + 1;
+        if (frame.role === 'coder' && frame.failures >= 3) this.checkpoint(state,frame,'Repeated failed actions; check scope drift and missing prerequisites before continuing.');
+      }
       this.save(chatId,state);
     }
     if (!signal.aborted && !state.frames.length) this.store.updateChat(chatId,{status:'idle'});
@@ -224,10 +239,17 @@ export class Runtime {
         if (result.ok && pending.action.name === 'write_file') this.store.event(chatId,'file_changed',{path:pending.action.args.path,source:'agent'});
         const data = result.data as {testReport?: import('../shared/types.js').TestReport}|undefined;
         if (data?.testReport) this.store.testReport(chatId,data.testReport);
+        frame.failures = result.ok ? 0 : (frame.failures ?? 0) + 1;
+        if (frame.role === 'coder' && (['run_shell','execute_python','run_tests'].includes(pending.action.name) || frame.failures >= 3)) this.checkpoint(state,frame,'Review command side effects, verification results, scope drift, and repeated failures before the coder continues.');
         frame.pending = undefined; this.save(chatId,state);
       });
     }
     return !signal.aborted;
+  }
+  private checkpoint(state: RunState, frame: Frame, reason: string) {
+    frame.failures = 0;
+    const critic = this.frame('critic',[{role:'user',content:`Checkpoint review, not final completion. ${reason}\nAssigned objective: ${frame.objective}\nFile scope: ${JSON.stringify(frame.scope ?? [])}\nEvidence: ${JSON.stringify(frame.messages).slice(-150000)}\nInspect actual diffs/files and submit review_result.`}],frame.objective);
+    critic.reviewKind = 'checkpoint';state.frames.push(critic);
   }
   private async finishFrame(chatId: string,state: RunState,frame: Frame,text: string) {
     if (frame.role === 'coder') {
@@ -240,10 +262,17 @@ export class Runtime {
     this.save(chatId,state);
   }
   private finishReview(chatId: string,state: RunState,passed: boolean,findings: string[]) {
-    state.frames.pop();
+    const reviewer = state.frames.pop();
     const parent = state.frames.at(-1);
     this.store.event(chatId,'review',{passed,findings});
     this.store.message(chatId,'critic',`${passed ? 'Review passed' : 'Changes requested'}${findings.length ? ':\n'+findings.join('\n') : '.'}`);
+    if (reviewer?.reviewKind === 'phase') {
+      if (passed && reviewer.proposedPlan) this.store.setPlan(chatId,reviewer.proposedPlan);
+      parent?.messages.push({role:'user',content:`Phase completion review ${passed ? 'passed; plan saved' : 'failed; previous plan retained'}: ${findings.join('\n')}`});return;
+    }
+    if (reviewer?.reviewKind === 'checkpoint') {
+      parent?.messages.push({role:'user',content:`Checkpoint review ${passed ? 'passed' : 'requests corrections'}: ${findings.join('\n')}. Continue only within the original scope and address findings before completing.`});return;
+    }
     if (parent?.role === 'coder') {
       if (!passed && parent.repairs++ < 2) { parent.messages.push({role:'user',content:`Independent critic requests changes. Address these findings and verify the result:\n${findings.join('\n')}`}); return; }
       state.frames.pop();
