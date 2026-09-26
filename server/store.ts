@@ -9,6 +9,7 @@ const now = () => new Date().toISOString();
 export class Store {
   readonly db: DatabaseSync;
   readonly changes = new EventEmitter();
+  private transactionEvents?: RunEvent[];
   constructor(filename: string) {
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new DatabaseSync(filename);
@@ -27,8 +28,14 @@ export class Store {
   }
   transaction<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
-    try { const result = fn(); this.db.exec('COMMIT'); return result; }
+    const events: RunEvent[] = [];
+    this.transactionEvents = events;
+    let result: T;
+    try { result = fn(); this.db.exec('COMMIT'); }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    finally { this.transactionEvents = undefined; }
+    for (const event of events) this.emitEvent(event);
+    return result;
   }
   getState<T>(key: string, fallback: T): T {
     const row = this.db.prepare('SELECT data FROM state WHERE key=?').get(key);
@@ -79,10 +86,16 @@ export class Store {
     const createdAt = now();
     const result = this.db.prepare('INSERT INTO events(chat_id,type,data,created_at) VALUES (?,?,?,?)').run(chatId,type,JSON.stringify(data),createdAt);
     const event = { id: Number(result.lastInsertRowid), chatId, type, data, createdAt };
-    // Emission after the synchronous statement; listeners only send data, never mutate state.
-    this.changes.emit(chatId, event);
-    this.changes.emit('event', event);
+    if (this.transactionEvents) this.transactionEvents.push(event);
+    else this.emitEvent(event);
     return event;
+  }
+  private emitEvent(event: RunEvent) {
+    this.changes.emit(event.chatId, event);
+    this.changes.emit('event', event);
+  }
+  recentEvents(chatId: string, limit = 1000): RunEvent[] {
+    return this.db.prepare('SELECT * FROM (SELECT * FROM events WHERE chat_id=? ORDER BY id DESC LIMIT ?) ORDER BY id').all(chatId,limit).map(row => ({ id:Number(row.id), chatId:String(row.chat_id), type:String(row.type), data:JSON.parse(String(row.data)), createdAt:String(row.created_at) }));
   }
   events(chatId: string, after = 0, limit = 2000): RunEvent[] {
     return this.db.prepare('SELECT * FROM events WHERE chat_id=? AND id>? ORDER BY id LIMIT ?').all(chatId,after,limit).map(row => ({ id: Number(row.id), chatId: String(row.chat_id), type: String(row.type), data: JSON.parse(String(row.data)), createdAt: String(row.created_at) }));
@@ -97,7 +110,13 @@ export class Store {
     return JSON.parse(String(row.data));
   }
   approvals(chatId: string): Approval[] { return this.db.prepare('SELECT data FROM approvals WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))); }
-  invalidateApprovals(chatId: string): void { for (const approval of this.approvals(chatId)) if (approval.status === 'pending' || approval.status === 'approved') this.approval({ ...approval, status: 'stale' }); }
+  invalidateApprovals(chatId: string): void {
+    const run = this.getState<{frames:{pending?:{stage:string;approvalId?:string}}[]}>(`run:${chatId}`,{frames:[]});
+    const prepared = new Set(run.frames.filter(frame=>frame.pending?.stage === 'prepared').map(frame=>frame.pending?.approvalId));
+    for (const approval of this.approvals(chatId)) {
+      if (approval.status === 'pending' || approval.status === 'approved' && prepared.has(approval.id)) this.approval({...approval,status:'stale'});
+    }
+  }
   plan(chatId: string): Plan { return this.getState(`plan:${chatId}`, { phases: [] }); }
   setPlan(chatId: string, plan: Plan) { this.setState(`plan:${chatId}`, plan); this.event(chatId,'plan',plan); }
   testReport(chatId: string, report: TestReport) {
@@ -105,7 +124,7 @@ export class Store {
     this.event(chatId,'tests',report);
   }
   detail(chatId: string): ChatDetail {
-    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), approvals: this.approvals(chatId), events: this.events(chatId,0,1000), tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
+    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), approvals: this.approvals(chatId), events: this.recentEvents(chatId), tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
   }
   recover() {
     for (const chat of this.chats()) if (chat.status === 'running') {

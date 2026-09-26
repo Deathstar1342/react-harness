@@ -9,6 +9,7 @@
 | M4 | Chat workspace interface | Project/chat navigation, real API chat, plans, editable syntax-highlighted files, diffs, approvals, test results |
 | M5 | Reviews and context management | Critic checkpoints, bounded repairs, summaries with durable state retained, configurable budgets |
 | M6 | Integrated release validation | Reviewed integration, meaningful automated/browser/Linux tests, setup docs, honest remaining live-provider acceptance |
+| M7 | Seamless dark workspace | Codex-inspired dark chat interface with less button chrome, folder explorer for import, automatic new-project workspace, and Settings to choose its drive/folder |
 
 Milestones may develop concurrently after interfaces are established. Integration remains coordinator-owned. Implement the single-coder loop before attempting parallel coder execution.
 

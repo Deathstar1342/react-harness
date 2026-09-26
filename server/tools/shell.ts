@@ -174,7 +174,7 @@ export async function gitCommand(root: string, args: string[], maxBytes: number,
   return new Promise(resolve => {
     let output = '', bytes = 0, truncated = false, done = false;
     const env = { ...childEnvironment(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0' };
-    const child = spawn('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...overrides, ...args], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', ['--no-optional-locks', '--literal-pathspecs', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...overrides, ...args], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const finish = (result: CommandResult) => { if (done) return; done = true; clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(result); };
     const abort = () => { child.kill(); finish({ output, cancelled: true, error: 'Git command cancelled.' }); };
     const timer = setTimeout(() => { child.kill(); finish({ output, timedOut: true, error: 'Git command timed out.' }); }, 15000);

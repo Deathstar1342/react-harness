@@ -2,6 +2,8 @@ export type AgentRole = 'architect' | 'coder' | 'critic';
 export type ApprovalMode = 'autonomous' | 'balanced' | 'review';
 export type ChatStatus = 'idle' | 'running' | 'awaiting_approval' | 'paused' | 'interrupted' | 'error';
 export interface Project { id: string; name: string; path: string; createdAt: string }
+export interface WorkspaceSettings { workspaceRoot: string; defaultWorkspaceRoot: string }
+export interface DirectoryListing { path: string; parentPath: string | null; entries: {name:string;path:string}[]; roots: {name:string;path:string}[]; truncated: boolean }
 export interface Chat { id: string; projectId: string; title: string; status: ChatStatus; approvalMode: ApprovalMode; createdAt: string; updatedAt: string }
 export interface Message { id: string; chatId: string; role: 'user' | AgentRole | 'tool' | 'system'; content: string; createdAt: string; metadata?: Record<string, unknown> }
 export interface PlanStep { id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }
