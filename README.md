@@ -6,6 +6,8 @@ React + TypeScript, a Node.js 24 backend, SQLite via `node:sqlite`, and a local 
 
 ## Run in WSL
 
+For a full walkthrough, including work-network STARK checks, upgrades, backups, and troubleshooting, see the **[Setup guide](docs/setup.md)**.
+
 Prerequisites: Node.js 24 or newer, npm, Git, Bash, and Python 3 for Python tools. If `node-pty` needs to compile on your Linux distribution, install its usual native build prerequisites (Python 3, make, and a C++ compiler). Keep the checkout and working projects in your WSL home directory for filesystem performance.
 
 ```bash

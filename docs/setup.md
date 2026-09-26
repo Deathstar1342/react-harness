@@ -1,0 +1,161 @@
+# Setup guide
+
+Run the backend inside WSL/Linux and open the interface in your Windows browser. These instructions assume you already have a WSL Linux distribution. Run the shell commands below in that distribution, not in PowerShell.
+
+You can use projects, chats, and the file editor without model access. For this deployment, STARK is available only at work; perform the provider checks there.
+
+## 1. Check prerequisites
+
+Install Node.js **24 or newer** with npm inside WSL, using your organization's approved installation method. A Windows Node installation does not replace the Linux installation. You also need Git, Bash, Python 3, make, and a C++ compiler. Python and the compiler support the native PTY dependency.
+
+On Ubuntu/Debian, install the non-Node prerequisites with:
+
+```bash
+sudo apt update
+sudo apt install -y git curl python3 python3-venv build-essential
+```
+
+Verify the tools in your WSL terminal:
+
+```bash
+node --version
+npm --version
+node -p 'process.platform'
+git --version
+python3 --version
+```
+
+Expect Node `v24.x` or newer and platform `linux`. If Node resolves to a Windows executable, install/use the Linux version before continuing. Persistent shell, Python execution, and test commands require the Linux backend; native Windows is suitable for the UI and portable development checks.
+
+## 2. Clone and install
+
+Keep the app and working projects under your Linux home directory for filesystem performance:
+
+```bash
+mkdir -p ~/apps
+cd ~/apps
+git clone https://github.com/Deathstar1342/react-harness.git
+cd react-harness
+npm ci
+cp .env.example .env
+chmod 600 .env
+```
+
+Copy `.env.example` only on initial setup; copying it again overwrites your local settings. No separate database service or Python backend is required: Node creates the local SQLite database on startup.
+
+## 3. Configure STARK
+
+Open `.env` in your preferred local editor. Set your work provider's URL and key:
+
+```dotenv
+STARK_BASE_URL=https://your-provider.example/v1
+STARK_API_KEY=your-local-key
+
+ARCHITECT_MODEL=gemini-3.1-pro-preview
+CODER_MODEL=gemini-3.8-flash
+CRITIC_MODEL=gemini-3.6-flash
+```
+
+Use the API prefix supplied by your provider. If the discovery endpoint is `https://example.internal/api/v1/models`, set the base URL to `https://example.internal/api/v1`. Do not include `/models` or `/chat/completions` in the base URL. The backend appends these paths itself.
+
+Model IDs must match your STARK catalog exactly. The role names above are configurable defaults, not a guarantee that every STARK deployment exposes them. Requests use Chat Completions with ordinary-text JSON instructions; they do not send native tool definitions, `response_format`, or Responses API requests.
+
+Keep real keys in the local `.env`, which Git ignores. Do not put them in chat messages, screenshots, or repository files. Leaving `STARK_API_KEY` empty lets you explore the UI without calling models. Restart the backend after configuration changes.
+
+Useful optional settings:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | Local-only listener; the app requires a loopback address |
+| `PORT` | `3000` | Backend and built UI port |
+| `HARNESS_DATA_DIR` | `.harness` | Chat database, durable runtime state, and local artifacts |
+| `HARNESS_WORKSPACE_ROOT` | `~/React Harness Projects` when unset | Initial destination for new projects; use an absolute Linux path if setting it |
+| `APPROVAL_MODE` | `balanced` | Default for new chats: `balanced`, `review`, or `autonomous` |
+| `MODEL_STREAMING` | `true` | Set `false` if the provider does not support streaming |
+
+Settings in the UI can override the new-project workspace locally. Existing projects stay in place. Relative data and prompt-file paths resolve from the directory where you start the backend, so run the commands from the repository root. Use `.env.example` for token budgets, request limits, and optional per-role prompt files.
+
+## 4. Build and start
+
+```bash
+npm run build
+npm start
+```
+
+Keep that terminal running, then open [http://localhost:3000](http://localhost:3000) in your Windows browser. Use the configured port if you changed it. Stop the server with **Ctrl+C**. On later launches, run `npm start` from the checkout; rebuild after pulling frontend changes.
+
+For development instead:
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173). This starts both the backend and Vite with automatic reloads. The development proxy currently targets backend port `3000`; keep that port or update `vite.config.ts` to match. Run either development or normal startup, not both on the same port.
+
+## 5. Verify access at work
+
+With the app running, use another WSL terminal:
+
+```bash
+curl --fail-with-body http://127.0.0.1:3000/api/health
+curl --fail-with-body http://127.0.0.1:3000/api/models
+```
+
+The health check should return `{"ok":true}`. The models route calls STARK through the backend using your local configuration; you do not need to put the API key in a shell command. Check that the returned catalog includes your three configured role IDs. Discovery success alone does not prove Chat Completions or JSON protocol compatibility.
+
+Try this first workflow in a disposable project:
+
+1. Create a project by name. The app creates a unique folder in the default workspace and initializes a local Git repository. Use **Import** and the folder explorer for an existing project.
+2. Create a chat and choose **Review every change** so you can inspect proposed writes and commands.
+3. Send: `Create a hello.txt file containing Hello from Harness. Ask the critic to review the result. Do not install packages or run shell commands.`
+4. Inspect the proposed file diff, approve it, and confirm the file and critic result appear. A refusal, parsing error, or unfinished run is a failed compatibility check, not a successful execution.
+5. Open the file in the editor, change its text, and save. Ask the architect to read the current contents and confirm it sees the manual edit. Drag the editor's left divider or use its expand/restore button for more space.
+6. Restart the app, reopen the project/chat, and confirm the conversation and saved file remain. Interrupted runs require explicit resumption; live PTY state does not survive a backend restart.
+
+Live STARK behavior has not yet been validated by the repository's synthetic-provider tests. Record failures without sharing credentials or confidential project contents.
+
+## 6. Python projects and test reports
+
+The app does not bundle your project's Python packages. Prepare them in the target project, for example:
+
+```bash
+cd /absolute/path/to/your/project
+python3 -m venv .venv
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest --junitxml=.react-harness-test-results.xml
+```
+
+Use your project's requirements or package manager when applicable. Ask the coder to use `run_tests` with that command and the report path `.react-harness-test-results.xml`. Running a shell command alone does not populate structured results. The test tool requires a fresh JUnit report, which appears as runner → run → individual tests in the UI.
+
+## Updating and keeping your data
+
+Stop the backend before making a consistent backup. Back up the complete configured data directory, your separate project folders, and local configuration to private storage. `.harness` contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again.
+
+From the repository root, update with:
+
+```bash
+git pull --ff-only
+npm ci
+npm run build
+npm start
+```
+
+Preserve your `.env` and data directory. Compare `.env.example` for new options instead of copying over your settings. If Git reports local changes or a divergent branch, resolve those changes before continuing; do not reset away your work.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| UI reports missing STARK configuration | Set both URL and key in the checkout's `.env`, then restart the backend from that directory. |
+| Model discovery fails | Confirm you are on the work network/VPN, the URL includes the correct API prefix, and the key is valid. WSL must have its own working network and certificate trust; Windows browser access alone is not sufficient. |
+| Certificate validation fails | Use your organization's approved CA configuration for Node/WSL; do not disable TLS verification. |
+| Model is missing or completions fail | Compare exact model IDs with `/api/models`. Confirm the provider supports Chat Completions and the requested streaming/output limits. |
+| Model returns prose/refuses the JSON instructions | Capture a sanitized error/example for protocol investigation. The runtime rejects invalid actions; model discovery does not test this behavior. |
+| PTY unavailable or `node-pty` failed to install | Confirm `process.platform` is `linux`, install Python/make/C++ prerequisites, and rerun `npm ci`. Check installation output; do not reuse Windows `node_modules` in WSL. |
+| Page cannot connect | Confirm the startup terminal is still running and the WSL health check succeeds. Check the port and Windows-to-WSL localhost forwarding. Keep the listener local. |
+| Port already in use | Stop the earlier app instance or choose a different `PORT`; update the dev proxy too if using Vite. |
+| New UI change is missing | Run `npm run build` for normal startup and refresh the browser. |
+| File change requires review or reports a conflict | Inspect the approval or refresh the file. Save/discard unsaved edits and let the model re-read before trying a revised proposal. |
+| Shell directory or variables disappeared after restart | Expected: chats and tool evidence persist, but live shell sessions do not. |
+
+For contributor checks, run `npm run typecheck`, `npm test`, and `npm run build`. Linux CI includes real PTY tests; Windows skips platform-specific cases. See [architecture](architecture.md), [API contract](api-contract.md), and [current status](STATUS.md) for implementation details and remaining acceptance work.
