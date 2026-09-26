@@ -88,6 +88,10 @@ export function useConversation(chatId: string, onChange: () => void) {
           "tests",
           "file_changed",
           "steering",
+          "review",
+          "delegation",
+          "usage",
+          "context_summary",
           "error",
         ]) {
           source.addEventListener(type, (event: Event) => {
@@ -106,7 +110,7 @@ export function useConversation(chatId: string, onChange: () => void) {
               return;
             }
             if (type === "delta") {
-              setStream((old) => (old + eventText(data)).slice(-32000));
+              setStream((old) => (old + (eventText(data) || " ")).slice(-32000));
               return;
             }
             if (type === "message" || type === "status" || type === "error")

@@ -7,6 +7,33 @@ import { Store } from '../server/store.js';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root,{recursive:true,force:true}); });
 describe('durable workspace state', () => {
+  it('publishes only committed events and returns the newest activity in long chats', () => {
+    const store = new Store(':memory:');
+    try {
+      const project = store.createProject('A','/a');
+      const chat = store.createChat(project.id,'Work','review');
+      const emitted: unknown[] = [];
+      store.changes.on(chat.id,event=>emitted.push(event));
+      expect(()=>store.transaction(()=>{store.event(chat.id,'tool',{output:'rolled back'});throw new Error('rollback');})).toThrow();
+      expect(emitted).toEqual([]);
+      expect(store.events(chat.id)).toEqual([]);
+      store.transaction(()=>{for(let i=0;i<1100;i++) store.event(chat.id,'tool',{output:String(i)});expect(emitted).toHaveLength(0);});
+      expect(emitted).toHaveLength(1100);
+      expect(store.detail(chat.id).events).toHaveLength(1000);
+      expect(store.detail(chat.id).events.at(-1)?.data).toEqual({output:'1099'});
+      expect(store.events(chat.id,0,2000)).toHaveLength(1100);
+    } finally {store.close();}
+  });
+  it('invalidates pending proposals without changing historical execution approvals',()=>{
+    const store = new Store(':memory:');
+    try {
+      const project = store.createProject('A','/a');const chat = store.createChat(project.id,'Work','review');
+      for(const id of ['past','current','pending']) store.approval({id,chatId:chat.id,agentId:'coder',action:{name:'write_file',args:{}},inspection:{effect:'write',risk:'routine',description:'Edit'},status:id==='pending'?'pending':'approved',createdAt:new Date().toISOString()});
+      store.setState(`run:${chat.id}`,{frames:[{pending:{stage:'prepared',approvalId:'current'}}]});
+      store.invalidateApprovals(chat.id);
+      expect(store.approvals(chat.id).map(item=>[item.id,item.status])).toEqual([['past','approved'],['current','stale'],['pending','stale']]);
+    } finally {store.close();}
+  });
   it('preserves conversations and pending approvals across restart, marks running work interrupted', () => {
     const root = mkdtempSync(path.join(tmpdir(),'harness-db-')); roots.push(root);
     const file = path.join(root,'state.sqlite');

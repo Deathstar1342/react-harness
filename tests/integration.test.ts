@@ -8,7 +8,9 @@ import type { AgentResponse } from '../shared/types.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
 import { StarkProvider } from '../server/provider.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
+import { createManagedHooks } from '../server/context.js';
+import { Store } from '../server/store.js';
+import { BUDGET_STATE_KEY, type Reservation } from '../server/scheduler.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 
 const roots: string[] = []; const servers: Server[] = [];
@@ -47,7 +49,13 @@ describe('real HTTP provider + runtime + workspace integration',()=> {
       final('The label is updated and independently reviewed.'),
     ]);
     const config=readConfig({STARK_BASE_URL:fake.baseUrl,STARK_API_KEY:'test-only-provider-key',HARNESS_DATA_DIR:path.join(root,'state')});
-    const build=()=>createApp({config,provider:new StarkProvider({baseUrl:fake.baseUrl,apiKey:config.apiKey,maxRetries:0}),tools:new WorkspaceTools(),hooks:{parse:parseAgentResponse,instructions:protocolInstructions}});
+    const build=async()=>{
+      const store = new Store(path.join(config.dataDir,'state.sqlite'));
+      const provider = new StarkProvider({baseUrl:fake.baseUrl,apiKey:config.apiKey,maxRetries:0});
+      const built = await createApp({config,provider,store,tools:new WorkspaceTools(),hooks:createManagedHooks(provider,store,config)});
+      built.app.addHook('onClose',async()=>store.close());
+      return built;
+    };
     const first=await build();
     const projectReply=await first.app.inject({method:'POST',url:'/api/projects',payload:{name:'Integration project',path:path.join(root,'project'),mode:'create'}});
     expect(projectReply.statusCode).toBe(201);const project=projectReply.json();
@@ -70,6 +78,9 @@ describe('real HTTP provider + runtime + workspace integration',()=> {
       expect(new Set(fake.requests.map(request=>request.model))).toEqual(new Set(Object.values(config.models)));
       expect(fake.requests.every(request=>request.tools===undefined && request.response_format===undefined)).toBe(true);
       expect(next.store.events(chat.id).some(event=>event.type==='delta')).toBe(true);
+      const ledger = next.store.getState<Reservation[]>(BUDGET_STATE_KEY,[]);
+      expect(ledger).toHaveLength(fake.requests.length);
+      expect(ledger.every(entry=>entry.status==='estimated')).toBe(true);
       expect((await next.app.inject({method:'POST',url:`/api/approvals/${approval.id}`,payload:{decision:'approve'}})).statusCode).toBe(409);
     } finally {await next.app.close();}
   });

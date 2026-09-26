@@ -7,7 +7,10 @@ Types in shared/types.ts are the integration boundary. All JSON API failures ret
 - GET /api/settings -> PublicSettings (never credentials)
 - GET /api/models -> { models: string[] }
 - GET /api/projects -> Project[]
-- POST /api/projects { name, path, mode: 'create' | 'import' } -> Project
+- POST /api/projects { name, path?, mode: 'create' | 'import' } -> Project; create without path allocates a new unique folder inside the configured workspace. Import requires a selected absolute directory path.
+- Planned M7: GET /api/workspace -> WorkspaceSettings { workspaceRoot, defaultWorkspaceRoot }; default is ~/React Harness Projects or HARNESS_WORKSPACE_ROOT.
+- Planned M7: PATCH /api/workspace { workspaceRoot } -> WorkspaceSettings; persist the absolute default folder for future projects without moving existing projects.
+- Planned M7: GET /api/directories?path= -> DirectoryListing { path, parentPath, entries:[{name,path}], roots:[{name,path}], truncated }; browse backend directories for import or workspace selection. Default path is the backend user's home. Entries are folders, sorted by name, excluding hidden folders; root shortcuts include Home, Workspace, and available drive/filesystem roots.
 - GET /api/projects/:id/chats -> Chat[]
 - POST /api/projects/:id/chats { title?, approvalMode? } -> Chat
 - GET /api/chats/:id -> ChatDetail

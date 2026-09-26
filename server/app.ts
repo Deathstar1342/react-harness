@@ -6,6 +6,7 @@ import { mkdir, realpath, readdir, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import type { ServerResponse } from 'node:http';
 import type { Config } from './config.js';
 import { publicSettings } from './config.js';
 import { Runtime, type RuntimeHooks } from './runtime.js';
@@ -24,6 +25,7 @@ export async function createApp(options: AppOptions) {
   const watchers = new Map<string,FSWatcher>();
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
   const recentWrites = new Map<string,number>();
+  const eventStreams = new Set<ServerResponse>();
   store.changes.on('event',(event: RunEvent)=> {
     if (event.type !== 'file_changed') return;
     const data = event.data as {path:string;source:string};
@@ -130,6 +132,7 @@ export async function createApp(options: AppOptions) {
     const headerId = Number(request.headers['last-event-id']);
     let cursor = Number.isSafeInteger(headerId) && headerId >= 0 ? headerId : query.after ?? 0;
     reply.hijack();
+    eventStreams.add(reply.raw);
     reply.raw.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive','X-Accel-Buffering':'no'});
     const send = (event: RunEvent) => {
       if (event.id <= cursor) return;
@@ -142,7 +145,7 @@ export async function createApp(options: AppOptions) {
     while (batch.length) { for (const event of batch) send(event); if (batch.length < 2000) break; batch = store.events(id,cursor); }
     reply.raw.write(': connected\n\n');
     const heartbeat = setInterval(()=>{if (!reply.raw.destroyed) reply.raw.write(': heartbeat\n\n');},15000);
-    const cleanup = () => {clearInterval(heartbeat);store.changes.off(id,send);};
+    const cleanup = () => {clearInterval(heartbeat);store.changes.off(id,send);eventStreams.delete(reply.raw);};
     reply.raw.on('close',cleanup);
   });
   const staticRoot = options.staticRoot ?? path.resolve('dist/client');
@@ -150,6 +153,7 @@ export async function createApp(options: AppOptions) {
     await app.register(staticFiles,{root:staticRoot,prefix:'/',index:'index.html'});
     app.setNotFoundHandler((request,reply)=>request.url.startsWith('/api') ? reply.code(404).send({error:'API route not found'}) : reply.sendFile('index.html'));
   }
+  app.addHook('preClose',async()=>{for(const stream of eventStreams) stream.end();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
   return {app,store,runtime};
 }
