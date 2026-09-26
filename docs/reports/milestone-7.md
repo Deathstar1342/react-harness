@@ -38,3 +38,7 @@ Automated browser access remains blocked by the previously reported saved-permis
 Local Linux/real PTY checks and live STARK credentials were not available or used. No live-provider execution is claimed. The isolated base predates coordinator backend implementation, so the coordinator must run integrated checks after combining these changes. No demo conversations were added to the product.
 
 Coordinator was notified of the browser blocker and requested to keep the heartbeat paused while user assistance is required. Integration into main and milestone closure remain coordinator-owned.
+
+## Coordinator integration
+
+Integrated into main at f96049c with backend workspace/directory APIs from 7b94cd3. Coordinator matched the name input limit to the API's 100 characters and starts Settings browsing at Home, avoiding an error when the initial default workspace has not been created. Existing Workspace shortcuts navigate directly to a saved, existing workspace. Full integrated Windows suite: 237 passed, ten skips; typecheck/build pass. Preview runs locally; rendered/interaction acceptance remains pending user feedback or restored browser automation. No live-provider claim.

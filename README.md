@@ -37,7 +37,7 @@ The UI opens without credentials so you can manage projects and files. Sending m
 
 Create or import local projects, then keep separate conversations for separate tasks. Chats, plans, approvals, tool evidence, and model context are stored in `.harness/state.sqlite` by default. Keep this local data private. You can set `HARNESS_DATA_DIR` to another location.
 
-Milestone 7 is adding a folder explorer, a quieter dark interface, and Settings for the default workspace. Its backend now supports name-only project creation under `~/React Harness Projects` (or `HARNESS_WORKSPACE_ROOT`) with unique destination folders, directory browsing, and saved workspace preferences. The UI redesign is being integrated; see [current status](docs/STATUS.md).
+The dark chat interface includes a folder explorer for imports and Settings for the default workspace. Create a project with just a name under `~/React Harness Projects` (or `HARNESS_WORKSPACE_ROOT`); the backend chooses a unique folder. Change the default workspace in Settings without moving existing projects. See [current validation status](docs/STATUS.md).
 
 Imported directories stay in place; importing does not copy files or rewrite existing Git history. New projects get a local Git repository. Project paths belong to the backend machine: inside WSL, use Linux paths such as `/home/you/projects`, or mounted Windows paths under `/mnt`.
 

@@ -40,7 +40,7 @@ export function ProjectDialog({ onCreated, onClose }: { onCreated: (project: Pro
         <button type="button" aria-pressed={mode === "create"} disabled={busy} onClick={() => { setMode("create"); setError(""); }}>New project</button>
         <button type="button" aria-pressed={mode === "import"} disabled={busy} onClick={() => { setMode("import"); setError(""); setBrowse(true); }}>Import existing</button>
       </div>
-      <label>Project name<input autoFocus required maxLength={120} value={name} disabled={busy}
+      <label>Project name<input autoFocus required maxLength={100} value={name} disabled={busy}
         onChange={(event) => setName(event.target.value)} placeholder="My project" /></label>
       {mode === "create" ? <div className="project-destination">
         <span className="field-help">Create in</span>
@@ -84,7 +84,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         setBusy(true); setError("");
         void saveWorkspace(path).then(onClose).catch((e) => { setError(errorText(e)); setBusy(false); });
       }}>{busy ? "Saving…" : "Save"}</button></div>
-    {browse && <DirectoryBrowser title="Choose workspace folder" initialPath={path} onClose={() => setBrowse(false)}
+    {browse && <DirectoryBrowser title="Choose workspace folder" onClose={() => setBrowse(false)}
       onSelect={(next) => { setSelected(next); setError(""); setBrowse(false); }} />}
   </Modal>;
 }

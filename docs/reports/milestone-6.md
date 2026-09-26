@@ -43,3 +43,7 @@ Coordinator must run the delivered regressions against main with its context fix
 Browser automation was not attempted because saved localhost permission verification remains blocked; no alternate browser/Playwright bypass was used. No live STARK credentials were present, and fixture validation is not live-provider acceptance. No local Linux/PTY check was performed; ten tests are platform-skipped. Coordinator-reported Linux CI results were not independently rerun here. These are remaining acceptance gates, not successful validations.
 
 All review test/build commands completed. No persistent review dev server or process remains. Temporary fixture apps, SQLite connections and watchers are cleaned up. The managed worktree is retained for further authorized review.
+
+## Coordinator integration validation
+
+The regression suite is integrated on main at c0fc99a with implementation fixes. All ten independent release tests pass: historical approval context growth, rapid external saves, original Git/plan/cross-chat findings, editor conflicts, denial/budget accounting, cancellation, uncertain restart actions and SSE replay/shutdown. Editor-change events now include a content hash; the assertion accepts this additional metadata while still requiring the external-change event. Integrated full suite after M7: 237 passed, ten platform/fixture skips; typecheck and build passed on Windows. Linux final-SHA CI and visual/live-provider gates are recorded in STATUS.
