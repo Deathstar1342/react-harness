@@ -63,6 +63,14 @@ describe('workspace file correctness', () => {
       expect(await tools.list(root)).toEqual([]);
     } finally { await rm(outside, { recursive: true, force: true }); }
   });
+  it('keeps an editor lease across saves until the editor releases its clean buffer', async () => {
+    const file = await tools.save(root, 'typing.txt', 'initial', null);
+    tools.setDirty(root, 'typing.txt', 'editor', true);
+    const saved = await tools.save(root, 'typing.txt', 'first keystrokes', file.hash, 'editor');
+    await expect(tools.save(root, 'typing.txt', 'agent overwrite', saved.hash)).rejects.toThrow('unsaved');
+    tools.setDirty(root, 'typing.txt', 'editor', false);
+    expect((await tools.save(root, 'typing.txt', 'after release', saved.hash)).content).toBe('after release');
+  });
   it('bounds file reads/writes and rejects binary data', async () => {
     tools = new WorkspaceTools({ maxFileBytes: 10 });
     await writeFile(path.join(root, 'big'), '12345678901');

@@ -94,7 +94,8 @@ export class WorkspaceFiles {
       await scoped(root, input);
       await rename(temporary, target.absolute);
       temporary = undefined;
-      if (leases.get(id)?.owner === owner) leases.delete(id);
+      // Only the editor knows whether more keystrokes arrived during this save.
+      // Keep its lease until it explicitly releases the now-clean buffer.
       return { path: target.relative, content, hash: hash(Buffer.from(content)) };
     } finally {
       if (temporary) await unlink(temporary).catch(() => {});
