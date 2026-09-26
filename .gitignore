@@ -1,0 +1,38 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Local runtime state, projects, logs, and databases
+.harness/
+data/
+workspaces/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*-wal
+*-shm
+
+# Editor and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Test artifacts and Python environments
+test-results/
+playwright-report/
+__pycache__/
+.pytest_cache/
+.venv/
