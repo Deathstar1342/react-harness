@@ -31,6 +31,7 @@ import { FilePanel } from "./FilePanel";
 import { ActivityDrawer, ApprovalCard, PlanPanel } from "./Panels";
 import { ProjectDialog, SettingsDialog } from "./WorkspaceDialogs";
 import { useConversation } from "./useConversation";
+import { useEditorLayout } from "./useEditorLayout";
 
 const approvalNames: Record<ApprovalMode, string> = {
   balanced: "Balanced",
@@ -562,6 +563,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [sidebar, setSidebar] = useState(false);
   const [files, setFiles] = useState(false);
+  const editorLayout = useEditorLayout();
   const [dirty, setDirty] = useState(false);
   const [fileRevision, setFileRevision] = useState(0);
   const [error, setError] = useState("");
@@ -811,7 +813,11 @@ export function App() {
             )}
           </div>
         )}
-        <div className="workspace-main">
+        <div
+          ref={editorLayout.workspaceRef}
+          className={`workspace-main ${files && editorLayout.expanded ? "editor-expanded" : ""} ${editorLayout.resizing ? "editor-resizing" : ""}`}
+          style={editorLayout.style}
+        >
           {chatId && project ? (
             <Conversation
               key={chatId}
@@ -880,13 +886,16 @@ export function App() {
             </main>
           )}
           {project && (
-            <div className={`file-panel-container ${files ? "visible" : ""}`}>
+            <div id="workspace-file-editor" className={`file-panel-container ${files ? "visible" : ""}`}>
+              <div className="editor-resize-handle" {...editorLayout.separatorProps} />
               <FilePanel
                 key={project.id}
                 projectId={project.id}
                 revision={fileRevision}
                 onDirty={setDirty}
                 onClose={() => setFiles(false)}
+                expanded={editorLayout.expanded}
+                onToggleExpanded={editorLayout.toggleExpanded}
               />
             </div>
           )}

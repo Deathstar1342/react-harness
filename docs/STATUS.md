@@ -3,10 +3,12 @@
 - Coordinator: 01a0dc0a-8866-7182-acd2-da997779962d
 - Repository: https://github.com/Deathstar1342/react-harness
 - Integration branch: main. User authorization for public commits/pushes persists.
-- BLOCKED on user input: STARK configuration and visual/interaction acceptance. Implementation and automated checks are saved; no automatic work should continue until an actionable reply or environment change.
+- Live-provider acceptance deferred: the user can access STARK only at work and will test there. The user approved the dark visual direction and requested an independently actionable editor resizing improvement.
 - Heartbeat react-harness-milestone-check-in remains PAUSED while browser permission assistance is unresolved; independent implementation continues.
 
 ## Milestones
+
+Latest user follow-up (2026-09-26): implemented a draggable editor divider and expand/restore control, preserving mounted editor buffers and conversation state. Divider supports arrow keys, Home/End, and double-click reset; expansion restores the chosen split width. Typecheck, production build, and all 245 portable tests passed (10 platform skips); localhost preview returned HTTP 200 after rebuilding. Browser interaction remains unverified because the prior browser permission block is unresolved. The heartbeat stays paused; do not poll for work-only credentials. This update supersedes the historical blocked audit below: visual direction is accepted and live STARK testing will happen at work.
 
 | Milestone | Chat | Current evidence |
 | --- | --- | --- |

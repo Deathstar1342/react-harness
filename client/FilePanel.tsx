@@ -12,6 +12,8 @@ import {
   ChevronRight,
   FileCode2,
   Folder,
+  Maximize2,
+  Minimize2,
   RefreshCw,
   Save,
   X,
@@ -38,11 +40,15 @@ export function FilePanel({
   revision,
   onDirty,
   onClose,
+  expanded = false,
+  onToggleExpanded,
 }: {
   projectId: string;
   revision: number;
   onDirty: (dirty: boolean) => void;
   onClose: () => void;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }) {
   const [directory, setDirectory] = useState("");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -290,13 +296,26 @@ export function FilePanel({
         <span>
           <FileCode2 size={16} /> Workspace
         </span>
-        <button
-          className="icon-button"
-          aria-label="Close files panel"
-          onClick={onClose}
-        >
-          <X size={17} />
-        </button>
+        <div className="file-panel-actions">
+          {onToggleExpanded && (
+            <button
+              className="icon-button"
+              aria-label={expanded ? "Restore editor width" : "Expand file editor"}
+              title={expanded ? "Restore editor width" : "Expand file editor"}
+              aria-pressed={expanded}
+              onClick={onToggleExpanded}
+            >
+              {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          )}
+          <button
+            className="icon-button"
+            aria-label="Close files panel"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </div>
       </div>
       <div className="file-navigation">
         <button

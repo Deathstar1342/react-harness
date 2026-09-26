@@ -90,6 +90,8 @@ Coordinate all roles through a shared scheduler. Initial configurable account bu
 
 Left sidebar: projects and chats. Center: architect conversation with collapsible activity and approval cards. Optional right panel: files, editor, and diffs. Collapsible plan panel: phases, steps, owners, blockers, and verification. Bottom drawer: shells and tests.
 
+The desktop editor pane supports a draggable, keyboard-accessible left divider and an expand/restore control. Expansion fills the main workspace while keeping the conversation and editor mounted, preserving drafts, unsaved file buffers, and live activity subscriptions. Restoring keeps the chosen split width; narrow screens use the existing overlay layout.
+
 Milestone 7 refines this layout into a seamless dark theme and adds the folder explorer/default-workspace settings. Flat selectable rows and small icon or overflow actions replace repeated button outlines. New-project creation defaults to the workspace, while import and workspace Settings reuse the same folder explorer. Maintain manual-edit guards when changing project/chat or closing supporting panels.
 
 Use structured test reports, beginning with pytest JUnit XML, rather than model interpretation of console text. Group the drawer into collapsible runner, run, and individual test levels, with green checks/red crosses plus readable status labels. Display runner, individual runs, test cases, status, traceback, and captured output. Distinguish skipped cases, failures, collection errors, cancellation, and runner crashes.
