@@ -40,7 +40,7 @@ describe.skipIf(process.platform !== 'linux')('Linux persistent PTY integration'
   });
   it('bounds output, exposes background jobs, and keeps callback failures harmless', async () => {
     tools = new WorkspaceTools({ maxOutputBytes: 100 });
-    const result = await tools.execute({ ...context, onOutput: () => { throw new Error('disconnected'); } }, shell('python3 -c "print(\"x\" * 2000)"'));
+    const result = await tools.execute({ ...context, onOutput: () => { throw new Error('disconnected'); } }, shell("printf '%02000d' 0"));
     expect(result.ok).toBe(true); expect((result.data as any).truncated).toBe(true); expect((result.data as any).output.length).toBeLessThanOrEqual(100);
     const background = await tools.execute(context, shell('sleep 60 &'));
     expect((background.data as any).backgroundPids.length).toBeGreaterThan(0);
