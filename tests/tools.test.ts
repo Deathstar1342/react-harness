@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { WorkspaceTools } from '../server/tools/index.js';
 import { childEnvironment } from '../server/tools/shell.js';
-import { parseJUnit } from '../server/tools/junit.js';
+import { parseJUnit, unavailableReport } from '../server/tools/junit.js';
 import type { ToolContext } from '../shared/types.js';
 let root: string, tools: WorkspaceTools, context: ToolContext;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), 'harness-tools-')); tools = new WorkspaceTools(); context = { projectRoot: root, chatId: 'chat', agentId: 'agent' }; });
@@ -132,6 +132,22 @@ describe('read-only Git and environment', () => {
 });
 
 describe('JUnit parsing', () => {
+  it.each([
+    ['pytest --junitxml=report.xml', 'pytest'],
+    ['python -m pytest -q', 'pytest'],
+    ['python3.12 -I -m pytest tests', 'pytest'],
+    ['".venv/bin/python" -m pytest', 'pytest'],
+    ['PYTHONWARNINGS=default .venv/bin/pytest', 'pytest'],
+    ['cd tests && pytest --junitxml=../report.xml', 'pytest'],
+    ['npm test', 'junit'],
+    ['echo "pytest"', 'junit'],
+    ['echo "ready && pytest"', 'junit'],
+    ['python -c "print(123)" -m pytest', 'junit'],
+    ['python -m pytest_extra', 'junit'],
+  ])('identifies runner metadata for %s without treating it as success', (command, runner) => {
+    expect(parseJUnit('<testsuite><testcase name="case"/></testsuite>', command, { output: '', exitCode: 0 }).runner).toBe(runner);
+    expect(unavailableReport(command, { output: '', exitCode: 1 }, 'missing report')).toMatchObject({ runner, status: 'error' });
+  });
   it('extracts pass/failure/error/skipped cases and captured traceback/output', () => {
     const report = parseJUnit('<testsuites><testsuite><testcase name="pass" time="0.25"/><testsuite><testcase name="fail"><failure message="assertion">trace</failure><system-out>captured</system-out></testcase><testcase name="skip"><skipped/></testcase><testcase name="collection"><error>import error</error></testcase></testsuite></testsuite></testsuites>', 'pytest', { output: 'runner log', exitCode: 1 });
     expect(report.status).toBe('error'); expect(report.tests.map(t => t.status)).toEqual(['passed', 'failed', 'skipped', 'error']);
