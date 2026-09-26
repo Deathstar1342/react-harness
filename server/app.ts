@@ -11,6 +11,7 @@ import type { Config } from './config.js';
 import { publicSettings } from './config.js';
 import { Runtime, type RuntimeHooks } from './runtime.js';
 import { Store } from './store.js';
+import { WorkspaceLocations } from './workspace.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 
 const executeFile = promisify(execFile);
@@ -21,6 +22,7 @@ export async function createApp(options: AppOptions) {
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
+  const locations = new WorkspaceLocations(store,config.workspaceRoot);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
   const watchers = new Map<string,FSWatcher>();
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
@@ -78,10 +80,14 @@ export async function createApp(options: AppOptions) {
   app.get('/api/settings',async()=>publicSettings(config));
   app.get('/api/models',async()=>({models:await provider.models()}));
   app.get('/api/projects',async()=>store.projects());
+  app.get('/api/workspace',async()=>locations.settings());
+  app.patch('/api/workspace',async request=>{const body=z.object({workspaceRoot:z.string().min(1).max(4096)}).strict().parse(request.body);return locations.update(body.workspaceRoot);});
+  app.get('/api/directories',async request=>{const query=z.object({path:z.string().min(1).max(4096).optional()}).strict().parse(request.query);return locations.browse(query.path);});
   app.post('/api/projects',async(request,reply)=> {
-    const body = z.object({name:z.string().trim().min(1).max(100),path:z.string().trim().min(1).max(4096),mode:z.enum(['create','import'])}).strict().parse(request.body);
-    if (!path.isAbsolute(body.path)) throw new Error('Use an absolute project folder path');
-    let root = path.resolve(body.path);
+    const body = z.object({name:z.string().trim().min(1).max(100),path:z.string().trim().min(1).max(4096).optional(),mode:z.enum(['create','import'])}).strict().parse(request.body);
+    if (body.mode==='import' && !body.path) throw new Error('Select the existing project folder to import');
+    if (body.path && (!path.isAbsolute(body.path) || body.path.includes('\0'))) throw new Error('Use an absolute project folder path');
+    let root = body.path ? path.resolve(body.path) : await locations.allocate(body.name);
     if (root === path.parse(root).root) throw new Error('Choose a project folder, not the filesystem root');
     if (body.mode === 'create') {
       if (existsSync(root) && (await readdir(root)).length) throw new Error('New project folder must be empty; import an existing project instead');

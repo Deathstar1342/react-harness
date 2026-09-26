@@ -1,8 +1,9 @@
 import path from 'node:path';
+import { homedir } from 'node:os';
 import type { AgentRole, ApprovalMode, PublicSettings } from '../shared/types.js';
 
 export interface Config {
-  baseUrl: string; apiKey: string; streaming: boolean; host: string; port: number; dataDir: string;
+  baseUrl: string; apiKey: string; streaming: boolean; host: string; port: number; dataDir: string; workspaceRoot: string;
   models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number;
   limits: PublicSettings['limits']; contextLimits: Record<AgentRole, number>; maxOutputTokens: number;
 }
@@ -24,6 +25,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     baseUrl, apiKey: env.STARK_API_KEY ?? '', streaming: env.MODEL_STREAMING !== 'false', host,
     port: positive('PORT', 3000), dataDir: path.resolve(env.HARNESS_DATA_DIR ?? '.harness'),
+    workspaceRoot: path.resolve(env.HARNESS_WORKSPACE_ROOT || path.join(homedir(),'React Harness Projects')),
     models: { architect: env.ARCHITECT_MODEL ?? 'gemini-3.1-pro-preview', coder: env.CODER_MODEL ?? 'gemini-3.8-flash', critic: env.CRITIC_MODEL ?? 'gemini-3.6-flash' },
     approvalMode: mode as ApprovalMode, maxParallelCoders: 1,
     limits: { requestsPerMinute: positive('REQUESTS_PER_MINUTE', 120), tokensPerMinute: positive('TOKENS_PER_MINUTE', 1500000), tokensPerDay: positive('TOKENS_PER_DAY', 150000000) },

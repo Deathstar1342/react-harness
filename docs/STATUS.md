@@ -1,51 +1,42 @@
 # Coordinator status
 
-- Coordinator task: 01a0dc0a-8866-7182-acd2-da997779962d
+- Coordinator: 01a0dc0a-8866-7182-acd2-da997779962d
 - Repository: https://github.com/Deathstar1342/react-harness
-- Integration branch: main
-- PAUSED at user request on 2026-09-26 for a Codex update. Resume only when requested.
-- Heartbeat: react-harness-milestone-check-in, PAUSED.
-- M1/M3/M4/M5 are idle. M6 instructed to checkpoint and stop. Coordinator preview server stopped.
-- Public GitHub commit/push authorization persists for coordinator and children.
+- Integration branch: main. User authorization for public commits/pushes persists.
+- ACTIVE: implementing M7 and completing M6 review after user-requested pause.
+- Heartbeat react-harness-milestone-check-in remains PAUSED while browser permission assistance is unresolved; independent implementation continues.
 
-## Milestone ownership and saved deliveries
+## Milestones
 
-| Milestone | Owner/task | State |
+| Milestone | Chat | Current evidence |
 | --- | --- | --- |
-| M0 | Coordinator | Complete; local and Linux CI passed; tracker closed |
-| M1 | Milestone 1: 01a0dc3a-6bca-7cb0-91a7-343b393d3bec | Reviewed and integrated at ec95965; Linux CI passed |
-| M2 | Coordinator | Durable runtime, API, approval/review checkpoints and real tool/provider wiring implemented; integrated review remains open |
-| M3 | Milestone 3: 01a0dc3a-79c2-71a3-b90b-455fc518c8c7 | Tools integrated at 68411b9; follow-up d04e0804fea39b13daf661ec650f3ce20e9e4569 awaits integration |
-| M4 | Milestone 4: 01a0dc3a-91de-73e3-8b8c-82cc0cb375a8 | Delivered 864eb168f8c0c7588f8509289151395c4a86b127; review/integration pending |
-| M5 | Milestone 5: 01a0dc46-426d-72d3-8dd4-461800aee720 | Delivered 177c7d7cf6456f01797c4e28a3b3205060a8a202; review/integration pending |
-| M6 | Milestone 6: 01a0dc69-ca84-72d3-803b-c46f14ffc6a2 | Review checkpoint requested; three reproducible findings, fixes on main awaiting regression integration |
+| M0 | Coordinator | Complete; local/Linux CI passed; tracker closed |
+| M1 | 01a0dc3a-6bca-7cb0-91a7-343b393d3bec | Integrated ec95965; provider/protocol tests and Linux CI passed |
+| M2 | Coordinator | Durable runtime, API, approvals, restart recovery, steering and review checkpoints implemented; release review ongoing |
+| M3 | 01a0dc3a-79c2-71a3-b90b-455fc518c8c7 | Integrated 68411b9 and 0e47ea4; nine Linux PTY cases passed in prior CI run 36222528237 |
+| M4 | 01a0dc3a-91de-73e3-8b8c-82cc0cb375a8 | Integrated 9814bbf; superseded visually by M7 work in progress |
+| M5 | 01a0dc46-426d-72d3-8dd4-461800aee720 | Integrated 96c9df8; managed hooks wired at a185cc0; context/scheduler and HTTP restart tests pass |
+| M6 | 01a0dc69-ca84-72d3-803b-c46f14ffc6a2 | Independent review resumed; initial five regression checks integrated at 31226b4 and all pass |
+| M7 | 01a0dc72-a118-7931-898e-d3e4cb0c83bb | UI redesign in isolated codex/milestone-7; coordinator owns backend workspace/directory APIs |
 
-Child branches are codex/milestone-1, codex/milestone-3, codex/milestone-4 and codex/milestone-5. Deliveries are committed and pushed, and worktrees are preserved. M3/M4/M5 have since been integrated into main at 0e47ea4, 9814bbf and 96c9df8; managed hooks/editor lease fix at a185cc0.
+M6 owns tests/release.test.ts and docs/reports/milestone-6.md only. M7 owns client/**, tests/ui-*.test.ts, docs/reports/milestone-7.md. Coordinator owns integration and other paths. Existing child worktrees/branches are preserved.
 
-## Checkpoint validation
+## Latest local validation
 
-Coordinator checkpoint: Node 24.16 on Windows; npm run typecheck, npm test (159 passed, nine Linux skips), and npm run build passed. Integration test uses a local HTTP STARK fixture with the real provider, runtime, tools and SQLite across backend restart; it is not live-provider acceptance.
+Node 24.16 on Windows: npm run typecheck; npm test (219 passed, ten skipped); npm run build all passed. Includes M6 Git literal-path credential exclusion, /plan on active runs, sibling-chat notifications, editor conflict protection and scheduler role accounting. Four new M7 API tests cover unique name-only project creation, persisted workspace settings across restart, folder browsing/import preservation, and invalid/cross-origin requests.
 
-M3 follow-up Linux CI run 36222528237 passed all nine real PTY cases (49 tests passed, one platform skip), typecheck and build. M4 reports typecheck, 13 UI tests and build passed. M5 reports typecheck, 154 tests and build passed on its branch. Recheck child results after integration.
+Tool implementation fixes include dirty leases surviving a save, historical approval preservation, recent activity pagination, post-commit event publication, SSE shutdown, cross-chat write notifications, active /plan enforcement, and literal Git pathspecs. Revalidate exact integrated SHA on Linux CI.
 
-Ordinary WSL is unavailable locally; the detected distribution belongs to Podman. Do not alter unrelated container services. STARK credentials are absent; live-provider validation remains pending.
+## M7 current contract
 
-## Resume sequence and open review items
+Dark charcoal, flat navigation, fewer outlined controls, contextual actions, chat-first layout. Import via backend folder explorer; new projects need only a name and use a unique default-workspace folder. Settings can change the future-project workspace without moving existing projects. Types/API contract and architecture.md updated. Coordinator backend implements GET/PATCH /api/workspace, GET /api/directories and optional create path. UI is not yet integrated. Default workspace is ~/React Harness Projects or HARNESS_WORKSPACE_ROOT.
 
-1. Review and integrate M3 follow-up, M4 and M5; inspect milestone reports. M5 exports createManagedHooks(provider, store, config, options?) from server/context.ts. Production StarkProvider must retain maxRetries: 0 so each scheduler reservation corresponds to one request. Account for Store ownership on shutdown when wiring hooks.
-2. Inspect editor lease lifetime after a save while the user continues typing: saving must not leave an unsaved buffer briefly unprotected. Review long-chat event pagination and historical approval invalidation.
-3. Run integrated checks and Linux CI; create an independent Milestone 6 review chat. Update README to actual WSL setup and limitations. Parallel coder execution is not implemented yet; the current baseline serializes delegation.
-4. Browser validation is blocked: coordinator and M4 Browser tools could not verify saved localhost permissions. User assistance to restore access is pending. Do not bypass browser security controls or use another browser as an indirect workaround. Visual acceptance remains pending; keep the heartbeat paused if user assistance is still required after resuming.
-5. Finish release validation and tracker updates before claiming completion. No live STARK, complete integrated UI, or local Linux acceptance has been claimed.
+## Remaining delivery work
 
+1. Review/integrate M7 UI and further M6 findings; run integrated tests/build and Linux CI. Update README from in-progress M7 to actual acceptance only after integration.
+2. Automated visual acceptance remains pending. Prior Browser tool could not verify saved localhost permissions, and the current tool catalog no longer lists the Browser skill. Do not bypass its security failure with another automation path. User manually viewed old UI and supplied M7 direction. No preview server currently running.
+3. Ordinary WSL is unavailable locally; detected distribution belongs to Podman. Do not alter unrelated container services. Linux CI covers real PTY behavior.
+4. STARK credentials are absent; no live-provider validation claimed. Synthetic HTTP tests cover actual runtime/provider/tools/SQLite with restart, but do not prove provider prompt compatibility.
+5. Coder delegation is serial. Parallel worktrees/coders remain a later extension after verified baseline, as stated in milestones. Finish release audit and tracker updates before completion.
 
-## Second pause checkpoint (user requested)
-
-- Latest combined checks before the final Git literal-path fix: 210 tests passed, ten skipped; typecheck and production build passed. After that one-line fix: typecheck and all 40 tool tests passed.
-- Main now includes managed context/budgets; editor lease persists until explicit release; latest activity pagination; transaction events publish after commit; historical approvals retain their original status; open SSE streams close during shutdown; cross-chat agent edits notify peers; /plan during a run enables mutation blocking.
-- M6 found a Git pathspec issue where a legal filename [.]env could expand to protected .env content. Main now uses --literal-pathspecs. The M6 reproduction must be integrated and verified when resuming. Test content is synthetic; no credential exposure was observed outside that reproduction.
-- M6 branch codex/milestone-6 is checkpointing tests/release.test.ts and docs/reports/milestone-6.md. Retrieve its final report and SHA before resuming review.
-- User explicitly requested M7: darker, quieter Codex-style UI, fewer boxed buttons, integrated controls; import via folder explorer; new projects automatically under a default workspace; Settings to change workspace drive/folder. M7 is recorded in milestones but its chat has NOT been created. Shared DirectoryListing/WorkspaceSettings types and planned routes are drafted only; backend routes and optional create path are NOT implemented.
-- Proposed M7 ownership: new Milestone 7 chat handles client UI and UI tests on isolated codex/milestone-7 branch; coordinator owns backend directory browser, saved workspace settings, default project allocation and API tests. Keep shared contracts compatible. Browser explorer shows backend filesystem (Linux/WSL when deployed); do not promise a native Windows chooser from a WSL backend.
-- Browser tool permission verification still needs resolution for automated visual acceptance. User manually viewed localhost preview and supplied the M7 feedback. Preview was stopped for this requested pause. Heartbeat remains PAUSED; do not resume work until requested.
-- M6 is now idle with a clean local checkpoint b5acfd4d65a53131e5e8a6b1ff1fdedc8c168311 on codex/milestone-6 (not pushed). Five targeted tests: three expected failures against its older a185cc0 base, two passes. No remaining processes. Integrate and run these against fixed main after resume.
+Keep the full requested product scope and recent UI feedback. Do not mistake a passing synthetic test or screenshot for live-provider acceptance.

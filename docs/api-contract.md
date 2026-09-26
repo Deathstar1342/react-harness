@@ -8,9 +8,9 @@ Types in shared/types.ts are the integration boundary. All JSON API failures ret
 - GET /api/models -> { models: string[] }
 - GET /api/projects -> Project[]
 - POST /api/projects { name, path?, mode: 'create' | 'import' } -> Project; create without path allocates a new unique folder inside the configured workspace. Import requires a selected absolute directory path.
-- Planned M7: GET /api/workspace -> WorkspaceSettings { workspaceRoot, defaultWorkspaceRoot }; default is ~/React Harness Projects or HARNESS_WORKSPACE_ROOT.
-- Planned M7: PATCH /api/workspace { workspaceRoot } -> WorkspaceSettings; persist the absolute default folder for future projects without moving existing projects.
-- Planned M7: GET /api/directories?path= -> DirectoryListing { path, parentPath, entries:[{name,path}], roots:[{name,path}], truncated }; browse backend directories for import or workspace selection. Default path is the backend user's home. Entries are folders, sorted by name, excluding hidden folders; root shortcuts include Home, Workspace, and available drive/filesystem roots.
+- GET /api/workspace -> WorkspaceSettings { workspaceRoot, defaultWorkspaceRoot }; default is ~/React Harness Projects or HARNESS_WORKSPACE_ROOT.
+- PATCH /api/workspace { workspaceRoot } -> WorkspaceSettings; persist the absolute default folder for future projects without moving existing projects.
+- GET /api/directories?path= -> DirectoryListing { path, parentPath, entries:[{name,path}], roots:[{name,path}], truncated }; browse backend directories for import or workspace selection. Default path is the backend user's home. Entries are folders, sorted by name, excluding hidden folders; root shortcuts include Home, Workspace, and available drive/filesystem roots.
 - GET /api/projects/:id/chats -> Chat[]
 - POST /api/projects/:id/chats { title?, approvalMode? } -> Chat
 - GET /api/chats/:id -> ChatDetail
@@ -49,7 +49,7 @@ Tool action argument contracts:
 
 set_plan/delegate/review/ask_user/review_result are runtime actions, not workspace tool actions. Restrict delegate to architect, avoid recursive delegation. Critic only gets read tools and concludes with review_result; runtime enforces it. Bound repair cycles.
 
-SSE payloads: delta {role, text} is provisional JSON text; tool_output {agentId, output}; steering {content, delivered}; file_changed {path, source:'agent'|'editor'|'external'}. Message/status/plan/approval/tests carry their shared type directly. tool carries {agentId,action,result?}; error carries {message}. Editor owner is a stable per-tab random UUID.
+SSE payloads: delta {role, text} signals provisional model activity; text may be empty and is never an executable or completed action; tool_output {agentId, output}; steering {content, delivered}; file_changed {path, source:'agent'|'editor'|'external'}. Message/status/plan/approval/tests carry their shared type directly. tool carries {agentId,action,result?}; error carries {message}. Editor owner is a stable per-tab random UUID.
 
 ## Workspace module (M3)
 
@@ -58,3 +58,4 @@ server/tools/index.ts exports WorkspaceTools implementing ToolService; construct
 ## UI module (M4)
 
 Own client/** and index.html. Use actual HTTP API, no static fake chat data. Refetch durable state after SSE events; stream deltas separately so incomplete JSON is never shown as successful execution. Chat is central. Monaco editor/diff and test trees are collapsible. Make desktop and narrow layouts usable. Use lucide-react icons. API credentials stay backend-only. Report dependency additions to coordinator rather than altering root package files concurrently.
+

@@ -44,7 +44,7 @@ async function fixture(responses: AgentResponse[], mode: ApprovalMode = 'review'
   cleanup.push(async () => { await app.app.close(); store.close(); });
   const project = store.createProject('Synthetic release fixture', projectRoot);
   const chat = store.createChat(project.id, 'Release fixture', mode);
-  const post = (url: string, payload: unknown) => app.app.inject({ method: 'POST', url, payload });
+  const post = (url: string, payload: Record<string,unknown>) => app.app.inject({ method: 'POST', url, payload });
   const submit = async (content: string) => {
     expect((await post(`/api/chats/${chat.id}/messages`, { content })).statusCode).toBe(202);
     await app.runtime.wait(chat.id);

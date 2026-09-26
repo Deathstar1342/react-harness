@@ -4,6 +4,8 @@
 
 Build a local browser application with a Node.js/TypeScript backend running in WSL. Chat with the architect is the primary interaction. Files, diffs, plans, terminal output, and test results are optional supporting panels.
 
+The visual direction is a quiet, Codex-inspired dark workspace: charcoal surfaces, flat project/chat navigation, subtle separators, and contextual controls. Avoid a dashboard of boxed buttons or prominent implementation/status cards. Keep the conversation and composer central, with secondary controls in unobtrusive menus and collapsible panels. Preserve visible approval decisions, keyboard focus, and readable contrast.
+
 This is a fresh implementation. There is no dependency on the previous Streamlit/FastAPI application or its tools.
 
 ## Provider contract
@@ -38,6 +40,10 @@ The runtime owns task status and permissions. Model prose cannot authorize an ac
 
 Provide file read, list, search, patch/write, local Git operations, shell execution, and Python execution through the local tool service. Create a Git repository for a new project. Preserve existing repositories and uncommitted work when importing projects.
 
+Project creation asks for a name and allocates a unique folder inside the configured default workspace. Default to `~/React Harness Projects`, with an initial `HARNESS_WORKSPACE_ROOT` environment override. A Settings panel lets the user choose another drive/folder; persist that preference in SQLite. A preference change affects future projects and never silently moves existing ones. Avoid overwriting a same-named project; allocate a suffixed directory atomically.
+
+Import uses a folder explorer with breadcrumbs, parent navigation, drive/root shortcuts, folder rows, and explicit folder selection. This is a view of the backend filesystem, not a browser file upload. In WSL, show Linux paths and available mounted drives. The browser only receives directory metadata; model file tools retain their separate project-boundary checks. Support existing absolute-path API clients, but do not require ordinary users to type paths.
+
 Use independent persistent PTY sessions for active coders so `cd`, activated environments, and shell state persist between their commands. Serialize access within a shell; track command boundaries, exit status, cancellation, and background processes. Browser reconnects attach to existing backend sessions.
 
 Backend restart recovery may recreate shells and working directories, but must not claim to restore arbitrary shell memory or dead processes.
@@ -57,6 +63,8 @@ Approval modes:
 | Review every change | Permit reads; request approval for writes and potentially modifying commands |
 
 File approvals display the current-to-proposed diff and are bound to the exact proposal and file version. Changes invalidate stale approvals.
+
+An editor save keeps its dirty-buffer lease until the editor explicitly reports that its current buffer is clean, covering keystrokes arriving during an in-flight save. Agent edits notify every chat sharing the project and invalidate affected pending proposals; historical execution approvals remain audit records. Publish durable events after database commit, return recent activity for long chats, and support event replay on reconnect.
 
 Shell execution must obey the same policy. Arbitrary commands cannot have a guaranteed predicted file diff. When a pre-application diff is required, execute in an isolated workspace and review the resulting changes before integration. A working directory alone does not enforce filesystem confinement.
 
@@ -82,6 +90,8 @@ Coordinate all roles through a shared scheduler. Initial configurable account bu
 
 Left sidebar: projects and chats. Center: architect conversation with collapsible activity and approval cards. Optional right panel: files, editor, and diffs. Collapsible plan panel: phases, steps, owners, blockers, and verification. Bottom drawer: shells and tests.
 
+Milestone 7 refines this layout into a seamless dark theme and adds the folder explorer/default-workspace settings. Flat selectable rows and small icon or overflow actions replace repeated button outlines. New-project creation defaults to the workspace, while import and workspace Settings reuse the same folder explorer. Maintain manual-edit guards when changing project/chat or closing supporting panels.
+
 Use structured test reports, beginning with pytest JUnit XML, rather than model interpretation of console text. Display runner, individual runs, test cases, status, traceback, and captured output. Distinguish skipped cases, failures, collection errors, cancellation, and runner crashes.
 
 ## Delivery sequence
@@ -94,5 +104,7 @@ Use structured test reports, beginning with pytest JUnit XML, rather than model 
 6. **Parallelism and delivery:** isolated coder workspaces, integration checks, concurrency tuning, startup documentation, and recovery tests.
 
 The first end-to-end milestone is a persistent architect conversation that delegates to one coder, proposes an approved file change, applies it, returns the result, and survives reopening.
+
+Implemented baseline: one delegated coder at a time, persistent conversations and action records, approval/version checks, Linux PTYs, structured JUnit reports, critic checkpoints, model-written context summaries, and durable request budgets. Parallel coder workspaces remain a later extension; do not present serial delegation as parallel execution. The M7 redesign is in progress. Live STARK acceptance, integrated visual verification, and final Linux release checks remain explicit gates in `docs/STATUS.md`.
 
 Follow-on features include selective undo that preserves unrelated manual changes, project instruction files, configurable execution budgets, and an agent activity timeline.
