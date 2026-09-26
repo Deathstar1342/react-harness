@@ -5,6 +5,7 @@ import {
   Circle,
   CircleAlert,
   LoaderCircle,
+  Minus,
   ShieldCheck,
   Terminal,
   TestTube2,
@@ -188,13 +189,21 @@ export function ApprovalCard({
   );
 }
 
+function TestStatusIcon({ status }: { status: string }) {
+  const Icon = status === "passed" ? Check
+    : status === "failed" ? X
+      : status === "error" ? CircleAlert
+        : status === "running" ? LoaderCircle : Minus;
+  return <Icon size={15} className={`test-status-icon ${status}`} aria-hidden="true" />;
+}
+
 export function TestRun({ report }: { report: TestReport }) {
   const counts = { passed: 0, failed: 0, skipped: 0, error: 0 };
   report.tests.forEach((test) => counts[test.status]++);
   return (
     <details className="test-run" open={report.status !== "passed"}>
       <summary>
-        <span className={`status-dot ${report.status}`} />
+        <TestStatusIcon status={report.status} />
         <strong>{report.runner}</strong>
         <span className={`test-status ${report.status}`}>{report.status}</span>
         <span className="muted">{formatTime(report.createdAt)}</span>
@@ -212,7 +221,7 @@ export function TestRun({ report }: { report: TestReport }) {
             key={`${test.classname}-${test.name}-${index}`}
           >
             <summary>
-              <span className={`status-dot ${test.status}`} />
+              <TestStatusIcon status={test.status} />
               <span>
                 {test.classname && (
                   <span className="muted">{test.classname} / </span>
