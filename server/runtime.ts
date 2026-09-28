@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { Action, AgentResponse, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService } from '../shared/types.js';
 import type { Config } from './config.js';
 import { Store } from './store.js';
+import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
 
-interface PendingAction { id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult }
+interface PendingAction { id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null }
 export interface Frame { id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'phase'; proposedPlan?: import('../shared/types.js').Plan }
-export interface RunState { frames: Frame[]; steering: string[]; planOnly: boolean; steps: number; generation: number }
+export interface RunState { frames: Frame[]; steering: string[]; planOnly: boolean; steps: number; generation: number; instructionsHash?: string | null }
 export interface RuntimeHooks {
   parse(text: string): AgentResponse;
   instructions(role: AgentRole): string;
@@ -95,6 +96,18 @@ export class Runtime {
     const state = this.load(approval.chatId);
     const pending = state?.frames.at(-1)?.pending;
     if (pending?.approvalId !== approval.id || state?.steering.length) throw Object.assign(new Error('This proposal has been superseded'),{statusCode:409});
+    try { await this.refreshInstructions(approval.chatId,state!); }
+    catch (error) {
+      this.store.updateChat(approval.chatId,{status:'error'});
+      this.store.message(approval.chatId,'system',(error as Error).message);
+      this.store.event(approval.chatId,'error',{message:(error as Error).message});
+      throw Object.assign(error as Error,{statusCode:409});
+    }
+    // Recheck after the read: a concurrent decision, pause, or steering can win.
+    if (this.store.getApproval(approvalId).status !== 'pending' || state!.frames.at(-1)?.pending !== pending || state!.steering.length) {
+      if (this.store.chat(approval.chatId).status === 'awaiting_approval') this.launch(approval.chatId);
+      throw Object.assign(new Error('This proposal has been superseded; refresh project guidance before reviewing a new proposal'),{statusCode:409});
+    }
     this.store.approval({...approval,status:decision === 'approve' ? 'approved' : 'denied'});
     this.launch(approval.chatId);
   }
@@ -113,12 +126,48 @@ export class Runtime {
     for (const content of guidance) this.store.event(chatId,'steering',{content,delivered:true});
     this.save(chatId,state);
   }
+  private discardPrepared(chatId: string, state: RunState) {
+    // Invalidate before removing the durable prepared references, so approved
+    // but unexecuted proposals become stale while completed history stays intact.
+    this.store.invalidateApprovals(chatId);
+    for (const frame of state.frames) {
+      if (frame.pending?.stage === 'prepared') frame.pending = undefined;
+    }
+  }
+  private async refreshInstructions(chatId: string, state: RunState, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    let instructions;
+    try { instructions = await readProjectInstructions(this.tools,this.store.project(this.store.chat(chatId).projectId).path); }
+    catch (error) {
+      this.discardPrepared(chatId,state);
+      delete state.instructionsHash;
+      state.generation++;
+      this.save(chatId,state);
+      throw error;
+    }
+    signal?.throwIfAborted();
+    if (state.instructionsHash !== instructions.hash || state.frames.some(frame=>frame.pending?.stage === 'prepared' && frame.pending.instructionsHash !== instructions.hash)) {
+      const previouslyLoaded = state.instructionsHash !== undefined;
+      this.discardPrepared(chatId,state);
+      state.instructionsHash = instructions.hash;
+      state.generation++;
+      if (previouslyLoaded) this.store.message(chatId,'system','Root AGENTS.md changed. Prepared proposals were discarded; the next request uses fresh project guidance.');
+      this.save(chatId,state);
+    }
+    return instructions;
+  }
   private async loop(chatId: string, signal: AbortSignal) {
     const state = this.load(chatId); if (!state?.frames.length) return;
     this.store.updateChat(chatId,{status:'running'});
     while (state.frames.length && !signal.aborted) {
       this.deliverSteering(chatId,state);
       const frame = state.frames.at(-1)!;
+      // Record interrupted/completed outcomes even if guidance is now unreadable.
+      if (frame.pending && frame.pending.stage !== 'prepared') {
+        if (!await this.executePending(chatId,state,frame,signal)) return;
+        continue;
+      }
+      const instructions = await this.refreshInstructions(chatId,state,signal);
       if (frame.pending) {
         if (!await this.executePending(chatId,state,frame,signal)) return;
         continue;
@@ -126,12 +175,15 @@ export class Runtime {
       if (++state.steps > 100) { this.store.updateChat(chatId,{status:'paused'}); this.store.message(chatId,'system','The task reached its 100-step safety budget. Review progress and resume to continue.'); this.save(chatId,state); return; }
       const generation = state.generation;
       const authoritative = `Project: ${this.store.project(this.store.chat(chatId).projectId).path}\nPlan: ${JSON.stringify(this.store.plan(chatId))}\nMode: ${state.planOnly ? 'PLAN ONLY: do not change files, run commands, or delegate implementation.' : 'Implementation is allowed subject to the runtime approval policy.'}\nYou are the ${frame.role}. ${frame.role === 'architect' ? 'You own the user conversation. Delegate code changes to a coder. Inspect context as needed. Report critic findings honestly.' : frame.role === 'critic' ? 'Review independently against the original request, task acceptance criteria, actual files, git diff, and tool/test evidence. Only read tools are permitted. Conclude with review_result. Do not infer tests passed from model claims.' : 'Complete the assigned task, read before editing, preserve manual changes, verify results, and provide evidence. Never delegate recursively.'}`;
-      let messages: ModelMessage[] = [{role:'system',content:this.hooks.instructions(frame.role)}, {role:'user',content:`Authoritative task state:\n${authoritative}`}, ...frame.messages];
+      let messages: ModelMessage[] = [{role:'system',content:`${this.hooks.instructions(frame.role)}\n\n${projectInstructionsPolicy}`}, {role:'user',content:`Authoritative task state:\n${authoritative}`}, instructions.message, ...frame.messages];
       if (this.hooks.prepareMessages) messages = await this.hooks.prepareMessages(chatId,frame,messages,signal);
       this.save(chatId,state);
       let response: AgentResponse | undefined;
       for (let attempt = 0; attempt < 2; attempt++) {
         signal.throwIfAborted();
+        // Compaction/retry work may have awaited another provider request.
+        await this.refreshInstructions(chatId,state,signal);
+        if (state.generation !== generation) break;
         let announced = false;
         const input = { model:this.config.models[frame.role],messages,signal,maxTokens:this.config.maxOutputTokens,onDelta:(_text:string)=> {
           // Stream transport stays incremental, but provisional JSON is neither an
@@ -140,8 +192,9 @@ export class Runtime {
         } };
         const completion = this.hooks.complete ? await this.hooks.complete(frame.role,input) : await this.provider.complete(input);
         signal.throwIfAborted();
-        if (state.generation !== generation) break;
         if (completion.usage) this.store.event(chatId,'usage',{role:frame.role,...completion.usage});
+        await this.refreshInstructions(chatId,state,signal);
+        if (state.generation !== generation) break;
         try { response = this.hooks.parse(completion.text); break; }
         catch (error) {
           if (attempt) throw new Error(`Invalid model action after formatting retry: ${error instanceof Error ? error.message : 'invalid JSON'}`);
@@ -190,10 +243,11 @@ export class Runtime {
           }
           const inspection = await this.tools.inspect(this.toolContext(chatId,frame,signal),action);
           signal.throwIfAborted();
+          await this.refreshInstructions(chatId,state,signal);
           if (state.generation !== generation) { this.deliverSteering(chatId,state); continue; }
           const mode = this.store.chat(chatId).approvalMode;
           const needsApproval = inspection.effect !== 'read' && (mode === 'review' || mode === 'balanced' && (inspection.effect === 'execute' || inspection.risk === 'elevated'));
-          frame.pending = {id:randomUUID(),action,stage:'prepared'};
+          frame.pending = {id:randomUUID(),action,stage:'prepared',instructionsHash:instructions.hash};
           if (needsApproval) {
             const approval: Approval = {id:randomUUID(),chatId,agentId:frame.id,action,inspection,status:'pending',createdAt:new Date().toISOString()};
             frame.pending.approvalId = approval.id;
@@ -201,7 +255,7 @@ export class Runtime {
           }
         }
       } catch (error) {
-        if (signal.aborted) throw error;
+        if (signal.aborted || error instanceof ProjectInstructionsError) throw error;
         frame.messages.push({role:'user',content:`Tool result: ${JSON.stringify(safeResult(error))}`}); this.store.event(chatId,'tool',{agentId:frame.id,action,result:safeResult(error)});
         frame.failures = (frame.failures ?? 0) + 1;
         if (frame.role === 'coder' && frame.failures >= 3) this.checkpoint(state,frame,'Repeated failed actions; check scope drift and missing prerequisites before continuing.');
@@ -230,6 +284,11 @@ export class Runtime {
       signal.throwIfAborted();
       if (state.steering.length) { this.deliverSteering(chatId,state); return true; }
       if (pending.stage === 'prepared') {
+        // This is the final runtime boundary, after any approval reinspection.
+        // A running tool is not rolled back; the next boundary sees its effects.
+        await this.refreshInstructions(chatId,state,signal);
+        if (frame.pending !== pending) return true;
+        if (state.steering.length) { this.deliverSteering(chatId,state); return true; }
         pending.stage = 'executing'; this.save(chatId,state);
         this.store.event(chatId,'tool',{agentId:frame.id,action:pending.action});
         try { pending.result = await this.tools.execute(this.toolContext(chatId,frame,signal),pending.action); }

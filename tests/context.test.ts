@@ -150,7 +150,10 @@ describe('model-written continuation contexts', () => {
       : { text: JSON.stringify({ version: 1, type: 'final', message: 'No changes made.' }) });
     t.config.contextLimits.architect = 18000;
     const inspect = vi.fn(), execute = vi.fn();
-    const tools: ToolService = { inspect, execute, read: vi.fn(), list: vi.fn(), save: vi.fn(), setDirty: vi.fn(), dispose: async () => {} };
+    const tools: ToolService = { inspect, execute, read: vi.fn(async (_root, path) => {
+      if (path !== 'AGENTS.md') throw new Error('Unexpected file read');
+      return { path, content: '', hash: null };
+    }), list: vi.fn(), save: vi.fn(), setDirty: vi.fn(), dispose: async () => {} };
     const hooks = createManagedHooks(t.provider, t.store, t.config, { compactionThreshold: 0.5 });
     const runtime = new Runtime(t.store, t.provider, tools, t.config, hooks);
     await runtime.control(t.chat.id, 'resume'); await runtime.wait(t.chat.id); await runtime.close();

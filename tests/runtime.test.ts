@@ -19,7 +19,7 @@ function setup(responses: Array<AgentResponse | (()=>Promise<AgentResponse>)>,mo
   const tools: ToolService = {
     inspect:async(_ctx,request)=>({effect:request.name === 'read_file' ? 'read' : 'write',risk:'routine',description:'Change label',before:current,after:'new',diff:`${current}->new`}),
     execute:async(_ctx,request)=>{executed.push(request);return {ok:true,output:'changed'};},
-    read:async()=>({path:'label.txt',content:current,hash:current}),list:async()=>[],
+    read:async(_root,path)=>path === 'AGENTS.md' ? {path,content:'',hash:null} : {path:'label.txt',content:current,hash:current},list:async()=>[],
     save:async()=>({path:'label.txt',content:'',hash:''}),setDirty:()=>{},dispose:async()=>{},
   };
   const provider: ModelProvider = { models:async()=>['test'],complete:async()=> {

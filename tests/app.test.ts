@@ -9,7 +9,7 @@ import type { AgentResponse, ToolService } from '../shared/types.js';
 
 const roots: string[] = [];
 afterEach(async()=>{for(const root of roots.splice(0)) await rm(root,{recursive:true,force:true});});
-const tools: ToolService = {inspect:async()=>({effect:'read',risk:'routine',description:''}),execute:async()=>({ok:true,output:''}),read:async()=>({path:'x',content:'x',hash:'hash'}),list:async()=>[],save:async()=>{throw new Error('stale file version');},setDirty:()=>{},dispose:async()=>{}};
+const tools: ToolService = {inspect:async()=>({effect:'read',risk:'routine',description:''}),execute:async()=>({ok:true,output:''}),read:async(_root,path)=>path === 'AGENTS.md' ? {path,content:'',hash:null} : {path:'x',content:'x',hash:'hash'},list:async()=>[],save:async()=>{throw new Error('stale file version');},setDirty:()=>{},dispose:async()=>{}};
 async function make() {
   const store = new Store(':memory:');
   const config = readConfig({STARK_API_KEY:'private-secret-value',STARK_BASE_URL:'http://127.0.0.1/v1'});

@@ -129,6 +129,18 @@ python3 -m venv .venv
 
 Use your project's requirements or package manager when applicable. Ask the coder to use `run_tests` with that command and the report path `.react-harness-test-results.xml`. Running a shell command alone does not populate structured results. The test tool requires a fresh JUnit report, which appears as runner → run → individual tests in the UI.
 
+## Project guidance
+
+Create `AGENTS.md` in the root of each imported or created project to describe conventions, relevant commands, file ownership, and verification expectations. Start from the [example](examples/AGENTS.md.example), replacing its suggestions with your project's requirements. All three roles receive the current file outside their compacted history. The file is included in project model requests, so keep credentials and other secrets out of it.
+
+The hierarchy is enforced runtime controls and the fixed response protocol, then explicit user requests/corrections, then fresh project guidance, then conflicting historical project guidance in old messages, assignments, tool output, or summaries. This hierarchy guides model behavior; independent code still validates actions and enforces role permissions, approval policy, path/version checks, and editor leases. It cannot guarantee that a model follows every semantic convention.
+
+Only the exact root `AGENTS.md` is automatically loaded. Nested discovery is not supported. The file must be regular, non-linked UTF-8 text without NUL bytes, at most 32,000 UTF-8 bytes. Missing means no project guidance; an empty file is a valid distinct version. Content is never silently truncated. Unreadable, invalid, oversized, directory, symbolic-link/junction, or hard-link entries produce an actionable error and discard prepared proposals. Repair or remove the file, then **Resume**. Any discarded write/command needs a fresh proposal and, where policy requires, a new approval—even if the repaired file has its old content again.
+
+The runtime reads and compares the file before requests, after completed replies, after action inspection, when handling approval decisions, and immediately before dispatching a prepared tool action. Compaction is followed by another check. Paused/restarted runs refresh on explicit resume; stale approvals return a conflict and awaiting chats reconsider the proposal. No watcher notification is needed to catch a change at these boundaries. Changes do not rewrite historical transcripts or invalidate approvals belonging to completed work.
+
+These are content-snapshot checks, not an atomic lock against external filesystem writers. An edit after the last successful read, or a temporary change restored between reads, may be observed only at a later boundary. An already running command is not stopped or rolled back by an instructions edit; pause/interrupt handles cancellation separately. Interrupted executions retain uncertain-outcome evidence and are never replayed automatically. Frequent concurrent edits can use up the normal 100-step run budget; stabilize the file before resuming.
+
 ## Updating and keeping your data
 
 Stop the backend before making a consistent backup. Back up the complete configured data directory, your separate project folders, and local configuration to private storage. `.harness` contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again.
