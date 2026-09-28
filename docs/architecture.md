@@ -74,6 +74,8 @@ Use SQLite plus artifact storage for projects, chats, messages, plans, tasks, to
 
 Use model-written continuation summaries independently for architect and coder contexts. Preserve goals, decisions, constraints, outstanding work, and evidence references. Reattach authoritative task state, recent steering, pending approvals, and file versions separately from the model summary.
 
+Root `AGENTS.md` is fresh project guidance for every role, attached outside compacted history with a 32,000-byte UTF-8 bound. Runtime and prepared-action fingerprints distinguish absent, present, and legacy/unvalidated guidance. Recheck around provider/inspection awaits, approval decisions and tool dispatch; changed or invalid guidance invalidates prepared proposals while preserving recorded or uncertain executing outcomes. Explicit user requests take precedence over project conventions, and runtime permissions remain enforced independently. Nested discovery is not implemented. These checks do not atomically lock out external editors or guarantee model compliance.
+
 Compact before exhausting input capacity, with room for instructions, output, and tool results. Use conservative estimates when provider token counting is unavailable. Do not infer infinite memory from a large context window.
 
 ## Steering and scheduling

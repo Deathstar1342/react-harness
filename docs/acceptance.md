@@ -1,12 +1,13 @@
 # Acceptance audit
 
-This is an evidence map for the requested application, not a declaration of completed live acceptance. Main includes the integrated M0-M8 work. Synthetic provider tests cannot establish STARK prompt compatibility, and component markup tests cannot establish rendered UI or keyboard behavior.
+This is an evidence map for the requested application, not a declaration of completed live acceptance. Main includes the integrated M0-M9 work. Synthetic provider tests cannot establish STARK prompt compatibility, and component markup tests cannot establish rendered UI or keyboard behavior.
 
 | Requirement | Current implementation and evidence | Remaining gate |
 | --- | --- | --- |
 | Public GitHub repository | Deathstar1342/react-harness; origin/main SHA verified after each push | None for hosting |
 | Custom STARK URL/key, Chat Completions and model discovery only | server/config.ts, provider.ts; provider tests assert request shape, secret exclusion, SSE framing, refusals, truncation, cancellation and bounded retry behavior | Actual provider credentials and live run |
 | Configurable JSON instructions | Optional local role prompt files loaded at startup; tests/prompts.test.ts covers role selection, hidden settings, invalid data/size and credential exclusion; strict parser remains enforced | Tune against actual STARK behavior if necessary |
+| Project instructions and freshness | M9 root AGENTS.md snapshots outside compaction, SHA-256 fingerprints around asynchronous boundaries, stale proposal invalidation, fail-closed invalid guidance, preserved uncertain execution; 30 new portable cases plus Linux symlink test | Live model compliance; no atomic lock against external edits |
 | Architect conversation and delegated coder/critic | Runtime role enforcement, assignment scopes, critic completion/phase/failure checkpoints, bounded repairs; runtime/integration/release tests | Live agent quality and task acceptance |
 | Create/select/import projects | Local Git initialization; default unique project folders; import preserves files; directory explorer and workspace Settings; workspace/API/UI contract tests | Rendered folder selection and keyboard walkthrough |
 | Persistent chats and context | SQLite store, messages/events/run frames, approval restart, model summaries and archives; store/context/integration/release tests | Manual close/reopen UI walkthrough |
@@ -25,7 +26,8 @@ This is an evidence map for the requested application, not a declaration of comp
 
 ## Validation
 
-- Local Node 24.16 on Windows: independent coordinator typecheck, full suite **284 passed / 10 skipped**, production build and diff-check passed after M8 integration at `6e5605e2872e73a1fbf7a3c3bb754b1e20f755d7`.
+- Local Node 24.16 on Windows: independent coordinator typecheck, full suite **314 passed / 11 skipped**, production build and diff-check passed after M9 integration at `639d981b118618ccfbffd807faf35fcf5776bcce`.
+- Exact M9 integration Linux CI passed: https://github.com/Deathstar1342/react-harness/actions/runs/36376683021 . M10 is next; live-provider/browser acceptance remains separate.
 - Exact M8 integration Linux CI passed: https://github.com/Deathstar1342/react-harness/actions/runs/36375663077 . Scoped M8 implementation issue/milestone closed with live/browser limitations explicit; M9 is next.
 - Exact earlier integrated Linux candidate 02342fe1ce87552c10486305eaa56bed0cc4e7b9 passed [CI run 36225306950](https://github.com/Deathstar1342/react-harness/actions/runs/36225306950), including real PTY tests. The final prompt-file candidate 11b1b2caeb2b60b5bb0438d63c855856cbe9d8b8 also passed [CI run 36225704259](https://github.com/Deathstar1342/react-harness/actions/runs/36225704259).
 - Ten independent M6 regressions pass. Two code reviews led to fixes for Git pathspec handling, active /plan enforcement, cross-chat notifications, historical context growth and rapid external saves.
