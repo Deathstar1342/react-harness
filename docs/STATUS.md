@@ -3,23 +3,27 @@
 - Coordinator: 01a0dc0a-8866-7182-acd2-da997779962d
 - Repository: https://github.com/Deathstar1342/react-harness
 - Integration branch: main. User authorization for public commits/pushes persists.
-- Active scope: user approved sequential M8–M11 with dedicated milestone chats; coordinator owns decisions, review, fixes requested from children, integration, validation, and pushes.
+- Approved M8–M11 implementation sequence delivered through dedicated milestone chats and independent coordinator review/integration. All four scoped issues/milestones are closed with acceptance limits recorded.
 - Live-provider acceptance remains deferred until work access. Do not repeatedly request credentials or treat that known gate as blocking independently testable features.
-- Existing heartbeat `react-harness-milestone-check-in` is ACTIVE, every 15 minutes, targeting this coordinator chat. Pause when user assistance is truly needed or the agreed sequence is delivered. Routine child questions are coordinator-owned decisions.
+- Existing heartbeat `react-harness-milestone-check-in` is PAUSED after M8–M11 delivery. No successor milestones or credential polling are scheduled.
 
 ## Milestones
 
-Current dispatch: M11 on-demand terminal has been dispatched. M8 settings/connection/debug, M9 project instructions, and M10 changes/undo are reviewed, integrated, and passed exact Linux CI. Detailed scope and ownership are in `docs/milestones.md`. Coordinator may resolve routine product/technical decisions without asking the user. Partial coordinator work was saved unvalidated on `codex/feature-preparation-20260927` at `8a87bb2` and removed from main; see `docs/reports/feature-preparation-2026-09-27.md`. Historical blocked audit below is superseded for this authorized feature sequence.
+Current dispatch: none. M8 settings/connection/debug, M9 project instructions, M10 changes/undo, and M11 on-demand terminal are reviewed, integrated, and passed exact Linux CI. Child chats are idle and their branches/worktrees preserved. Detailed scope and ownership are in `docs/milestones.md`. Coordinator may resolve routine product/technical decisions without asking the user. Partial coordinator work was saved unvalidated on `codex/feature-preparation-20260927` at `8a87bb2` and removed from main; see `docs/reports/feature-preparation-2026-09-27.md`. Historical blocked audit below is superseded for this authorized feature sequence.
 
-### Active follow-up sequence
+### Delivered follow-up sequence
 
 | Milestone | Chat / branch | Tracker | State |
 | --- | --- | --- | --- |
 | M8 | `01a0e617-9cba-7260-a64e-409403164a7b` / `codex/milestone-8` | Issue #9, GitHub milestone 9 | Reviewed delivery `bf62963`, integrated/pushed `6e5605e`; independent local checks and Linux CI passed |
 | M9 | `01a0e62a-9ad7-7ac2-a704-46144431309a` / `codex/milestone-9` | Issue #10, GitHub milestone 10 | Reviewed `7137d73`, integrated/pushed `639d981`; independent local checks and exact Linux CI passed |
 | M10 | `01a0e638-dc36-7f63-91d6-bb93a25958b0` / `codex/milestone-10` | Issue #11, GitHub milestone 11 | Reviewed `864f625`, integrated/pushed `466524d`; independent local checks and exact Linux CI passed |
-| M11 | `01a0e64b-5b04-78c2-af86-720ab6240cbc` / `codex/milestone-11` | Issue #12, GitHub milestone 12 | Active from `c503eae`; managed worktree `D:/CodexData/.codex/worktrees/b5ce/REACT harness` |
+| M11 | `01a0e64b-5b04-78c2-af86-720ab6240cbc` / `codex/milestone-11` | Issue #12, GitHub milestone 12 | Reviewed `0fcdfc9`, integrated/pushed `d8d8371`; independent local checks and exact Linux CI passed |
 
+
+M11 final review: child `0fcdfc9782ff4d85b15d786058d1318f4f73c39a`, integrated `d8d8371a658bbd643e613027bfe753102a3c0e5b`. Review resolved duplicate unassociated new-command entries and preservation of partial output on uncertain tool failures. Independent main typecheck, 359 passed / 13 Windows platform skips, build and diff-check passed. Exact Linux CI succeeded: https://github.com/Deathstar1342/react-harness/actions/runs/36379367004 . Includes new real-PTY evidence test and existing filesystem/PTY coverage. Issue/milestone 12 closed; existing heartbeat confirmed PAUSED. M8–M11 is delivered. Actual browser interaction and live STARK remain unverified; these gates do not imply another scheduled implementation milestone. M11 worktree remains `D:/CodexData/.codex/worktrees/b5ce/REACT harness`.
+
+Historical coordination notes below describe earlier dispatches and are superseded by this delivery record.
 M8 worktree: `D:/CodexData/.codex/worktrees/1ac4/REACT harness`. Ready thread ID above is confirmed by a compact wait snapshot (active); pending creation ID was `client-new-thread:24b82153-b682-45f6-8909-1e5646bf381c`. Last wait cursor: `e4c85478-d782-4671-b4d0-aa96ffd38185:1`.
 
 M9 ready thread ID is confirmed by its coordinator message and compact wait snapshot. Do not duplicate it. M8 issue/milestone 9 is closed with evidence and its chat instructed to remain idle. Heartbeat ACTIVE was reverified at M9 dispatch. M9 proposes internal run/pending-action guidance fingerprints and watcher-independent freshness checks around request/inspection/execution boundaries; approved in scope. Coordinator emphasized preserving executing/done uncertain-recovery records, invalid guidance failing closed, missing/present transitions, and honest external-filesystem race limitations.

@@ -19,6 +19,8 @@ Milestones may develop concurrently after interfaces are established. Integratio
 
 ## Approved follow-up workflow (2026-09-27)
 
+Delivery record (2026-09-28): M8–M11 are reviewed, integrated and passed exact Linux CI. Their scoped GitHub issues/milestones are closed and the existing heartbeat is paused. No successor milestone is scheduled. See STATUS and acceptance for commit/run evidence and the still-open browser/live-STARK acceptance gates. The workflow below records the approved process used for this sequence.
+
 Deliver M8, M9, M10, and M11 **sequentially**, each in a dedicated chat named exactly `Milestone x` and an isolated `codex/` branch/worktree from reviewed main. The coordinator reviews code and evidence, requests fixes, runs integration checks, and pushes main before dispatching the next milestone. The user authorizes the coordinator to decide routine design, interface, and implementation choices; escalate only decisions that truly need the user's information or approval. Child chats must send routine questions to the coordinator rather than stall awaiting the user.
 
 The existing 15-minute heartbeat monitors the active chat, helps with stalls, reviews deliveries, and advances the sequence. Stay quiet when unchanged. Pause immediately when progress truly requires user assistance; pause once M8–M11 are delivered. Live STARK access at work is an explicitly deferred acceptance gate, not a reason to stall independent implementation or repeatedly request credentials.
