@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport } from '../shared/types.js';
+import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
 export class Store {
@@ -23,6 +23,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS test_reports (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS file_changes (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, snapshots TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS file_changes_project ON file_changes(project_id);
     `);
     this.changes.setMaxListeners(100);
   }
@@ -40,6 +42,22 @@ export class Store {
   getState<T>(key: string, fallback: T): T {
     const row = this.db.prepare('SELECT data FROM state WHERE key=?').get(key);
     return row ? JSON.parse(String(row.data)) as T : fallback;
+  }
+  recordFileChange(change: FileChange) {
+    if (this.chat(change.chatId).projectId !== change.projectId) throw new Error('Change project ownership mismatch');
+    const {before,after,...summary} = change;
+    this.db.prepare('INSERT INTO file_changes VALUES (?,?,?,?,?)').run(change.id,change.projectId,change.status,JSON.stringify(summary),JSON.stringify({before,after}));
+  }
+  fileChange(projectId: string, id: string): FileChange {
+    const row = this.db.prepare('SELECT summary,snapshots,status FROM file_changes WHERE id=? AND project_id=?').get(id,projectId);
+    if (!row) throw Object.assign(new Error('Recorded change not found'),{statusCode:404});
+    return {...JSON.parse(String(row.summary)),...JSON.parse(String(row.snapshots)),status:String(row.status)};
+  }
+  fileChanges(projectId: string, limit = 101): FileChangeSummary[] {
+    return this.db.prepare('SELECT summary,status FROM file_changes WHERE project_id=? ORDER BY rowid DESC LIMIT ?').all(projectId,limit).map(row=>({...JSON.parse(String(row.summary)),status:String(row.status)}));
+  }
+  transitionFileChange(id: string, from: FileChangeStatus, to: FileChangeStatus) {
+    if (this.db.prepare('UPDATE file_changes SET status=? WHERE id=? AND status=?').run(to,id,from).changes !== 1) throw Object.assign(new Error('Recorded change state changed; refresh before continuing'),{statusCode:409});
   }
   setState(key: string, value: unknown) { this.db.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run(key, JSON.stringify(value)); }
   projects(): Project[] { return this.db.prepare('SELECT data FROM projects ORDER BY rowid DESC').all().map(row => JSON.parse(String(row.data))); }
@@ -127,6 +145,7 @@ export class Store {
     return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), approvals: this.approvals(chatId), events: this.recentEvents(chatId), tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
   }
   recover() {
+    this.db.prepare("UPDATE file_changes SET status='unknown' WHERE status IN ('recording','undoing')").run();
     for (const chat of this.chats()) if (chat.status === 'running') {
       this.updateChat(chat.id, { status: 'interrupted' });
       this.message(chat.id,'system','The backend restarted during this task. Resume will reconcile recorded actions; uncertain commands will not be rerun automatically.');

@@ -143,6 +143,7 @@ These are content-snapshot checks, not an atomic lock against external filesyste
 
 ## Updating and keeping your data
 
+
 Stop the backend before making a consistent backup. Back up the complete configured data directory, your separate project folders, and local configuration to private storage. `.harness` contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again.
 
 From the repository root, update with:
@@ -173,3 +174,17 @@ Preserve your `.env` and data directory. Compare `.env.example` for new options 
 | Shell directory or variables disappeared after restart | Expected: chats and tool evidence persist, but live shell sessions do not. |
 
 For contributor checks, run `npm run typecheck`, `npm test`, and `npm run build`. Linux CI includes real PTY tests; Windows skips platform-specific cases. See [architecture](architecture.md), [API contract](api-contract.md), and [current status](STATUS.md) for implementation details and remaining acceptance work.
+
+## Changes and undo
+
+Open **Changes** beside Files when you want to inspect work. The panel starts closed and leaves the editor and its unsaved buffer mounted. **Current project Git changes** includes staged, unstaged, renamed, deleted, and untracked files, including manual or pre-existing changes. It does not attribute every dirty file to an agent. Select a file for a readable diff; rename review includes the original and destination paths. Protected credential paths are excluded. Git-unavailable projects can still show recorded-write history.
+
+**Recorded agent writes** lists individual `write_file` attempts with their status and originating chat. Select one to inspect the recorded forward diff and **Undo preview**, then explicitly click **Undo this write**. The backend restores only the stored previous content; a newly created file is removed without removing its directory or siblings. The Git index is never changed, so a staged version can remain different from the restored working file. No Git reset or whole-task rollback is performed. Review arbitrary shell effects through Git; they have no automatic undo. Actions completed before snapshot recording was introduced have no retroactive snapshots.
+
+Pause all active chats in the project and wait for their actions to stop before undoing. The backend checks actual running work, including actions still stopping after Pause, and blocks starts/resumes/approvals during an undo. A rejected active-work check does not interrupt a chat for you. Close Changes to use the chat's Pause control, then reopen the preview. Other chats receive file-change notifications and their unexecuted proposals are invalidated; paused chats stay paused.
+
+Undo compares the current content hash with the recorded result and checks all dirty editor leases. A later saved manual edit blocks undo. Save or deliberately discard unsaved edits before trying again; a dirty-buffer rejection does not consume the undo. Previews expire after five minutes or a backend restart; Refresh and select the record again. Only confirmed writes are eligible. `recording` is an execution intent, `rejected` means the file mutation did not start, and `unknown` means no reliable outcome was recorded. `undoing` is a durable claim; interrupted writes/undos recover as `unknown` and cannot be retried automatically. Inspect actual files and the recorded before/after diff to decide what remains.
+
+The panel displays the latest 100 history records and explicitly indicates omitted older entries. Git output is bounded to 1 MB; individual review diffs are limited to 200 KB with a one-second computation budget for snapshot diffs. Oversized review returns an explicit message and no undo button. Stored snapshots retain full file content within the existing 2 MB file-tool limit and are private data in the backend SQLite database. Keep backups private; history is not currently pruned automatically.
+
+These content checks and in-process file locks do not atomically exclude external programs. A change after the last filesystem check, or a change reverted to identical bytes between checks, may escape detection. Use one backend instance per data directory/project and avoid external writers during undo. File permissions are retained by the existing save primitive, but undo is content restoration, not restoration of original filesystem metadata, directory creation, or arbitrary shell state.

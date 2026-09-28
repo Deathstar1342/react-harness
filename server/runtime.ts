@@ -3,6 +3,7 @@ import type { Action, AgentResponse, AgentRole, Approval, CompletionResult, Mode
 import type { Config } from './config.js';
 import { Store } from './store.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
+import { hash } from './tools/paths.js';
 
 interface PendingAction { id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null }
 export interface Frame { id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'phase'; proposedPlan?: import('../shared/types.js').Plan }
@@ -20,6 +21,18 @@ const safeResult = (error: unknown): ToolResult => ({ ok: false, output: error i
 export class Runtime {
   private active = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private runs = new Map<string, RunState>();
+  private projectEdits = new Set<string>();
+  private assertAvailable(chatId: string) {
+    if (this.projectEdits.has(this.store.chat(chatId).projectId)) throw Object.assign(new Error('An undo is in progress; wait before starting project work'),{statusCode:409});
+  }
+  async exclusiveProjectEdit<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+    this.store.project(projectId);
+    if (this.projectEdits.has(projectId) || this.store.chats(projectId).some(chat=>this.active.has(chat.id) || ['running','awaiting_approval'].includes(chat.status))) {
+      throw Object.assign(new Error('Pause all active project chats and wait for their actions to stop before undoing'),{statusCode:409});
+    }
+    this.projectEdits.add(projectId);
+    try { return await operation(); } finally { this.projectEdits.delete(projectId); }
+  }
   constructor(readonly store: Store, readonly provider: ModelProvider, readonly tools: ToolService, readonly config: Config, readonly hooks: RuntimeHooks) {}
   private load(chatId: string): RunState | null {
     const cached = this.runs.get(chatId); if (cached) return cached;
@@ -30,6 +43,7 @@ export class Runtime {
   private save(chatId: string, state: RunState) { this.runs.set(chatId,state); this.store.setState(`run:${chatId}`,state); }
   private frame(role: AgentRole, messages: ModelMessage[], objective?: string): Frame { return { id: randomUUID(), role, messages, objective, repairs: 0 }; }
   async submit(chatId: string, content: string) {
+    this.assertAvailable(chatId);
     const chat = this.store.chat(chatId);
     const text = content.trim(); if (!text) throw new Error('Message must not be empty');
     if (text.length > 100000) throw new Error('Message is too large');
@@ -51,6 +65,7 @@ export class Runtime {
     this.save(chatId,state); this.launch(chatId);
   }
   private launch(chatId: string) {
+    this.assertAvailable(chatId);
     if (this.active.has(chatId)) return;
     const controller = new AbortController();
     const promise = Promise.resolve().then(()=>this.loop(chatId,controller.signal)).catch(error=> {
@@ -62,7 +77,7 @@ export class Runtime {
     this.active.set(chatId,{controller,promise});
   }
   async wait(chatId: string) { await this.active.get(chatId)?.promise; }
-  notifyFileChange(projectId: string, filename: string, source: 'editor'|'external'|'agent', excludeChatId?: string) {
+  notifyFileChange(projectId: string, filename: string, source: 'editor'|'external'|'agent'|'undo', excludeChatId?: string) {
     for (const chat of this.store.chats(projectId)) {
       if (chat.id === excludeChatId) continue;
       const state = this.load(chat.id);
@@ -72,12 +87,13 @@ export class Runtime {
       this.store.invalidateApprovals(chat.id);
       this.save(chat.id,state);
       // A paused task stays paused; active tasks consume this at the next safe boundary.
-      if (chat.status === 'awaiting_approval' && !this.active.has(chat.id)) this.launch(chat.id);
+      if (chat.status === 'awaiting_approval' && !this.active.has(chat.id) && !this.projectEdits.has(projectId)) this.launch(chat.id);
     }
   }
   async control(chatId: string, action: 'pause'|'resume'|'interrupt') {
     this.store.chat(chatId);
     if (action === 'resume') {
+      this.assertAvailable(chatId);
       if (this.active.has(chatId)) throw Object.assign(new Error('Wait for the current action to stop before resuming'),{statusCode:409});
       const state = this.load(chatId);
       if (!state?.frames.length) return;
@@ -92,6 +108,7 @@ export class Runtime {
   }
   async decide(approvalId: string, decision: 'approve'|'deny') {
     const approval = this.store.getApproval(approvalId);
+    this.assertAvailable(approval.chatId);
     if (approval.status !== 'pending') throw Object.assign(new Error('Approval is no longer pending'),{statusCode:409});
     const state = this.load(approval.chatId);
     const pending = state?.frames.at(-1)?.pending;
@@ -108,6 +125,7 @@ export class Runtime {
       if (this.store.chat(approval.chatId).status === 'awaiting_approval') this.launch(approval.chatId);
       throw Object.assign(new Error('This proposal has been superseded; refresh project guidance before reviewing a new proposal'),{statusCode:409});
     }
+    this.assertAvailable(approval.chatId);
     this.store.approval({...approval,status:decision === 'approve' ? 'approved' : 'denied'});
     this.launch(approval.chatId);
   }
@@ -289,12 +307,41 @@ export class Runtime {
         await this.refreshInstructions(chatId,state,signal);
         if (frame.pending !== pending) return true;
         if (state.steering.length) { this.deliverSteering(chatId,state); return true; }
+        if (pending.action.name === 'write_file') {
+          const project = this.store.project(this.store.chat(chatId).projectId);
+          const args = pending.action.args;
+          const before = await this.tools.read(project.path,String(args.path));
+          signal.throwIfAborted();
+          // Snapshot reads await I/O: recheck M9 guidance and steering afterwards.
+          await this.refreshInstructions(chatId,state,signal);
+          if (frame.pending !== pending) return true;
+          if (state.steering.length) { this.deliverSteering(chatId,state); return true; }
+          if (before.hash !== args.baseHash) {
+            pending.result = {ok:false,output:'File changed before recording the write; re-read before editing.'};
+            pending.stage = 'done'; this.save(chatId,state);
+            return true;
+          }
+          const content = String(args.content);
+          // A stable action ID and transaction bind snapshots to execution intent.
+          this.store.transaction(()=>{
+            this.store.recordFileChange({id:pending.id,projectId:project.id,chatId,path:before.path,createdAt:new Date().toISOString(),status:'recording',before,after:{path:before.path,content,hash:hash(content)}});
+            pending.stage = 'executing'; this.save(chatId,state);
+          });
+        }
         pending.stage = 'executing'; this.save(chatId,state);
         this.store.event(chatId,'tool',{agentId:frame.id,action:pending.action});
         try { pending.result = await this.tools.execute(this.toolContext(chatId,frame,signal),pending.action); }
         catch (error) { pending.result = safeResult(error); }
         // Persist the outcome even if cancellation happened while the tool was running.
-        pending.stage = 'done'; this.save(chatId,state);
+        this.store.transaction(()=>{
+          if (pending.action.name === 'write_file') {
+            const projectId = this.store.chat(chatId).projectId;
+            const change = this.store.fileChange(projectId,pending.id);
+            const result = pending.result?.data as {hash?:string;path?:string;mutation?:string}|undefined;
+            this.store.transitionFileChange(pending.id,'recording',pending.result?.ok && result?.hash === change.after.hash && result.path === change.path ? 'confirmed' : result?.mutation === 'not_started' ? 'rejected' : 'unknown');
+          }
+          pending.stage = 'done'; this.save(chatId,state);
+        });
       }
     }
     if (pending.stage === 'done') {

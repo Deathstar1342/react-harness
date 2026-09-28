@@ -20,6 +20,11 @@ export interface CompletionResult { text: string; usage?: ModelUsage; finishReas
 export interface ModelProvider { complete(input: { model: string; messages: ModelMessage[]; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]> }
 export interface FileEntry { path: string; name: string; type: 'file' | 'directory'; size?: number }
 export interface FileSnapshot { path: string; content: string; hash: string | null }
+export type FileChangeStatus = 'recording' | 'confirmed' | 'rejected' | 'unknown' | 'undoing' | 'undone';
+export interface FileChange { id: string; projectId: string; chatId: string; path: string; createdAt: string; status: FileChangeStatus; before: FileSnapshot; after: FileSnapshot }
+export type FileChangeSummary = Omit<FileChange, 'before' | 'after'>;
+export interface ProjectChanges { git: { status: string; path: string; originalPath?: string }[]; gitError?: string; history: FileChangeSummary[]; historyTruncated: boolean }
+export interface ChangePreview { change: FileChangeSummary; diff: string; undoDiff: string; expectedHash: string | null; previewToken?: string; reason?: string }
 export interface ToolContext { projectRoot: string; chatId: string; agentId: string; signal?: AbortSignal; onOutput?: (output: string) => void }
 export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; before?: string; after?: string; diff?: string }
 export interface ToolResult { ok: boolean; output: string; data?: unknown }
@@ -32,6 +37,7 @@ export interface ToolService {
   list(root: string, path?: string): Promise<FileEntry[]>;
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot>;
   setDirty(root: string, path: string, owner: string, dirty: boolean): void;
+  restore?(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void): Promise<FileSnapshot>;
   dispose(): Promise<void>;
 }
 export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string }
