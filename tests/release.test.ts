@@ -75,6 +75,9 @@ describe('M6 independent release integration', () => {
     const t = await fixture([delegate(), write('obsolete proposal'), write('must not execute'), final(), verdict(), final()]);
     await t.submit('Implement a label');
     expect(t.store.chat(t.chat.id).status).toBe('awaiting_approval');
+    // M8 requires pausing before changing policy; Settings cannot release a proposal.
+    expect((await t.app.inject({ method: 'PATCH', url: `/api/chats/${t.chat.id}`, payload: { approvalMode: 'autonomous' } })).statusCode).toBe(409);
+    expect((await t.post(`/api/chats/${t.chat.id}/control`, { action: 'pause' })).statusCode).toBe(200);
     // Switching to autonomy ensures the invariant is runtime plan-only enforcement,
     // rather than a second approval accidentally masking the violation.
     expect((await t.app.inject({ method: 'PATCH', url: `/api/chats/${t.chat.id}`, payload: { approvalMode: 'autonomous' } })).statusCode).toBe(200);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Folder, FolderOpen } from "lucide-react";
-import type { Project, WorkspaceSettings } from "../shared/types";
+import type { Preferences, Project, WorkspaceSettings } from "../shared/types";
+import { SettingsControls } from './SettingsControls';
 import { errorText } from "./api";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { Modal } from "./Modal";
@@ -62,7 +63,7 @@ export function ProjectDialog({ onCreated, onClose }: { onCreated: (project: Pro
   </Modal>;
 }
 
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+export function SettingsDialog({ onClose, chatId, onPreferences }: { onClose: () => void; chatId?: string; onPreferences?: (value: Preferences) => void }) {
   const workspace = useWorkspaceSettings();
   const [selected, setSelected] = useState<string | null>(null);
   const [browse, setBrowse] = useState(false);
@@ -70,6 +71,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState("");
   const path = selected ?? workspace.settings?.workspaceRoot;
   return <Modal title="Settings" titleId="settings-dialog-title" onClose={onClose} busy={busy}>
+    <SettingsControls chatId={chatId} onPreferences={onPreferences} />
     <h3>Default workspace</h3>
     <p className="field-help">New projects are created inside this folder. Existing projects stay where they are.</p>
     <div className="project-destination"><code>{path ?? "Loading workspace…"}</code>
@@ -78,12 +80,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       onClick={() => { setSelected(workspace.settings!.defaultWorkspaceRoot); setError(""); }}>Use default folder</button>}
     {(workspace.error || error) && <p className="inline-error" role="alert">{error || workspace.error}
       {workspace.error && <button type="button" className="text-button" onClick={workspace.retry}>Retry</button>}</p>}
-    <div className="dialog-actions"><button type="button" className="button" disabled={busy} onClick={onClose}>Cancel</button>
+    <div className="dialog-actions"><button type="button" className="button" disabled={busy} onClick={onClose}>Close</button>
       <button type="button" className="button primary" disabled={busy || !path || path === workspace.settings?.workspaceRoot} onClick={() => {
         if (busy || !path) return;
         setBusy(true); setError("");
         void saveWorkspace(path).then(onClose).catch((e) => { setError(errorText(e)); setBusy(false); });
-      }}>{busy ? "Saving…" : "Save"}</button></div>
+      }}>{busy ? "Saving workspace…" : "Save workspace"}</button></div>
     {browse && <DirectoryBrowser title="Choose workspace folder" onClose={() => setBrowse(false)}
       onSelect={(next) => { setSelected(next); setError(""); setBrowse(false); }} />}
   </Modal>;
