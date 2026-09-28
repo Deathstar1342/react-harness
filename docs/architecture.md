@@ -68,6 +68,12 @@ An editor save keeps its dirty-buffer lease until the editor explicitly reports 
 
 Shell execution must obey the same policy. Arbitrary commands cannot have a guaranteed predicted file diff. When a pre-application diff is required, execute in an isolated workspace and review the resulting changes before integration. A working directory alone does not enforce filesystem confinement.
 
+Changes opens on demand beside Files while keeping the editor mounted. It separates current Git modifications, whose ownership is unknown, from recorded agent write attempts. Each write captures private before/after snapshots under its unique action ID before dispatch; only a matching successful result confirms the record. Interrupted recording or undo claims become unknown on restart and cannot replay.
+
+Selective undo requires a server-issued five-minute preview token bound to the project, write, and expected file hash. With every project run stopped, a runtime guard excludes launches while the shared file lock rechecks paths, content and dirty editor leases. A synchronous durable claim immediately precedes restoring the previous content or removing a newly created file. Undo preserves the Git index and unrelated files, notifies sibling chats, and invalidates prepared approvals. Late lease acquisition is checked again after asynchronous validation. Shell changes and legacy actions without snapshots have no automatic undo. One backend instance is assumed; external filesystem races and changes reverted to identical bytes cannot be excluded atomically.
+
+History lists the latest 100 records with a truncation notice. Diffs have a 200 KB review bound, and at most 200 preview tokens are retained. Larger snapshots remain private in SQLite but are unavailable for UI undo; history is not automatically pruned.
+
 ## Persistence and context
 
 Use SQLite plus artifact storage for projects, chats, messages, plans, tasks, tool calls, approvals, file versions, summaries, and test reports. Preserve original transcripts and large output artifacts for retrieval.
@@ -113,4 +119,4 @@ The first end-to-end milestone is a persistent architect conversation that deleg
 
 Implemented baseline: one delegated coder at a time, persistent conversations and action records, approval/version checks, Linux PTYs, structured JUnit reports, critic checkpoints, model-written context summaries, and durable request budgets. Parallel coder workspaces remain a later extension; do not present serial delegation as parallel execution. The M7 redesign and workspace selection APIs are integrated. Live STARK acceptance, integrated visual verification, and final Linux release checks remain explicit gates in `docs/STATUS.md`.
 
-Follow-on features include selective undo that preserves unrelated manual changes, project instruction files, configurable execution budgets, and an agent activity timeline.
+Root project instructions and selective per-write undo are implemented. M11 adds the on-demand command/output view; parallel coders and broader activity navigation remain possible later extensions.

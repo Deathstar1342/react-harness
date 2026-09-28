@@ -1,6 +1,6 @@
 # Acceptance audit
 
-This is an evidence map for the requested application, not a declaration of completed live acceptance. Main includes the integrated M0-M9 work. Synthetic provider tests cannot establish STARK prompt compatibility, and component markup tests cannot establish rendered UI or keyboard behavior.
+This is an evidence map for the requested application, not a declaration of completed live acceptance. Main includes the integrated M0-M10 work. Synthetic provider tests cannot establish STARK prompt compatibility, and component markup tests cannot establish rendered UI or keyboard behavior.
 
 | Requirement | Current implementation and evidence | Remaining gate |
 | --- | --- | --- |
@@ -22,11 +22,12 @@ This is an evidence map for the requested application, not a declaration of comp
 | Dark seamless interface and workspace preference | M7 integrated; user approved visual direction; editor drag/expand controls, name-only creation, Settings and backend folder explorer | Interactive/keyboard walkthrough remains unverified |
 | Connection diagnostics and focused chat | M8 integrated; fixed sanitized catalog/role results, cancellation/deadline/ledger checks; separate current-chat/default approval settings; persistent Debug off by default; 39 added tests | Real STARK checks at work and rendered Settings walkthrough |
 | No uncertain action replay | Persisted action stages; resumed uncertain shell reported without execution; late model completions ignored after interruption; release tests | None beyond live recovery acceptance |
+| Changes review and selective undo | M10 on-demand Git review and separate durable agent-write snapshots; explicit forward/reverse previews; token/hash/lease protection; durable uncertain claims; 23 added cases including staged-index preservation, concurrent undo, late leases, and M9 freshness | Rendered interaction; no shell rollback or atomic exclusion of external filesystem edits |
 | Check-ins and milestone ownership | Named milestone chats/worktrees and reports retained; 15-minute heartbeat active for approved sequential M8–M11 delivery; routine decisions handled by coordinator | Pause if user assistance is truly required or sequence is delivered |
 
 ## Validation
 
-- Local Node 24.16 on Windows: independent coordinator typecheck, full suite **314 passed / 11 skipped**, production build and diff-check passed after M9 integration at `639d981b118618ccfbffd807faf35fcf5776bcce`.
+- Local Node 24.16 on Windows: independent coordinator typecheck, full suite **336 passed / 12 skipped**, production build and diff-check passed after M10 integration at `466524d5456ccff4edbb49f5c9f7c49e9618b9d8`. Exact integration Linux CI passed: https://github.com/Deathstar1342/react-harness/actions/runs/36378149347 . M11 is next.
 - Exact M9 integration Linux CI passed: https://github.com/Deathstar1342/react-harness/actions/runs/36376683021 . M10 is next; live-provider/browser acceptance remains separate.
 - Exact M8 integration Linux CI passed: https://github.com/Deathstar1342/react-harness/actions/runs/36375663077 . Scoped M8 implementation issue/milestone closed with live/browser limitations explicit; M9 is next.
 - Exact earlier integrated Linux candidate 02342fe1ce87552c10486305eaa56bed0cc4e7b9 passed [CI run 36225306950](https://github.com/Deathstar1342/react-harness/actions/runs/36225306950), including real PTY tests. The final prompt-file candidate 11b1b2caeb2b60b5bb0438d63c855856cbe9d8b8 also passed [CI run 36225704259](https://github.com/Deathstar1342/react-harness/actions/runs/36225704259).
