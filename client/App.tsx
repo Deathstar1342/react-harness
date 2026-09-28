@@ -29,6 +29,7 @@ import type {
 import { errorText, formatTime, id, post, request } from "./api";
 import { FilePanel } from "./FilePanel";
 import { ChangesPanel } from './ChangesPanel';
+import { TerminalPanel } from './TerminalPanel';
 import { ActivityDrawer, ApprovalCard, PlanPanel } from "./Panels";
 import { ProjectDialog, SettingsDialog } from "./WorkspaceDialogs";
 import { useConversation } from "./useConversation";
@@ -62,6 +63,7 @@ function Conversation({
   const { detail, error, stream, connection, fileRevision, refresh } =
     useConversation(chatId, onChange);
   const [busy, setBusy] = useState("");
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [actionError, setActionError] = useState("");
   const [rename, setRename] = useState(false);
   const [title, setTitle] = useState("");
@@ -204,6 +206,7 @@ function Conversation({
           <button className="icon-button" onClick={onFiles} aria-label="Toggle files" title="Files">
             <FileCode2 size={15} />
           </button>
+          <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
         </div>
       </header>
@@ -528,6 +531,7 @@ function Conversation({
           </div>
         </div>
       </div>
+      {terminalOpen && <TerminalPanel detail={detail} connected={connection === 'connected'} onClose={()=>setTerminalOpen(false)} />}
       <ActivityDrawer events={detail.events} tests={detail.tests} debug={debug} />
     </main>
   );
@@ -840,6 +844,7 @@ export function App() {
                   >
                     <FileCode2 size={15} />
                   </button>
+                  <button className="text-button" disabled title="Select a chat to view command evidence">Terminal</button>
                   <button className="text-button" onClick={()=>setChanges(true)}>Changes</button>
                   </div>
                 )}

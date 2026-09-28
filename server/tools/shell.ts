@@ -35,7 +35,7 @@ class PersistentShell {
     session.disposables.push(terminal.onData(data => session.receive(data)), terminal.onExit(({ exitCode }) => {
       session.dead = true;
       session.readyReject?.(new ToolError('Shell exited during startup.', 'PTY_UNAVAILABLE'));
-      session.active?.finish({ output: session.active.output, exitCode, error: 'Persistent shell exited before a command boundary; outcome may be uncertain. Shell state was lost.', shellReset: true });
+      session.active?.finish({ output: session.active.output, truncated:session.active.truncated, exitCode, error: 'Persistent shell exited before a command boundary; outcome may be uncertain. Shell state was lost.', shellReset: true });
     }));
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => { session.kill(); reject(new ToolError('PTY startup timed out.', 'PTY_UNAVAILABLE')); }, 5000);
@@ -66,14 +66,14 @@ class PersistentShell {
         this.output(active.buffer.slice(0, start));
         const boundary = active.buffer.slice(start + prefix.length, end);
         const match = /^(\d+):([\d,]*)$/.exec(boundary);
-        if (!match) { this.kill(); active.finish({ output: active.output, error: 'Invalid command boundary; shell state was discarded.', shellReset: true }); return; }
+        if (!match) { this.kill(); active.finish({ output: active.output, truncated:active.truncated, error: 'Invalid command boundary; shell state was discarded.', shellReset: true }); return; }
         active.finish({ output: active.output, exitCode: Number(match[1]), truncated: active.truncated, backgroundPids: match[2].split(',').filter(Boolean).map(Number) });
         return;
       }
     }
     if (start >= 0) {
       this.output(active.buffer.slice(0, start)); active.buffer = active.buffer.slice(start);
-      if (active.buffer.length > prefix.length + 4096) { this.kill(); active.finish({ output: active.output, error: 'Oversized command boundary; shell state was discarded.', shellReset: true }); }
+      if (active.buffer.length > prefix.length + 4096) { this.kill(); active.finish({ output: active.output, truncated:active.truncated, error: 'Oversized command boundary; shell state was discarded.', shellReset: true }); }
     } else {
       let keep = Math.min(active.buffer.length, prefix.length - 1);
       while (keep && !prefix.startsWith(active.buffer.slice(-keep))) keep--;
@@ -101,8 +101,9 @@ class PersistentShell {
       const stop = (cancelled: boolean) => {
         this.output(this.active?.buffer ?? '');
         const output = this.active?.output ?? '';
+        const truncated = this.active?.truncated;
         this.kill();
-        finish({ output, cancelled, timedOut: !cancelled, error: `${cancelled ? 'Cancelled' : 'Timed out'}; shell and its process group were terminated. Shell state was lost; completed side effects were not rolled back.`, shellReset: true });
+        finish({ output, truncated, cancelled, timedOut: !cancelled, error: `${cancelled ? 'Cancelled' : 'Timed out'}; shell and its process group were terminated. Shell state was lost; completed side effects were not rolled back.`, shellReset: true });
       };
       const abort = () => stop(true);
       const timer = setTimeout(() => stop(false), timeoutMs);
@@ -121,7 +122,7 @@ class PersistentShell {
   }
   dispose(): void {
     this.kill();
-    this.active?.finish({ output: this.active.output, cancelled: true, error: 'Tool service disposed; shell state was lost.', shellReset: true });
+    this.active?.finish({ output: this.active.output, truncated:this.active.truncated, cancelled: true, error: 'Tool service disposed; shell state was lost.', shellReset: true });
     for (const listener of this.disposables) listener.dispose();
   }
 }

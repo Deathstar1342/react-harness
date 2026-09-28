@@ -42,5 +42,12 @@ export interface ToolService {
 }
 export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string }
 export interface RunEvent { id: number; chatId: string; type: string; data: unknown; createdAt: string }
-export interface ChatDetail { chat: Chat; messages: Message[]; plan: Plan; approvals: Approval[]; events: RunEvent[]; tests: TestReport[] }
+export interface CommandEvent {
+  commandId: string; agentId: string; sessionId: string; role: AgentRole; action: Action;
+  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'uncertain';
+  output?: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean;
+  shellReset?: boolean; truncated?: boolean; message?: string;
+}
+export interface CommandOutput { agentId: string; commandId?: string; sessionId?: string; output: string; truncated?: boolean }
+export interface ChatDetail { chat: Chat; messages: Message[]; plan: Plan; approvals: Approval[]; events: RunEvent[]; eventsTruncated?: boolean; tests: TestReport[] }
 export interface PublicSettings { configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
