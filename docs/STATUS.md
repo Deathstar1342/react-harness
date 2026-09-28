@@ -18,7 +18,7 @@ Current dispatch: M11 on-demand terminal has been dispatched. M8 settings/connec
 | M8 | `01a0e617-9cba-7260-a64e-409403164a7b` / `codex/milestone-8` | Issue #9, GitHub milestone 9 | Reviewed delivery `bf62963`, integrated/pushed `6e5605e`; independent local checks and Linux CI passed |
 | M9 | `01a0e62a-9ad7-7ac2-a704-46144431309a` / `codex/milestone-9` | Issue #10, GitHub milestone 10 | Reviewed `7137d73`, integrated/pushed `639d981`; independent local checks and exact Linux CI passed |
 | M10 | `01a0e638-dc36-7f63-91d6-bb93a25958b0` / `codex/milestone-10` | Issue #11, GitHub milestone 11 | Reviewed `864f625`, integrated/pushed `466524d`; independent local checks and exact Linux CI passed |
-| M11 | `Milestone 11`, managed worktree creation pending | Issue #12, GitHub milestone 12 | Dispatched from reviewed `c503eae`; pending client ID `client-new-thread:1d6a2e4e-cee3-4184-b51f-6cc483b3a0e8` |
+| M11 | `01a0e64b-5b04-78c2-af86-720ab6240cbc` / `codex/milestone-11` | Issue #12, GitHub milestone 12 | Active from `c503eae`; managed worktree `D:/CodexData/.codex/worktrees/b5ce/REACT harness` |
 
 M8 worktree: `D:/CodexData/.codex/worktrees/1ac4/REACT harness`. Ready thread ID above is confirmed by a compact wait snapshot (active); pending creation ID was `client-new-thread:24b82153-b682-45f6-8909-1e5646bf381c`. Last wait cursor: `e4c85478-d782-4671-b4d0-aa96ffd38185:1`.
 
@@ -85,4 +85,6 @@ Code candidate 11b1b2caeb2b60b5bb0438d63c855856cbe9d8b8 passed Linux CI run 3622
 
 Unblock by configuring STARK_BASE_URL and STARK_API_KEY locally in .env (never paste/publish credentials), then confirming readiness; and by supplying UI feedback plus restored browser-control access or explicit acceptance-scope direction. Restart the backend to load configuration before live checks. The goal is blocked, not complete. The 15-minute heartbeat remains paused.
 
-M11 dispatched from reviewed main after exact M10 Linux success and tracker closure. Wait for its ready thread ID; do not use the client ID with thread tools or duplicate creation if list_threads omits the pending child. Scope remains on-demand read-only terminal, accurate durable command/output correlation, no interactive input or shell reset. Existing heartbeat verified ACTIVE every 15 minutes; no user blocker.
+M11 dispatched from reviewed main after exact M10 Linux success and tracker closure. Ready thread ID is confirmed by its coordinator message and compact wait; do not duplicate creation if list_threads omits the child. Scope remains on-demand read-only terminal, accurate durable command/output correlation, no interactive input or shell reset. Existing heartbeat verified ACTIVE every 15 minutes; no user blocker.
+
+M11 contract approved: reuse durable events for typed command start/outcomes and commandId/sessionId output correlation; optional ChatDetail.eventsTruncated; bounded final output snapshot and honest uncertain/legacy handling. Coordinator requires atomic intent/start and done/outcome writes, idempotent recovery without action replay, actual run_tests/command exit evidence, snapshot/chunk deduplication, and tests for shared sessions, restart, cancellation and truncated history. No dependency or database-schema changes proposed.
