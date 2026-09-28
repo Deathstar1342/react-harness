@@ -1,6 +1,6 @@
 # Acceptance audit
 
-This is an evidence map for the requested application, not a declaration of completed live acceptance. Main includes the integrated M0-M7 work. Synthetic provider tests cannot establish STARK prompt compatibility, and component markup tests cannot establish rendered UI or keyboard behavior.
+This is an evidence map for the requested application, not a declaration of completed live acceptance. Main includes the integrated M0-M8 work. Synthetic provider tests cannot establish STARK prompt compatibility, and component markup tests cannot establish rendered UI or keyboard behavior.
 
 | Requirement | Current implementation and evidence | Remaining gate |
 | --- | --- | --- |
@@ -18,13 +18,15 @@ This is an evidence map for the requested application, not a declaration of comp
 | Plan phases and progress | Plan/step schema, runtime review before newly completed steps, collapsible UI; protocol/runtime/UI tests | Visual acceptance |
 | Steering and interruption | /btw and ordinary active-run input, generation checks, stale-approval invalidation, /plan switches active run to mutation prohibition; runtime/release tests | Live-model responsiveness |
 | Finite context and account limits | Model-written summaries, protected instructions, original archives, active approvals only; durable request reservations and headroom; context/scheduler/release tests | Actual provider token reporting/limits |
-| Dark seamless interface and workspace preference | M7 integrated; charcoal theme, flatter navigation, context controls, name-only creation, Settings and backend folder explorer | User feedback and automated browser acceptance pending |
+| Dark seamless interface and workspace preference | M7 integrated; user approved visual direction; editor drag/expand controls, name-only creation, Settings and backend folder explorer | Interactive/keyboard walkthrough remains unverified |
+| Connection diagnostics and focused chat | M8 integrated; fixed sanitized catalog/role results, cancellation/deadline/ledger checks; separate current-chat/default approval settings; persistent Debug off by default; 39 added tests | Real STARK checks at work and rendered Settings walkthrough |
 | No uncertain action replay | Persisted action stages; resumed uncertain shell reported without execution; late model completions ignored after interruption; release tests | None beyond live recovery acceptance |
-| Check-ins and milestone ownership | Named milestone chats/worktrees and reports retained; 15-minute heartbeat exists and remains paused while awaiting user assistance | Resume check-ins only when actionable work is unblocked |
+| Check-ins and milestone ownership | Named milestone chats/worktrees and reports retained; 15-minute heartbeat active for approved sequential M8–M11 delivery; routine decisions handled by coordinator | Pause if user assistance is truly required or sequence is delivered |
 
 ## Validation
 
-- Local Node 24.16 on Windows: typecheck, full suite **245 passed / 10 skipped**, production build passed after prompt configuration.
+- Local Node 24.16 on Windows: independent coordinator typecheck, full suite **284 passed / 10 skipped**, production build and diff-check passed after M8 integration at `6e5605e2872e73a1fbf7a3c3bb754b1e20f755d7`.
+- Exact M8 integration Linux CI passed: https://github.com/Deathstar1342/react-harness/actions/runs/36375663077 . Scoped M8 implementation issue/milestone closed with live/browser limitations explicit; M9 is next.
 - Exact earlier integrated Linux candidate 02342fe1ce87552c10486305eaa56bed0cc4e7b9 passed [CI run 36225306950](https://github.com/Deathstar1342/react-harness/actions/runs/36225306950), including real PTY tests. The final prompt-file candidate 11b1b2caeb2b60b5bb0438d63c855856cbe9d8b8 also passed [CI run 36225704259](https://github.com/Deathstar1342/react-harness/actions/runs/36225704259).
 - Ten independent M6 regressions pass. Two code reviews led to fixes for Git pathspec handling, active /plan enforcement, cross-chat notifications, historical context growth and rapid external saves.
 - Browser automation remains unavailable following saved-localhost-permission verification failure; do not bypass it with another automation path. User has viewed the earlier UI and requested the implemented M7 changes; revised visual feedback is pending.

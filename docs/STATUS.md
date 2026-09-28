@@ -16,11 +16,13 @@ Current dispatch: M8 settings/connection/debug; M9 project instructions, M10 cha
 | Milestone | Chat / branch | Tracker | State |
 | --- | --- | --- | --- |
 | M8 | `01a0e617-9cba-7260-a64e-409403164a7b` / `codex/milestone-8` | Issue #9, GitHub milestone 9 | Reviewed delivery `bf62963`, integrated/pushed `6e5605e`; independent local checks and Linux CI passed |
-| M9 | Create `Milestone 9` after reviewed M8 integration | Issue #10, GitHub milestone 10 | Queued |
+| M9 | `01a0e62a-9ad7-7ac2-a704-46144431309a` / `codex/milestone-9` | Issue #10, GitHub milestone 10 | Active from `0a7bd8f`; managed worktree `D:/CodexData/.codex/worktrees/48d1/REACT harness` |
 | M10 | Create `Milestone 10` after reviewed M9 integration | Issue #11, GitHub milestone 11 | Queued |
 | M11 | Create `Milestone 11` after reviewed M10 integration | Issue #12, GitHub milestone 12 | Queued |
 
 M8 worktree: `D:/CodexData/.codex/worktrees/1ac4/REACT harness`. Ready thread ID above is confirmed by a compact wait snapshot (active); pending creation ID was `client-new-thread:24b82153-b682-45f6-8909-1e5646bf381c`. Last wait cursor: `e4c85478-d782-4671-b4d0-aa96ffd38185:1`.
+
+M9 ready thread ID is confirmed by its coordinator message and compact wait snapshot. Do not duplicate it. M8 issue/milestone 9 is closed with evidence and its chat instructed to remain idle. Heartbeat ACTIVE was reverified at M9 dispatch. M9 proposes internal run/pending-action guidance fingerprints and watcher-independent freshness checks around request/inspection/execution boundaries; approved in scope. Coordinator emphasized preserving executing/done uncertain-recovery records, invalid guidance failing closed, missing/present transitions, and honest external-filesystem race limitations.
 
 M8 preliminary interface proposal approved: GET/PATCH `/api/preferences` with persistent `debugMode` and `defaultApprovalMode`; POST `/api/connection-check` with catalog and per-role sanitized results; current-chat approval changes conservatively rejected while active work/proposals could be released. Child will use managed scheduler accounting and bounded cancellation-aware probes. Coordinator advised enough output headroom for reasoning providers (up to 1024/configured cap), clear timeout versus format failures, and not-checked results for unattempted roles. Exact final contract remains subject to delivery review.
 
