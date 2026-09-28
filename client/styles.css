@@ -1051,6 +1051,16 @@ textarea {
   background: #202020;
   border-color: #303030;
 }
+.command-terminal { flex: 0 0 auto; border-top: 1px solid #353535; background: #202020; min-height: 0; font-size: 12px; }
+.command-terminal > header { display: flex; gap: 12px; align-items: center; padding: 8px 20px; }
+.command-terminal > header button { margin-left: auto; }
+.command-scroll { max-height: 30dvh; overflow: auto; padding: 0 20px 12px; }
+.command-entry { border-top: 1px solid #353535; padding: 12px 0; }
+.command-heading { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.command-terminal pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.command-terminal .terminal-meta { overflow-wrap: anywhere; }
+.command-source { color: #e4e4e4; }
+.unassociated-output pre { border-top: 1px solid #353535; padding-top: 8px; }
 .drawer-tabs {
   display: flex;
   align-items: center;

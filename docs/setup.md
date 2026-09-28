@@ -175,6 +175,16 @@ Preserve your `.env` and data directory. Compare `.env.example` for new options 
 
 For contributor checks, run `npm run typecheck`, `npm test`, and `npm run build`. Linux CI includes real PTY tests; Windows skips platform-specific cases. See [architecture](architecture.md), [API contract](api-contract.md), and [current status](STATUS.md) for implementation details and remaining acceptance work.
 
+## Terminal command evidence
+
+Select a chat and open **Terminal** beside Files to inspect real command/output evidence. It starts closed each time you switch chats. Opening or closing it only changes the local panel; chat drafts, editor buffers, and running backend work stay intact. **Tests** remains available beneath it, including its failure indicator, with Debug either on or off. Internal critic/coder conversation remains controlled by Debug.
+
+Commands show their originating agent, logical shell session, command ID, status, output, and recorded exit code when available. Python actions show the submitted source. **Completed / Exit 0** means the command boundary reported zero; a separate tool/report error can still require attention in Tests. **Failed** means a recorded nonzero command exit. **Interrupted** reflects an actual cancellation/timeout result, not merely clicking Pause or Interrupt. **Uncertain** means no reliable command outcome exists, including execution interrupted by backend restart. The app never automatically reruns an uncertain action. Review workspace changes before deciding how to proceed.
+
+This is a read-only view; use the chat to request work. Running is explicitly the last recorded state, and disconnected views show a reconnecting notice. Shell state can be lost or recreated after interruption/restart; session labels identify the logical agent shell slot, not a promise of restored processes or variables.
+
+The view uses the latest 1,000 activity events and indicates omitted history or missing lifecycle evidence. Each command keeps up to the last 64,000 characters of available output; individual live chunks are capped at 16,000 characters and tool output has its existing byte limit. Final recorded output replaces overlapping live chunks. Truncation notices distinguish partial evidence from empty captured output. Old events without command IDs appear under **Unassociated / legacy evidence** and never establish a command's completion. Open Debug Activity to inspect other tool traces.
+
 ## Changes and undo
 
 Open **Changes** beside Files when you want to inspect work. The panel starts closed and leaves the editor and its unsaved buffer mounted. **Current project Git changes** includes staged, unstaged, renamed, deleted, and untracked files, including manual or pre-existing changes. It does not attribute every dirty file to an agent. Select a file for a readable diff; rename review includes the original and destination paths. Protected credential paths are excluded. Git-unavailable projects can still show recorded-write history.

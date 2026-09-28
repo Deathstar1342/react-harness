@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { commandEvent, isCommand } from './command-events.js';
+import type { RunState } from './runtime.js';
 import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
@@ -142,10 +144,21 @@ export class Store {
     this.event(chatId,'tests',report);
   }
   detail(chatId: string): ChatDetail {
-    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), approvals: this.approvals(chatId), events: this.recentEvents(chatId), tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
+    const recent = this.recentEvents(chatId,1001);
+    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), approvals: this.approvals(chatId), events: recent.slice(-1000), eventsTruncated:recent.length>1000, tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
   }
   recover() {
     this.db.prepare("UPDATE file_changes SET status='unknown' WHERE status IN ('recording','undoing')").run();
+    for (const chat of this.chats()) {
+      const run = this.getState<RunState|null>(`run:${chat.id}`,null);
+      for (const frame of run?.frames ?? []) if (frame.pending?.stage === 'executing' && !frame.pending.commandOutcomeRecorded && isCommand(frame.pending.action)) {
+        this.transaction(()=>{
+          this.event(chat.id,'command',commandEvent(frame,frame.pending!,{ok:false,output:'Backend restarted during execution. Outcome is uncertain; this command will not be rerun automatically. Shell state was lost.',data:{uncertain:true,shellReset:true}}));
+          frame.pending!.commandOutcomeRecorded = true;
+          this.setState(`run:${chat.id}`,run);
+        });
+      }
+    }
     for (const chat of this.chats()) if (chat.status === 'running') {
       this.updateChat(chat.id, { status: 'interrupted' });
       this.message(chat.id,'system','The backend restarted during this task. Resume will reconcile recorded actions; uncertain commands will not be rerun automatically.');

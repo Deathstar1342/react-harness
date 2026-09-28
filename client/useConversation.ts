@@ -85,6 +85,7 @@ export function useConversation(chatId: string, onChange: () => void) {
           "approval",
           "tool",
           "tool_output",
+          "command",
           "tests",
           "file_changed",
           "steering",
