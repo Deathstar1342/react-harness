@@ -17,6 +17,11 @@ export interface CompletionResult { text: string; usage?: ModelUsage; finishReas
 export interface ModelProvider { complete(input: { model: string; messages: ModelMessage[]; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]> }
 export interface FileEntry { path: string; name: string; type: 'file' | 'directory'; size?: number }
 export interface FileSnapshot { path: string; content: string; hash: string | null }
+export interface FileChange { id: string; projectId: string; chatId: string; path: string; createdAt: string; status: 'applied' | 'undoing' | 'undone'; before: FileSnapshot; after: FileSnapshot }
+export type FileChangeSummary = Omit<FileChange, 'before' | 'after'>;
+export interface ProjectChanges { files: {path:string;status:string;originalPath?:string}[]; gitError?: string; history: FileChangeSummary[] }
+export interface ConnectionCheck { name: string; ok: boolean; detail: string }
+export interface ConnectionReport { ok: boolean; checks: ConnectionCheck[] }
 export interface ToolContext { projectRoot: string; chatId: string; agentId: string; signal?: AbortSignal; onOutput?: (output: string) => void }
 export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; before?: string; after?: string; diff?: string }
 export interface ToolResult { ok: boolean; output: string; data?: unknown }
@@ -28,6 +33,7 @@ export interface ToolService {
   read(root: string, path: string): Promise<FileSnapshot>;
   list(root: string, path?: string): Promise<FileEntry[]>;
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot>;
+  remove?(root: string, path: string, baseHash: string): Promise<FileSnapshot>;
   setDirty(root: string, path: string, owner: string, dirty: boolean): void;
   dispose(): Promise<void>;
 }

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport } from '../shared/types.js';
+import type { Approval, ApprovalMode, Chat, ChatDetail, FileChange, FileChangeSummary, Message, Plan, Project, RunEvent, TestReport } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
 export class Store {
@@ -23,6 +23,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS test_reports (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS file_changes (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, data TEXT NOT NULL);
     `);
     this.changes.setMaxListeners(100);
   }
@@ -42,6 +43,21 @@ export class Store {
     return row ? JSON.parse(String(row.data)) as T : fallback;
   }
   setState(key: string, value: unknown) { this.db.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run(key, JSON.stringify(value)); }
+  recordChange(change: FileChange) { this.db.prepare('INSERT INTO file_changes VALUES (?,?,?) ON CONFLICT(id) DO NOTHING').run(change.id,change.projectId,JSON.stringify(change)); }
+  fileChanges(projectId: string): FileChangeSummary[] {
+    return this.db.prepare('SELECT data FROM file_changes WHERE project_id=? ORDER BY rowid DESC LIMIT 200').all(projectId).map(row=> {
+      const {before:_before,after:_after,...summary} = JSON.parse(String(row.data)) as FileChange; return summary;
+    });
+  }
+  fileChange(projectId: string, id: string): FileChange {
+    const row = this.db.prepare('SELECT data FROM file_changes WHERE project_id=? AND id=?').get(projectId,id);
+    if (!row) throw Object.assign(new Error('File change not found'),{statusCode:404});
+    return JSON.parse(String(row.data));
+  }
+  changeStatus(projectId: string, id: string, status: FileChange['status']) {
+    const change = this.fileChange(projectId,id);
+    this.db.prepare('UPDATE file_changes SET data=? WHERE id=?').run(JSON.stringify({...change,status}),id);
+  }
   projects(): Project[] { return this.db.prepare('SELECT data FROM projects ORDER BY rowid DESC').all().map(row => JSON.parse(String(row.data))); }
   project(id: string): Project {
     const row = this.db.prepare('SELECT data FROM projects WHERE id=?').get(id);

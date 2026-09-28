@@ -12,6 +12,8 @@ import { publicSettings } from './config.js';
 import { Runtime, type RuntimeHooks } from './runtime.js';
 import { Store } from './store.js';
 import { WorkspaceLocations } from './workspace.js';
+import { Changes } from './changes.js';
+import { checkConnection } from './diagnostics.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 
 const executeFile = promisify(execFile);
@@ -23,6 +25,8 @@ export async function createApp(options: AppOptions) {
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
   const locations = new WorkspaceLocations(store,config.workspaceRoot);
+  const changes = new Changes(store,tools);
+  let diagnosticRunning = false;
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
   const watchers = new Map<string,FSWatcher>();
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
@@ -89,6 +93,13 @@ export async function createApp(options: AppOptions) {
   app.get('/api/health',async()=>({ok:true}));
   app.get('/api/settings',async()=>publicSettings(config));
   app.get('/api/models',async()=>({models:await provider.models()}));
+  app.post('/api/connection-check',async request=> {
+    z.object({}).strict().parse(request.body);
+    if (diagnosticRunning) throw Object.assign(new Error('A connection check is already running.'),{statusCode:409});
+    diagnosticRunning = true;
+    try { return await checkConnection(config,provider,hooks,AbortSignal.timeout(90_000)); }
+    finally { diagnosticRunning = false; }
+  });
   app.get('/api/projects',async()=>store.projects());
   app.get('/api/workspace',async()=>locations.settings());
   app.patch('/api/workspace',async request=>{const body=z.object({workspaceRoot:z.string().min(1).max(4096)}).strict().parse(request.body);return locations.update(body.workspaceRoot);});
@@ -129,6 +140,28 @@ export async function createApp(options: AppOptions) {
   app.post('/api/chats/:id/control',async request=> {const {action} = z.object({action:z.enum(['pause','resume','interrupt'])}).strict().parse(request.body);await runtime.control(paramId(request.params),action);return {ok:true};});
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
+  app.get('/api/projects/:id/changes',async request=>changes.list(paramId(request.params)));
+  app.get('/api/projects/:id/change',async request=> {
+    const {changeId} = z.object({changeId:z.string().min(1)}).strict().parse(request.query);
+    return changes.preview(paramId(request.params),changeId);
+  });
+  app.get('/api/projects/:id/diff',async request=> {
+    const {path:relative} = z.object({path:z.string().min(1)}).strict().parse(request.query);
+    const project = store.project(paramId(request.params));
+    const result = await tools.execute({projectRoot:project.path,chatId:'changes-view',agentId:'changes-view'},{name:'git_diff',args:{path:relative}});
+    if (!result.ok) throw new Error(result.output);
+    if (result.output) return {diff:result.output};
+    const file = await tools.read(project.path,relative);
+    return {diff:file.hash===null ? 'File is absent.' : `Current file contents (no tracked Git diff):\n${file.content}`};
+  });
+  app.post('/api/projects/:id/undo',async request=> {
+    const {changeId,baseHash} = z.object({changeId:z.string().min(1),baseHash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(request.body);
+    const projectId = paramId(request.params);
+    const saved = await changes.undo(projectId,changeId,baseHash);
+    runtime.notifyFileChange(projectId,saved.path,'editor');
+    for (const chat of store.chats(projectId)) store.event(chat.id,'file_changed',{path:saved.path,source:'editor',hash:saved.hash});
+    return saved;
+  });
   app.get('/api/projects/:id/file',async request=> {const {path:relative} = z.object({path:z.string().min(1)}).parse(request.query);return tools.read(store.project(paramId(request.params)).path,relative);});
   app.put('/api/projects/:id/file',async request=> {
     const body = z.object({path:z.string().min(1),content:z.string().max(1024*1024),baseHash:z.string().nullable(),owner:z.string().min(1).max(200)}).strict().parse(request.body);

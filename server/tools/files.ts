@@ -103,6 +103,23 @@ export class WorkspaceFiles {
       if (locks.get(id) === tail) locks.delete(id);
     }
   }
+  async remove(root: string, input: string, baseHash: string): Promise<FileSnapshot> {
+    if (!/^[a-f0-9]{64}$/.test(baseHash)) throw new ToolError('Expected SHA-256 baseHash.');
+    const target = await scoped(root,input), id = key(target.absolute);
+    const previous = locks.get(id) ?? Promise.resolve();
+    let release!: () => void;
+    const pending = new Promise<void>(resolve=>{release=resolve;});
+    const tail = previous.then(()=>pending); locks.set(id,tail);
+    await previous;
+    try {
+      this.checkLease(id);
+      if ((await this.read(root,input)).hash !== baseHash) throw new ToolError('File changed since the undo preview.','CONFLICT');
+      await scoped(root,input);
+      this.checkLease(id);
+      await unlink(target.absolute);
+      return {path:target.relative,content:'',hash:null};
+    } finally { release(); if (locks.get(id)===tail) locks.delete(id); }
+  }
   async search(root: string, query: string, input = ''): Promise<{ matches: { path: string; line: number; text: string }[]; truncated: boolean }> {
     const matches: { path: string; line: number; text: string }[] = [];
     const stack = [input]; let visited = 0, truncated = false;

@@ -47,6 +47,7 @@ export class WorkspaceTools implements ToolService {
   read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.files.read(root, path); }
   list(root: string, path = '') { this.check(); return this.files.list(root, path); }
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.files.save(root, path, content, baseHash, owner); }
+  remove(root: string, path: string, baseHash: string) { this.check(); return this.files.remove(root,path,baseHash); }
   setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); this.files.setDirty(root, path, owner, dirty); }
   async inspect(context: ToolContext, action: Action): Promise<ToolInspection> {
     this.check(); const args = validate(action);
@@ -99,7 +100,7 @@ export class WorkspaceTools implements ToolService {
   }
   private async gitStatus(root: string, signal?: AbortSignal): Promise<ToolResult> {
     await this.assertGitRoot(root, signal);
-    const result = await gitCommand(root, ['status', '--porcelain=v1', '-z', '--untracked-files=normal', '--ignore-submodules=all'], this.maxOutputBytes, signal);
+    const result = await gitCommand(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all'], this.maxOutputBytes, signal);
     if (result.exitCode !== 0 || result.error) return this.commandResult(result);
     const raw = result.output.split('\0'), entries: { status: string; path: string; originalPath?: string }[] = [];
     for (let i = 0; i < raw.length; i++) {

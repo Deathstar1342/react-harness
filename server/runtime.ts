@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Action, AgentResponse, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService } from '../shared/types.js';
 import type { Config } from './config.js';
 import { Store } from './store.js';
+import { projectInstructions } from './project-instructions.js';
+import { hash } from './tools/paths.js';
 
-interface PendingAction { id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult }
+interface PendingAction { id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; before?: import('../shared/types.js').FileSnapshot }
 export interface Frame { id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'phase'; proposedPlan?: import('../shared/types.js').Plan }
 export interface RunState { frames: Frame[]; steering: string[]; planOnly: boolean; steps: number; generation: number }
 export interface RuntimeHooks {
@@ -126,7 +128,8 @@ export class Runtime {
       if (++state.steps > 100) { this.store.updateChat(chatId,{status:'paused'}); this.store.message(chatId,'system','The task reached its 100-step safety budget. Review progress and resume to continue.'); this.save(chatId,state); return; }
       const generation = state.generation;
       const authoritative = `Project: ${this.store.project(this.store.chat(chatId).projectId).path}\nPlan: ${JSON.stringify(this.store.plan(chatId))}\nMode: ${state.planOnly ? 'PLAN ONLY: do not change files, run commands, or delegate implementation.' : 'Implementation is allowed subject to the runtime approval policy.'}\nYou are the ${frame.role}. ${frame.role === 'architect' ? 'You own the user conversation. Delegate code changes to a coder. Inspect context as needed. Report critic findings honestly.' : frame.role === 'critic' ? 'Review independently against the original request, task acceptance criteria, actual files, git diff, and tool/test evidence. Only read tools are permitted. Conclude with review_result. Do not infer tests passed from model claims.' : 'Complete the assigned task, read before editing, preserve manual changes, verify results, and provide evidence. Never delegate recursively.'}`;
-      let messages: ModelMessage[] = [{role:'system',content:this.hooks.instructions(frame.role)}, {role:'user',content:`Authoritative task state:\n${authoritative}`}, ...frame.messages];
+      const guidance = await projectInstructions(this.tools,this.store.project(this.store.chat(chatId).projectId).path);
+      let messages: ModelMessage[] = [{role:'system',content:this.hooks.instructions(frame.role)}, {role:'user',content:`Authoritative task state:\n${authoritative}`}, ...(guidance ? [{role:'user' as const,content:guidance}] : []), ...frame.messages];
       if (this.hooks.prepareMessages) messages = await this.hooks.prepareMessages(chatId,frame,messages,signal);
       this.save(chatId,state);
       let response: AgentResponse | undefined;
@@ -232,7 +235,15 @@ export class Runtime {
       if (pending.stage === 'prepared') {
         pending.stage = 'executing'; this.save(chatId,state);
         this.store.event(chatId,'tool',{agentId:frame.id,action:pending.action});
-        try { pending.result = await this.tools.execute(this.toolContext(chatId,frame,signal),pending.action); }
+        try {
+          if (pending.action.name === 'write_file') {
+            pending.before = await this.tools.read(this.toolContext(chatId,frame,signal).projectRoot,String(pending.action.args.path));
+            if (pending.before.hash !== pending.action.args.baseHash) throw new Error('File changed since the proposal was prepared.');
+            this.save(chatId,state);
+          }
+          signal.throwIfAborted();
+          pending.result = await this.tools.execute(this.toolContext(chatId,frame,signal),pending.action);
+        }
         catch (error) { pending.result = safeResult(error); }
         // Persist the outcome even if cancellation happened while the tool was running.
         pending.stage = 'done'; this.save(chatId,state);
@@ -248,6 +259,9 @@ export class Runtime {
           const projectId = this.store.chat(chatId).projectId;
           const snapshot = result.data as {path?:string;hash?:string|null}|undefined;
           const filename = snapshot?.path ?? String(pending.action.args.path);
+          if (pending.before && snapshot?.hash === hash(String(pending.action.args.content))) {
+            this.store.recordChange({id:pending.id,projectId,chatId,path:filename,createdAt:new Date().toISOString(),status:'applied',before:pending.before,after:{path:filename,content:String(pending.action.args.content),hash:snapshot.hash!}});
+          }
           this.notifyFileChange(projectId,filename,'agent',chatId);
           for (const affected of this.store.chats(projectId)) this.store.event(affected.id,'file_changed',{path:filename,source:'agent',hash:snapshot?.hash});
         }
