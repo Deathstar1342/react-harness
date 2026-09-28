@@ -15,7 +15,7 @@ Current dispatch: M8 settings/connection/debug; M9 project instructions, M10 cha
 
 | Milestone | Chat / branch | Tracker | State |
 | --- | --- | --- | --- |
-| M8 | `01a0e617-9cba-7260-a64e-409403164a7b` / `codex/milestone-8` | Issue #9, GitHub milestone 9 | Active implementation; based on `9a7514f` |
+| M8 | `01a0e617-9cba-7260-a64e-409403164a7b` / `codex/milestone-8` | Issue #9, GitHub milestone 9 | Reviewed delivery `bf62963`, integrated/pushed `6e5605e`; independent local checks and Linux CI passed |
 | M9 | Create `Milestone 9` after reviewed M8 integration | Issue #10, GitHub milestone 10 | Queued |
 | M10 | Create `Milestone 10` after reviewed M9 integration | Issue #11, GitHub milestone 11 | Queued |
 | M11 | Create `Milestone 11` after reviewed M10 integration | Issue #12, GitHub milestone 12 | Queued |
@@ -24,7 +24,7 @@ M8 worktree: `D:/CodexData/.codex/worktrees/1ac4/REACT harness`. Ready thread ID
 
 M8 preliminary interface proposal approved: GET/PATCH `/api/preferences` with persistent `debugMode` and `defaultApprovalMode`; POST `/api/connection-check` with catalog and per-role sanitized results; current-chat approval changes conservatively rejected while active work/proposals could be released. Child will use managed scheduler accounting and bounded cancellation-aware probes. Coordinator advised enough output headroom for reasoning providers (up to 1024/configured cap), clear timeout versus format failures, and not-checked results for unattempted roles. Exact final contract remains subject to delivery review.
 
-Do not duplicate M8 work or dispatch M9 early. Inspect compact child status at scheduled check-in, assist routine stalls, and review the delivered branch/report before integration. Current main contains only planning/report changes for this sequence; the draft feature code remains unmerged. No new full-suite or live-provider validation is claimed for planning changes.
+M8 delivery review resolved duplicate error rendering, role-specific provisional wording, and immediate-save Settings clarity. Coordinator authorized a narrow update to the M6 /plan regression: first assert pending policy change returns 409, then pause, change policy, and retain the mutation-prohibition assertions. Independent checks on integrated `6e5605e2872e73a1fbf7a3c3bb754b1e20f755d7`: typecheck, 284 tests passed / 10 Windows platform skips, build and diff-check passed. Exact integration Linux CI **passed**: https://github.com/Deathstar1342/react-harness/actions/runs/36375663077. M9 may proceed. Browser interaction and live STARK remain unverified; no user-assistance blocker. The mixed preparation branch remains unmerged. The earlier preview process handle is no longer available and the preferences route did not respond during this check; do not claim the preview is currently running without a fresh start/health check.
 
 Latest user follow-up (2026-09-26): implemented a draggable editor divider and expand/restore control, preserving mounted editor buffers and conversation state. Divider supports arrow keys, Home/End, and double-click reset; expansion restores the chosen split width. Typecheck, production build, and all 245 portable tests passed (10 platform skips); localhost preview returned HTTP 200 after rebuilding. Browser interaction remains unverified because the prior browser permission block is unresolved. The heartbeat stays paused; do not poll for work-only credentials. This update supersedes the historical blocked audit below: visual direction is accepted and live STARK testing will happen at work.
 

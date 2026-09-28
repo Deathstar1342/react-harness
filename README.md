@@ -47,6 +47,8 @@ Send `/plan ...` to plan without new mutations. Send `/btw ...` or another messa
 
 ## Approvals and editing
 
+Open **Settings** to select an approval level for the current chat or set the default for future chats. These are separate controls and save immediately. Pause active work and resolve pending proposals before changing the current chat's mode; changing a default does not alter existing chats or approve a proposal.
+
 | Mode | Behavior |
 | --- | --- |
 | Full workspace autonomy | File and command proposals execute without per-action approval |
@@ -60,6 +62,10 @@ The shell runs with the backend user's operating-system permissions. A working d
 Linux PTY sessions retain `cd` and shell variables across commands and sequential delegations in the same chat while the backend stays alive. Restarting the backend does not restore shell memory or processes.
 
 ## Models, context, and test evidence
+
+**Settings → Test connection** checks the provider catalog and each configured role using small, bounded model requests. Results distinguish successful, failed, and unattempted checks. It uses your configured transport and account budgets without executing actions or exposing raw replies. A passing check establishes basic connectivity and reply-format compatibility, not task completion quality.
+
+**Debug mode** in Settings is off by default. Normal chat shows the user and architect conversation, actionable errors, approvals, and tests. Enable Debug to inspect internal coder/critic messages and tool traces. This preference is saved for the backend; already-open tabs refresh it when initialized or Settings is opened.
 
 Default roles are configurable in `.env`:
 

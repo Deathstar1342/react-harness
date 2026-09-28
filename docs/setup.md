@@ -94,6 +94,8 @@ Open [http://localhost:5173](http://localhost:5173). This starts both the backen
 
 ## 5. Verify access at work
 
+Open **Settings → Test connection** for the built-in check. It verifies the model catalog and sends up to three small reply-format probes. It uses your normal configured transport and shared account budgets, with a 25-second total deadline. Failed or cancelled requests may consume budget. A timeout or “not checked” result requires a later retry; it is not a successful provider check. No diagnostic reply executes an action, and raw responses and credentials are not shown.
+
 With the app running, use another WSL terminal:
 
 ```bash
@@ -106,7 +108,7 @@ The health check should return `{"ok":true}`. The models route calls STARK throu
 Try this first workflow in a disposable project:
 
 1. Create a project by name. The app creates a unique folder in the default workspace and initializes a local Git repository. Use **Import** and the folder explorer for an existing project.
-2. Create a chat and choose **Review every change** so you can inspect proposed writes and commands.
+2. Create a chat, open **Settings**, and choose **Review every change** under **Current chat** so you can inspect proposed writes and commands. The separate future-chat default does not change this chat. Approval and Debug changes save immediately; workspace selection has its own Save workspace button.
 3. Send: `Create a hello.txt file containing Hello from Harness. Ask the critic to review the result. Do not install packages or run shell commands.`
 4. Inspect the proposed file diff, approve it, and confirm the file and critic result appear. A refusal, parsing error, or unfinished run is a failed compatibility check, not a successful execution.
 5. Open the file in the editor, change its text, and save. Ask the architect to read the current contents and confirm it sees the manual edit. Drag the editor's left divider or use its expand/restore button for more space.
