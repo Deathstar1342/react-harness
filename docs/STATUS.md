@@ -9,7 +9,7 @@
 
 ## Milestones
 
-Current dispatch: M11 on-demand terminal is ready to start. M8 settings/connection/debug, M9 project instructions, and M10 changes/undo are reviewed, integrated, and passed exact Linux CI. Detailed scope and ownership are in `docs/milestones.md`. Coordinator may resolve routine product/technical decisions without asking the user. Partial coordinator work was saved unvalidated on `codex/feature-preparation-20260927` at `8a87bb2` and removed from main; see `docs/reports/feature-preparation-2026-09-27.md`. Historical blocked audit below is superseded for this authorized feature sequence.
+Current dispatch: M11 on-demand terminal has been dispatched. M8 settings/connection/debug, M9 project instructions, and M10 changes/undo are reviewed, integrated, and passed exact Linux CI. Detailed scope and ownership are in `docs/milestones.md`. Coordinator may resolve routine product/technical decisions without asking the user. Partial coordinator work was saved unvalidated on `codex/feature-preparation-20260927` at `8a87bb2` and removed from main; see `docs/reports/feature-preparation-2026-09-27.md`. Historical blocked audit below is superseded for this authorized feature sequence.
 
 ### Active follow-up sequence
 
@@ -18,7 +18,7 @@ Current dispatch: M11 on-demand terminal is ready to start. M8 settings/connecti
 | M8 | `01a0e617-9cba-7260-a64e-409403164a7b` / `codex/milestone-8` | Issue #9, GitHub milestone 9 | Reviewed delivery `bf62963`, integrated/pushed `6e5605e`; independent local checks and Linux CI passed |
 | M9 | `01a0e62a-9ad7-7ac2-a704-46144431309a` / `codex/milestone-9` | Issue #10, GitHub milestone 10 | Reviewed `7137d73`, integrated/pushed `639d981`; independent local checks and exact Linux CI passed |
 | M10 | `01a0e638-dc36-7f63-91d6-bb93a25958b0` / `codex/milestone-10` | Issue #11, GitHub milestone 11 | Reviewed `864f625`, integrated/pushed `466524d`; independent local checks and exact Linux CI passed |
-| M11 | Create `Milestone 11` after reviewed M10 integration | Issue #12, GitHub milestone 12 | Queued |
+| M11 | `Milestone 11`, managed worktree creation pending | Issue #12, GitHub milestone 12 | Dispatched from reviewed `c503eae`; pending client ID `client-new-thread:1d6a2e4e-cee3-4184-b51f-6cc483b3a0e8` |
 
 M8 worktree: `D:/CodexData/.codex/worktrees/1ac4/REACT harness`. Ready thread ID above is confirmed by a compact wait snapshot (active); pending creation ID was `client-new-thread:24b82153-b682-45f6-8909-1e5646bf381c`. Last wait cursor: `e4c85478-d782-4671-b4d0-aa96ffd38185:1`.
 
@@ -84,3 +84,5 @@ The same two acceptance blockers remain after three consecutive resumed goal tur
 Code candidate 11b1b2caeb2b60b5bb0438d63c855856cbe9d8b8 passed Linux CI run 36225704259. Preview health is OK on localhost:3000. GitHub M1/M2/M3/M5 implementation issues/milestones are closed with evidence; M4/M6/M7 remain open for acceptance. All child chats are idle.
 
 Unblock by configuring STARK_BASE_URL and STARK_API_KEY locally in .env (never paste/publish credentials), then confirming readiness; and by supplying UI feedback plus restored browser-control access or explicit acceptance-scope direction. Restart the backend to load configuration before live checks. The goal is blocked, not complete. The 15-minute heartbeat remains paused.
+
+M11 dispatched from reviewed main after exact M10 Linux success and tracker closure. Wait for its ready thread ID; do not use the client ID with thread tools or duplicate creation if list_threads omits the pending child. Scope remains on-demand read-only terminal, accurate durable command/output correlation, no interactive input or shell reset. Existing heartbeat verified ACTIVE every 15 minutes; no user blocker.
