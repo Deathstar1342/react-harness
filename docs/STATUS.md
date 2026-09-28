@@ -5,11 +5,26 @@
 - Integration branch: main. User authorization for public commits/pushes persists.
 - Active scope: user approved sequential M8–M11 with dedicated milestone chats; coordinator owns decisions, review, fixes requested from children, integration, validation, and pushes.
 - Live-provider acceptance remains deferred until work access. Do not repeatedly request credentials or treat that known gate as blocking independently testable features.
-- Restore the existing 15-minute heartbeat for active milestone coordination; pause only when user assistance is truly needed or the agreed sequence is delivered.
+- Existing heartbeat `react-harness-milestone-check-in` is ACTIVE, every 15 minutes, targeting this coordinator chat. Pause when user assistance is truly needed or the agreed sequence is delivered. Routine child questions are coordinator-owned decisions.
 
 ## Milestones
 
 Current dispatch: M8 settings/connection/debug; M9 project instructions, M10 changes/undo, M11 on-demand terminal follow after reviewed integration. Detailed scope and ownership are in `docs/milestones.md`. Coordinator may resolve routine product/technical decisions without asking the user. Partial coordinator work was saved unvalidated on `codex/feature-preparation-20260927` at `8a87bb2` and removed from main; see `docs/reports/feature-preparation-2026-09-27.md`. Main baseline is `864b7db` plus these coordination documents. Historical blocked audit below is superseded for this authorized feature sequence.
+
+### Active follow-up sequence
+
+| Milestone | Chat / branch | Tracker | State |
+| --- | --- | --- | --- |
+| M8 | `01a0e617-9cba-7260-a64e-409403164a7b` / `codex/milestone-8` | Issue #9, GitHub milestone 9 | Active implementation; based on `9a7514f` |
+| M9 | Create `Milestone 9` after reviewed M8 integration | Issue #10, GitHub milestone 10 | Queued |
+| M10 | Create `Milestone 10` after reviewed M9 integration | Issue #11, GitHub milestone 11 | Queued |
+| M11 | Create `Milestone 11` after reviewed M10 integration | Issue #12, GitHub milestone 12 | Queued |
+
+M8 worktree: `D:/CodexData/.codex/worktrees/1ac4/REACT harness`. Ready thread ID above is confirmed by a compact wait snapshot (active); pending creation ID was `client-new-thread:24b82153-b682-45f6-8909-1e5646bf381c`. Last wait cursor: `e4c85478-d782-4671-b4d0-aa96ffd38185:1`.
+
+M8 preliminary interface proposal approved: GET/PATCH `/api/preferences` with persistent `debugMode` and `defaultApprovalMode`; POST `/api/connection-check` with catalog and per-role sanitized results; current-chat approval changes conservatively rejected while active work/proposals could be released. Child will use managed scheduler accounting and bounded cancellation-aware probes. Coordinator advised enough output headroom for reasoning providers (up to 1024/configured cap), clear timeout versus format failures, and not-checked results for unattempted roles. Exact final contract remains subject to delivery review.
+
+Do not duplicate M8 work or dispatch M9 early. Inspect compact child status at scheduled check-in, assist routine stalls, and review the delivered branch/report before integration. Current main contains only planning/report changes for this sequence; the draft feature code remains unmerged. No new full-suite or live-provider validation is claimed for planning changes.
 
 Latest user follow-up (2026-09-26): implemented a draggable editor divider and expand/restore control, preserving mounted editor buffers and conversation state. Divider supports arrow keys, Home/End, and double-click reset; expansion restores the chosen split width. Typecheck, production build, and all 245 portable tests passed (10 platform skips); localhost preview returned HTTP 200 after rebuilding. Browser interaction remains unverified because the prior browser permission block is unresolved. The heartbeat stays paused; do not poll for work-only credentials. This update supersedes the historical blocked audit below: visual direction is accepted and live STARK testing will happen at work.
 
