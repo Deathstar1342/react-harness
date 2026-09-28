@@ -28,6 +28,7 @@ import type {
 } from "../shared/types";
 import { errorText, formatTime, id, post, request } from "./api";
 import { FilePanel } from "./FilePanel";
+import { ChangesPanel } from './ChangesPanel';
 import { ActivityDrawer, ApprovalCard, PlanPanel } from "./Panels";
 import { ProjectDialog, SettingsDialog } from "./WorkspaceDialogs";
 import { useConversation } from "./useConversation";
@@ -42,6 +43,7 @@ function Conversation({
   debug,
   onChange,
   onFiles,
+  onChanges,
   onFileRevision,
   draft,
   setDraft,
@@ -52,6 +54,7 @@ function Conversation({
   debug: boolean;
   onChange: () => void;
   onFiles: () => void;
+  onChanges: () => void;
   onFileRevision: (revision: number) => void;
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -201,6 +204,7 @@ function Conversation({
           <button className="icon-button" onClick={onFiles} aria-label="Toggle files" title="Files">
             <FileCode2 size={15} />
           </button>
+          <button className="text-button" onClick={onChanges}>Changes</button>
         </div>
       </header>
       <div
@@ -541,6 +545,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [sidebar, setSidebar] = useState(false);
   const [files, setFiles] = useState(false);
+  const [changes, setChanges] = useState(false);
   const editorLayout = useEditorLayout();
   const [dirty, setDirty] = useState(false);
   const [fileRevision, setFileRevision] = useState(0);
@@ -816,6 +821,7 @@ export function App() {
               debug={preferences?.debugMode ?? false}
               onChange={() => void refreshChats()}
               onFiles={() => setFiles((old) => !old)}
+              onChanges={() => setChanges(true)}
               onFileRevision={updateFileRevision}
             />
           ) : (
@@ -826,6 +832,7 @@ export function App() {
                   <h1>{project?.name ?? "Welcome to Harness"}</h1>
                 </div>
                 {project && (
+                  <div className="header-actions">
                   <button
                     className="icon-button"
                     aria-label="Toggle files" title="Files"
@@ -833,6 +840,8 @@ export function App() {
                   >
                     <FileCode2 size={15} />
                   </button>
+                  <button className="text-button" onClick={()=>setChanges(true)}>Changes</button>
+                  </div>
                 )}
               </header>
               <div className="center-empty">
@@ -882,6 +891,7 @@ export function App() {
         </div>
       </div>
       {showSettings && <SettingsDialog chatId={chatId || undefined} onPreferences={setPreferences} onClose={() => setShowSettings(false)} />}
+      {changes && project && <ChangesPanel key={project.id} projectId={project.id} revision={fileRevision} onClose={()=>setChanges(false)} />}
       {showProject && (
         <ProjectDialog
           onClose={() => setShowProject(false)}

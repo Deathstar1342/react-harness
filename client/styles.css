@@ -1989,3 +1989,15 @@ option {
 .connection-results ul { padding-left: 18px; }
 .connection-results li { margin: 10px 0; }
 .connection-results li span { display: block; margin-top: 3px; color: #b7b8bb; }
+
+.changes-dialog { width: min(1100px, 94vw); max-width: 1100px; }
+.changes-layout { display: grid; grid-template-columns: minmax(210px, 30%) minmax(0, 1fr); gap: 24px; margin-top: 16px; }
+.changes-layout nav { max-height: 65vh; overflow: auto; }
+.changes-review { min-width: 0; max-height: 65vh; overflow: auto; }
+.change-file { display: block; width: 100%; text-align: left; padding: 10px 6px; overflow-wrap: anywhere; }
+.change-file small { display: block; opacity: .65; margin-top: 4px; }
+.change-diff { white-space: pre; overflow: auto; padding: 14px; background: #16171a; font: 12px/1.6 monospace; tab-size: 4; }
+.change-diff .added { color: #a2d6ab; }
+.change-diff .removed { color: #f0a6a6; }
+.change-diff .location { color: #a8bce8; }
+@media (max-width: 700px) { .changes-layout { grid-template-columns: 1fr; } .changes-layout nav { max-height: 25vh; } .changes-review { max-height: 40vh; } }

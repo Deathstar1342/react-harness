@@ -83,6 +83,8 @@ describe('durable architect orchestration',()=> {
   });
   it('can resume a persisted pending approval in a new runtime',async()=> {
     const t = setup([delegate(),action('write_file',{path:'x',content:'new',baseHash:null}),final(),verdict(),final()]);
+    const read = t.tools.read;
+    t.tools.read = async (root,path)=>path === 'x' ? {path,content:'',hash:null} : read(root,path);
     await t.runtime.submit(t.chat.id,'Build');await t.runtime.wait(t.chat.id);await t.runtime.close();
     const next = new Runtime(t.store,t.provider,t.tools,t.config,t.hooks);
     await next.decide(t.store.approvals(t.chat.id)[0].id,'approve');await next.wait(t.chat.id);

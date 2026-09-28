@@ -66,7 +66,7 @@ export class WorkspaceFiles {
     if (lease && lease.expires <= Date.now()) leases.delete(id);
     else if (lease && lease.owner !== owner) throw new ToolError('An editor has unsaved changes; refresh after it saves or releases its lease.', 'CONFLICT');
   }
-  async save(root: string, input: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot> {
+  async save(root: string, input: string, content: string, baseHash: string | null, owner?: string, beforeMutation?: () => void, remove = false): Promise<FileSnapshot> {
     if (typeof content !== 'string' || Buffer.from(content).toString('utf8') !== content || content.includes('\0') || Buffer.byteLength(content) > this.options.maxFileBytes) throw new ToolError('Invalid content or file exceeds size limit.');
     if (baseHash !== null && !/^[a-f0-9]{64}$/.test(baseHash)) throw new ToolError('Expected SHA-256 baseHash or null for a new file.');
     const target = await scoped(root, input), id = key(target.absolute);
@@ -82,6 +82,16 @@ export class WorkspaceFiles {
       const before = await this.read(root, input);
       if (before.hash !== baseHash) throw new ToolError('File changed since it was read. Refresh and propose a new edit.', 'CONFLICT');
       await scoped(root, input);
+      if (remove) {
+        // Deletion never creates parents or follows links; use the same lock as saves.
+        this.checkLease(id);
+        if (baseHash === null || (await this.read(root, input)).hash !== baseHash) throw new ToolError('File changed before removal.', 'CONFLICT');
+        await scoped(root, input);
+        this.checkLease(id);
+        beforeMutation?.();
+        await unlink(target.absolute);
+        return { path: target.relative, content: '', hash: null };
+      }
       await mkdir(path.dirname(target.absolute), { recursive: true });
       await scoped(root, input);
       temporary = path.join(path.dirname(target.absolute), `.rh-write-${randomUUID()}`);
@@ -92,6 +102,8 @@ export class WorkspaceFiles {
       this.checkLease(id, owner);
       if ((await this.read(root, input)).hash !== baseHash) throw new ToolError('File changed before applying the edit.', 'CONFLICT');
       await scoped(root, input);
+      this.checkLease(id, owner);
+      beforeMutation?.();
       await rename(temporary, target.absolute);
       temporary = undefined;
       // Only the editor knows whether more keystrokes arrived during this save.

@@ -14,6 +14,7 @@ import { Store } from './store.js';
 import { WorkspaceLocations } from './workspace.js';
 import { Settings } from './settings.js';
 import { ConnectionDiagnostics } from './diagnostics.js';
+import { Changes } from './changes.js';
 import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 
@@ -25,6 +26,7 @@ export async function createApp(options: AppOptions) {
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
+  const changes = new Changes(store,tools,runtime);
   const locations = new WorkspaceLocations(store,config.workspaceRoot);
   const settings = new Settings(store,config.approvalMode);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
@@ -150,6 +152,20 @@ export async function createApp(options: AppOptions) {
   app.post('/api/chats/:id/control',async request=> {const {action} = z.object({action:z.enum(['pause','resume','interrupt'])}).strict().parse(request.body);await runtime.control(paramId(request.params),action);return {ok:true};});
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
+  app.get('/api/projects/:id/changes',async request=>changes.list(paramId(request.params)));
+  app.get('/api/projects/:id/diff',async request=>{
+    const {path} = z.object({path:z.string().min(1).max(4096)}).strict().parse(request.query);
+    return changes.diff(paramId(request.params),path);
+  });
+  app.get('/api/projects/:id/change/:changeId',async request=>{
+    const {id,changeId} = z.object({id:z.string(),changeId:z.string()}).parse(request.params);
+    return changes.preview(id,changeId);
+  });
+  app.post('/api/projects/:id/change/:changeId/undo',async request=>{
+    const {id,changeId} = z.object({id:z.string(),changeId:z.string()}).parse(request.params);
+    const {expectedHash,previewToken} = z.object({expectedHash:z.string().regex(/^[a-f0-9]{64}$/),previewToken:z.string().uuid()}).strict().parse(request.body);
+    return changes.undo(id,changeId,expectedHash,previewToken);
+  });
   app.get('/api/projects/:id/file',async request=> {const {path:relative} = z.object({path:z.string().min(1)}).parse(request.query);return tools.read(store.project(paramId(request.params)).path,relative);});
   app.put('/api/projects/:id/file',async request=> {
     const body = z.object({path:z.string().min(1),content:z.string().max(1024*1024),baseHash:z.string().nullable(),owner:z.string().min(1).max(200)}).strict().parse(request.body);

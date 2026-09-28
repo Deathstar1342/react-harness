@@ -65,6 +65,8 @@ The shell runs with the backend user's operating-system permissions. A working d
 
 Linux PTY sessions retain `cd` and shell variables across commands and sequential delegations in the same chat while the backend stays alive. Restarting the backend does not restore shell memory or processes.
 
+Open **Changes** beside Files to review current Git changes or separate recorded agent writes. Git changes include pre-existing work, manual edits, and shell effects. Select a recorded write to see its original diff and an explicit undo preview, then choose **Undo this write**. Pause active chats in that project first. Undo requires the file to still match the recorded result and have no dirty editor lease; it preserves Git staging and unrelated files. It restores one file's previous content or removes that one newly created file. Shell effects, old actions without snapshots, and uncertain operations have no automatic undo. See [changes and undo](docs/setup.md#changes-and-undo) for limits and recovery.
+
 ## Models, context, and test evidence
 
 **Settings → Test connection** checks the provider catalog and each configured role using small, bounded model requests. Results distinguish successful, failed, and unattempted checks. It uses your configured transport and account budgets without executing actions or exposing raw replies. A passing check establishes basic connectivity and reply-format compatibility, not task completion quality.
