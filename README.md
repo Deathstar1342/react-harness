@@ -45,6 +45,10 @@ Imported directories stay in place; importing does not copy files or rewrite exi
 
 Send `/plan ...` to plan without new mutations. Send `/btw ...` or another message during a run to steer it at the next safe boundary. Pause, resume, and interrupt are available in the chat. Cancelling does not undo changes already applied. After a backend restart, resume explicitly; an uncertain command is reported instead of blindly replayed.
 
+Put project conventions in a root `AGENTS.md` (see [example](docs/examples/AGENTS.md.example)). The architect, coder, and critic receive fresh guidance automatically, separately from conversation summaries. Explicit user requests take precedence; runtime permissions, approval rules, and the response protocol still apply. Only the root file is loaded; nested files are not discovered.
+
+Use a regular UTF-8 text file of at most 32,000 bytes. Missing or empty files are supported; invalid, oversized, symbolic-linked, or hard-linked files stop the run until repaired or removed. Changes are checked around requests and before execution, including after approval waits and on resume, without relying on file-watcher notifications. Changed guidance discards prepared proposals for reconsideration and invalidates their approvals. It does not undo completed work or stop an already running command. See [project guidance details](docs/setup.md#project-guidance) for recovery and freshness limits.
+
 ## Approvals and editing
 
 Open **Settings** to select an approval level for the current chat or set the default for future chats. These are separate controls and save immediately. Pause active work and resolve pending proposals before changing the current chat's mode; changing a default does not alter existing chats or approve a proposal.

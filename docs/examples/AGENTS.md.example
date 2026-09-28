@@ -1,0 +1,24 @@
+# Project working agreement
+
+Adapt this example and save it as AGENTS.md at your project's root.
+
+## Scope and conventions
+
+- Read the task and existing implementation before making changes.
+- Preserve unrelated work and follow the naming/style of nearby code.
+- Keep public interfaces compatible; explain changes to callers explicitly.
+- Use the project's existing dependencies unless the task requires otherwise.
+
+## Verification
+
+- Run the relevant project checks after code changes and report their results.
+- Distinguish automated results from browser, device, and live-service acceptance.
+- Report blockers and uncertain command outcomes without claiming success.
+
+## Collaboration
+
+- The architect coordinates the task, the coder implements within scope, and the
+  critic independently reviews actual files and evidence.
+- Explicit user requests and runtime controls take precedence over this file.
+- This file describes conventions; it does not grant approval or change tool
+  permissions. Do not put credentials or secrets here.

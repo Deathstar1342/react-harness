@@ -15,7 +15,7 @@ import type { Chat, ModelProvider, ToolService } from '../shared/types.js';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const valid = JSON.stringify({ version: 1, type: 'final', message: 'Connection OK' });
-const tools: ToolService = { inspect: vi.fn(async () => ({ effect: 'read' as const, risk: 'routine' as const, description: '' })), execute: vi.fn(async () => ({ ok: true, output: '' })), read: async () => ({ path: 'x', content: 'x', hash: 'hash' }), list: async () => [], save: vi.fn(async () => ({ path: 'x', content: '', hash: '' })), setDirty: vi.fn(), dispose: async () => {} };
+const tools: ToolService = { inspect: vi.fn(async () => ({ effect: 'read' as const, risk: 'routine' as const, description: '' })), execute: vi.fn(async () => ({ ok: true, output: '' })), read: async (_root, path) => path === 'AGENTS.md' ? { path, content: '', hash: null } : { path: 'x', content: 'x', hash: 'hash' }, list: async () => [], save: vi.fn(async () => ({ path: 'x', content: '', hash: '' })), setDirty: vi.fn(), dispose: async () => {} };
 async function fixture(provider: ModelProvider = { models: async () => ['a', 'c', 'r'], complete: async () => ({ text: valid }) }) {
   const root = await mkdtemp(path.join(tmpdir(), 'harness-m8-'));
   cleanup.push(async () => { if (path.dirname(root) !== path.resolve(tmpdir()) || !path.basename(root).startsWith('harness-m8-')) throw new Error('Unsafe test cleanup'); await rm(root, { recursive: true, force: true }); });
