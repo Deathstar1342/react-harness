@@ -269,11 +269,14 @@ export function TestReports({ reports }: { reports: TestReport[] }) {
 export function ActivityDrawer({
   events,
   tests,
+  debug = false,
 }: {
   events: RunEvent[];
   tests: TestReport[];
+  debug?: boolean;
 }) {
-  const [tab, setTab] = useState<"terminal" | "tests">("terminal");
+  const [selectedTab, setTab] = useState<"terminal" | "tests">("tests");
+  const tab = debug ? selectedTab : 'tests';
   const [open, setOpen] = useState(false);
   const output = terminalEvents(events);
   return (
@@ -282,7 +285,7 @@ export function ActivityDrawer({
       aria-label="Execution evidence"
     >
       <div className="drawer-tabs">
-        <button
+        {debug && <button
           className={tab === "terminal" && open ? "active" : ""}
           onClick={() => {
             setTab("terminal");
@@ -292,7 +295,7 @@ export function ActivityDrawer({
         >
           <Terminal size={15} />
           Activity <span>{output.length}</span>
-        </button>
+        </button>}
         <button
           className={tab === "tests" && open ? "active" : ""}
           onClick={() => {
@@ -303,6 +306,7 @@ export function ActivityDrawer({
         >
           <TestTube2 size={15} />
           Tests <span>{tests.length}</span>
+          {tests.some(test => test.status !== 'passed') && <span className="test-status failed">Review results</span>}
         </button>
         {open && (
           <button

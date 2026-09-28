@@ -1981,3 +1981,11 @@ option {
 .test-runner[open] > summary::before { transform: rotate(90deg); }
 .test-runner > summary::-webkit-details-marker { display: none; }
 .test-runner-body { padding-left: 18px; }
+
+.settings-section { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 16px; }
+.settings-section select { width: 100%; margin-top: 5px; padding: 8px; background: #222325; color: inherit; border: 1px solid #424347; border-radius: 5px; }
+.settings-section .text-button { margin-left: 12px; }
+.connection-results { margin-top: 16px; font-size: 13px; }
+.connection-results ul { padding-left: 18px; }
+.connection-results li { margin: 10px 0; }
+.connection-results li span { display: block; margin-top: 3px; color: #b7b8bb; }

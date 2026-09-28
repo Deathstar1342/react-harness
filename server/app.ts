@@ -12,6 +12,9 @@ import { publicSettings } from './config.js';
 import { Runtime, type RuntimeHooks } from './runtime.js';
 import { Store } from './store.js';
 import { WorkspaceLocations } from './workspace.js';
+import { Settings } from './settings.js';
+import { ConnectionDiagnostics } from './diagnostics.js';
+import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 
 const executeFile = promisify(execFile);
@@ -23,6 +26,8 @@ export async function createApp(options: AppOptions) {
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
   const locations = new WorkspaceLocations(store,config.workspaceRoot);
+  const settings = new Settings(store,config.approvalMode);
+  const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
   const watchers = new Map<string,FSWatcher>();
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
@@ -87,7 +92,18 @@ export async function createApp(options: AppOptions) {
   });
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
   app.get('/api/health',async()=>({ok:true}));
-  app.get('/api/settings',async()=>publicSettings(config));
+  app.get('/api/settings',async()=>({...publicSettings(config),approvalMode:settings.get().defaultApprovalMode}));
+  app.get('/api/preferences',async()=>settings.get());
+  app.patch('/api/preferences',async request=>settings.update(z.object({debugMode:z.boolean().optional(),defaultApprovalMode:approvalMode.optional()}).strict().parse(request.body)));
+  app.post('/api/connection-check',async(request,reply)=> {
+    z.object({}).strict().parse(request.body);
+    const controller = new AbortController();
+    const abort = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    request.raw.on('aborted',abort);
+    reply.raw.on('close',abort);
+    try { return await diagnostics.run(controller.signal); }
+    finally { request.raw.off('aborted',abort);reply.raw.off('close',abort); }
+  });
   app.get('/api/models',async()=>({models:await provider.models()}));
   app.get('/api/projects',async()=>store.projects());
   app.get('/api/workspace',async()=>locations.settings());
@@ -113,12 +129,17 @@ export async function createApp(options: AppOptions) {
   app.post('/api/projects/:id/chats',async(request,reply)=> {
     const body = z.object({title:z.string().trim().min(1).max(200).optional(),approvalMode:approvalMode.optional()}).strict().parse(request.body);
     const id = paramId(request.params); watchProject(id);
-    return reply.code(201).send(store.createChat(id,body.title ?? 'New chat',body.approvalMode ?? config.approvalMode));
+    return reply.code(201).send(store.createChat(id,body.title ?? 'New chat',body.approvalMode ?? settings.get().defaultApprovalMode));
   });
   app.get('/api/chats/:id',async request=> {const id = paramId(request.params);watchProject(store.chat(id).projectId);return store.detail(id);});
   app.patch('/api/chats/:id',async request=> {
     const body = z.object({title:z.string().trim().min(1).max(200).optional(),approvalMode:approvalMode.optional()}).strict().parse(request.body);
-    return store.updateChat(paramId(request.params),body);
+    const id = paramId(request.params), chat = store.chat(id);
+    if (body.approvalMode && body.approvalMode !== chat.approvalMode &&
+        (['running','awaiting_approval'].includes(chat.status) || store.approvals(id).some(item=>item.status==='pending'))) {
+      throw Object.assign(new Error('Pause the chat and resolve pending proposals before changing its approval mode'),{statusCode:409});
+    }
+    return store.updateChat(id,body);
   });
   app.post('/api/chats/:id/messages',async(request,reply)=> {
     const body = z.object({content:z.string().trim().min(1).max(100000)}).strict().parse(request.body);
@@ -169,7 +190,7 @@ export async function createApp(options: AppOptions) {
     await app.register(staticFiles,{root:staticRoot,prefix:'/',index:'index.html'});
     app.setNotFoundHandler((request,reply)=>request.url.startsWith('/api') ? reply.code(404).send({error:'API route not found'}) : reply.sendFile('index.html'));
   }
-  app.addHook('preClose',async()=>{closing=true;for(const stream of eventStreams) stream.end();});
+  app.addHook('preClose',async()=>{closing=true;for(const stream of eventStreams) stream.end();await diagnostics.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
   return {app,store,runtime};
 }

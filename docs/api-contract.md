@@ -4,7 +4,10 @@ Types in shared/types.ts are the integration boundary. All JSON API failures ret
 
 ## HTTP interface (coordinator implements)
 
-- GET /api/settings -> PublicSettings (never credentials)
+- GET /api/settings -> PublicSettings (never credentials); approvalMode reflects the persisted future-chat default, falling back to backend APPROVAL_MODE.
+- GET /api/preferences -> Preferences { debugMode: boolean, defaultApprovalMode: ApprovalMode }; backend-wide durable preferences, Debug defaults to false.
+- PATCH /api/preferences { debugMode?, defaultApprovalMode? } -> Preferences; strict partial update, persists only those preferences. Existing chats, pending proposals and workspace settings remain unchanged.
+- POST /api/connection-check {} -> ConnectionReport { ok, completedAt, checks: [{target:'catalog'|'architect'|'coder'|'critic', status:'passed'|'failed'|'skipped', message}] }. Uses the configured provider transport and managed account scheduler for completion probes. Report messages are fixed safe text, without raw replies, catalog contents, URLs, credentials or parser exceptions. A failed check returns HTTP 200 with ok:false; a concurrent check returns 409, shutdown rejects new checks with 503. Requires an empty JSON object and the existing local-origin policy.
 - GET /api/models -> { models: string[] }
 - GET /api/projects -> Project[]
 - POST /api/projects { name, path?, mode: 'create' | 'import' } -> Project; create without path allocates a new unique folder inside the configured workspace. Import requires a selected absolute directory path.
@@ -12,9 +15,9 @@ Types in shared/types.ts are the integration boundary. All JSON API failures ret
 - PATCH /api/workspace { workspaceRoot } -> WorkspaceSettings; persist the absolute default folder for future projects without moving existing projects.
 - GET /api/directories?path= -> DirectoryListing { path, parentPath, entries:[{name,path}], roots:[{name,path}], truncated }; browse backend directories for import or workspace selection. Default path is the backend user's home. Entries are folders, sorted by name, excluding hidden folders; root shortcuts include Home, Workspace, and available drive/filesystem roots.
 - GET /api/projects/:id/chats -> Chat[]
-- POST /api/projects/:id/chats { title?, approvalMode? } -> Chat
+- POST /api/projects/:id/chats { title?, approvalMode? } -> Chat; omitted approvalMode uses the persisted future-chat default at creation time.
 - GET /api/chats/:id -> ChatDetail
-- PATCH /api/chats/:id { title?, approvalMode? } -> Chat
+- PATCH /api/chats/:id { title?, approvalMode? } -> Chat; a different approvalMode returns 409 while running, awaiting approval, or holding any pending proposal. Pause/resolve work first. A policy change never starts/resumes a run, decides a proposal, changes another chat, or changes the future-chat default.
 - POST /api/chats/:id/messages { content } -> { accepted: true }; running chat messages are steering. /plan plans without tool mutations; /btw steers.
 - POST /api/chats/:id/control { action: 'pause' | 'resume' | 'interrupt' } -> { ok: true }
 - POST /api/approvals/:id { decision: 'approve' | 'deny' } -> { ok: true }
@@ -25,6 +28,14 @@ Types in shared/types.ts are the integration boundary. All JSON API failures ret
 - POST /api/projects/:id/editor { path, owner, dirty } -> { ok: true }; heartbeat renews dirty lease while open, explicit false releases
 
 ## Provider module (M1)
+
+### Connection diagnostics (M8)
+
+One diagnostic can run per backend. Its 25-second total deadline includes catalog retrieval, scheduler queue waits and all three serial role probes; the browser uses a 30-second upper bound and exposes Cancel check. Disconnect, Settings close and backend shutdown cancel outstanding work. Unattempted roles are reported as skipped (shown as "not checked"). No automatic retries are added; the production provider already has internal retries disabled.
+
+The catalog must contain each exact configured model ID. Available roles each receive a small ordinary text request for the version-1 final envelope with the fixed message `Connection OK`, capped at min(1024, configured max output tokens). Diagnostics uses the configured streaming behavior; it does not send native tools or response_format. Normal scheduler estimates/reported usage and conservative uncertain charges apply, including failed/aborted probes. Catalog access is one bounded GET, not a token-bearing completion reservation. Small context/account budgets may reject the test before transport.
+
+Only complete, strict final replies with the expected message pass; actions, refusals, wrong envelopes, malformed/oversized replies and incomplete finishes fail. Completed text is limited to 2048 characters for diagnostic parsing; existing provider byte/stream bounds apply before it. There is no tool/runtime execution path and no project/chat context or durable model transcript for a probe. Budget, authentication, throttling, refusal, timeout, truncation/output limit and invalid-reply failures have sanitized explanations. Passing diagnostics verifies this small probe, not general task quality or full live-provider acceptance.
 
 server/provider.ts exports StarkProvider implementing ModelProvider. Constructor accepts `{ baseUrl: string, apiKey: string, streaming?: boolean, timeoutMs?: number }`. No server config import. server/protocol.ts exports parseAgentResponse(text): AgentResponse; invalid, partial, unknown actions, or malformed arguments throw descriptive errors. Export protocolInstructions(role) with role-specific JSON output instructions. No tools or response_format in provider requests. Use fetch and AbortSignal. Tests use local fake HTTP servers.
 
@@ -58,3 +69,5 @@ server/tools/index.ts exports WorkspaceTools implementing ToolService; construct
 ## UI module (M4)
 
 Own client/** and index.html. Use actual HTTP API, no static fake chat data. Refetch durable state after SSE events; stream deltas separately so incomplete JSON is never shown as successful execution. Chat is central. Monaco editor/diff and test trees are collapsible. Make desktop and narrow layouts usable. Use lucide-react icons. API credentials stay backend-only. Report dependency additions to coordinator rather than altering root package files concurrently.
+
+M8 Settings saves current-chat approval separately from the future-chat default and Debug preference. Preference controls save immediately; workspace folder changes retain their explicit Save workspace button. Debug is backend-persisted, false by default, and does not affect model context or execution. The default conversation shows user/architect/system messages and failed tool results; successful tool messages, coder/critic messages and the Activity trace tab appear with Debug enabled. Runtime/tool errors remain visible independently, and approvals with exact diffs plus structured test results remain usable in both views. Tests with failures/errors/cancellation show a review indicator while the drawer is collapsed. Editor buffers, leases and resize/expand state are not remounted when changing Debug.

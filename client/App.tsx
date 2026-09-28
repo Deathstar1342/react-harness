@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import type {
-  ApprovalMode,
+  Preferences,
   Chat,
   Project,
   PublicSettings,
@@ -32,17 +32,14 @@ import { ActivityDrawer, ApprovalCard, PlanPanel } from "./Panels";
 import { ProjectDialog, SettingsDialog } from "./WorkspaceDialogs";
 import { useConversation } from "./useConversation";
 import { useEditorLayout } from "./useEditorLayout";
-
-const approvalNames: Record<ApprovalMode, string> = {
-  balanced: "Balanced",
-  review: "Review every change",
-  autonomous: "Full workspace autonomy",
-};
+import { getPreferences } from './settings';
+import { visibleMessages, conversationErrors } from './conversation';
 
 function Conversation({
   chatId,
   project,
   configured,
+  debug,
   onChange,
   onFiles,
   onFileRevision,
@@ -52,6 +49,7 @@ function Conversation({
   chatId: string;
   project: Project;
   configured: boolean;
+  debug: boolean;
   onChange: () => void;
   onFiles: () => void;
   onFileRevision: (revision: number) => void;
@@ -251,11 +249,11 @@ function Conversation({
             </div>
           ) : (
             <div className="messages">
-              {detail.messages.map((message) =>
+              {visibleMessages(detail.messages, debug).map((message) =>
                 message.role === "tool" ? (
-                  <details className="tool-message" key={message.id}>
+                  <details className={`tool-message ${message.metadata?.ok === false ? 'inline-error' : ''}`} key={message.id} open={message.metadata?.ok === false}>
                     <summary>
-                      Tool result <span>{formatTime(message.createdAt)}</span>
+                      {message.metadata?.ok === false ? 'Tool action failed' : 'Tool result'} <span>{formatTime(message.createdAt)}</span>
                     </summary>
                     <pre>{message.content}</pre>
                   </details>
@@ -292,6 +290,7 @@ function Conversation({
               )}
             </div>
           )}
+          {conversationErrors(detail.events, detail.messages).map(failure => <div key={failure.id} className="inline-error" role="alert">{failure.message}</div>)}
           {pending.map((approval) => (
             <ApprovalCard
               key={approval.id}
@@ -331,14 +330,14 @@ function Conversation({
                 <i />
               </span>
               {stream
-                ? "Architect is composing a response…"
+                ? "A response is being prepared…"
                 : "Work is in progress…"}
               <span className="muted">You can steer or pause at any time.</span>
             </div>
           )}
           {chat.status === "error" && (
             <div className="inline-error" role="alert">
-              The run stopped with an error. Inspect Activity for details, then
+              The run stopped with an error. Review the errors above, then
               resume when ready.
             </div>
           )}
@@ -473,28 +472,6 @@ function Conversation({
           </div>
         </form>
         <div className="conversation-controls">
-          <label className="approval-mode">
-            <span className="sr-only">Approval mode</span>
-            <select
-              aria-label="Approval mode"
-              value={chat.approvalMode}
-              disabled={!!busy || running || pending.length > 0}
-              onChange={(event) =>
-                void act("mode", () =>
-                  request(`/chats/${id(chatId)}`, {
-                    method: "PATCH",
-                    body: JSON.stringify({ approvalMode: event.target.value }),
-                  }),
-                )
-              }
-            >
-              {Object.entries(approvalNames).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
           <div className="run-controls">
             <span className={`status-dot ${chat.status}`} />
             <span className="run-status">
@@ -547,13 +524,14 @@ function Conversation({
           </div>
         </div>
       </div>
-      <ActivityDrawer events={detail.events} tests={detail.tests} />
+      <ActivityDrawer events={detail.events} tests={detail.tests} debug={debug} />
     </main>
   );
 }
 
 export function App() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [chats, setChats] = useState<Chat[]>([]);
@@ -585,13 +563,16 @@ export function App() {
   const initialize = useCallback(async () => {
     setLoading(true);
     setError("");
-    const [config, list] = await Promise.allSettled([
+    const [config, list, prefs] = await Promise.allSettled([
       request<PublicSettings>("/settings"),
       request<Project[]>("/projects"),
+      getPreferences(),
     ]);
     if (!mounted.current) return;
     if (config.status === "fulfilled") setSettings(config.value);
     else setError(errorText(config.reason));
+    if (prefs.status === 'fulfilled') setPreferences(prefs.value);
+    else setError(errorText(prefs.reason));
     if (list.status === "fulfilled") {
       setProjects(list.value);
       setProjectId((current) => current || list.value[0]?.id || "");
@@ -630,9 +611,7 @@ export function App() {
     setError("");
     const target = project.id;
     try {
-      const chat = await post<Chat>(`/projects/${id(target)}/chats`, {
-        approvalMode: settings?.approvalMode ?? "balanced",
-      });
+      const chat = await post<Chat>(`/projects/${id(target)}/chats`, {});
       if (projectRef.current === target) {
         setChats((old) => [chat, ...old]);
         setChatId(chat.id);
@@ -834,6 +813,7 @@ export function App() {
               chatId={chatId}
               project={project}
               configured={!!settings?.configured}
+              debug={preferences?.debugMode ?? false}
               onChange={() => void refreshChats()}
               onFiles={() => setFiles((old) => !old)}
               onFileRevision={updateFileRevision}
@@ -901,7 +881,7 @@ export function App() {
           )}
         </div>
       </div>
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsDialog chatId={chatId || undefined} onPreferences={setPreferences} onClose={() => setShowSettings(false)} />}
       {showProject && (
         <ProjectDialog
           onClose={() => setShowProject(false)}
