@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "createdAt": "2026-09-29T16:35:17.010Z",
+  "role": "critic",
+  "model": "gemini-3.6-flash",
+  "streaming": false,
+  "maxTokens": 16384,
+  "attempts": [
+    {
+      "test": "simple-json",
+      "attempt": 1,
+      "expected": {
+        "version": 1,
+        "type": "final",
+        "message": "Connection OK"
+      },
+      "httpStatus": 200,
+      "elapsedMs": 18847,
+      "choiceCount": 1,
+      "finishReason": "stop",
+      "content": "{\"version\":1,\"type\":\"final\",\"message\":\"Connection OK\"}\n\n",
+      "contentType": "string",
+      "contentClipped": false,
+      "refusal": null,
+      "providerErrorPresent": false,
+      "nativeToolsPresent": false,
+      "matchesExpectedJson": true,
+      "passed": true
+    },
+    {
+      "test": "action-json",
+      "attempt": 1,
+      "expected": {
+        "version": 1,
+        "type": "action",
+        "message": "Read README.md",
+        "action": {
+          "name": "read_file",
+          "args": {
+            "path": "README.md"
+          }
+        }
+      },
+      "httpStatus": 200,
+      "elapsedMs": 19168,
+      "choiceCount": 1,
+      "finishReason": "stop",
+      "content": "{\"version\":1,\"type\":\"action\",\"message\":\"Read README.md\",\"action\":{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\"}}}\n\n",
+      "contentType": "string",
+      "contentClipped": false,
+      "refusal": null,
+      "providerErrorPresent": false,
+      "nativeToolsPresent": false,
+      "matchesExpectedJson": true,
+      "passed": true
+    }
+  ]
+}
