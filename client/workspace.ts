@@ -5,7 +5,7 @@ export const workspaceSettings = () => request<WorkspaceSettings>("/workspace");
 export const saveWorkspace = (workspaceRoot: string) =>
   request<WorkspaceSettings>("/workspace", { method: "PATCH", body: JSON.stringify({ workspaceRoot }) });
 export const listDirectories = (path?: string, signal?: AbortSignal) =>
-  request<DirectoryListing>(`/directories${path === undefined ? "" : `?path=${encodeURIComponent(path)}`}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : undefined });
+  request<DirectoryListing>(`/directories${path === undefined ? "" : `?path=${encodeURIComponent(path)}`}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(190_000)]) : undefined });
 export function createProject(name: string, mode: "create" | "import", path?: string) {
   if (!name.trim()) throw new Error("Enter a project name.");
   if (mode === "import" && !path) throw new Error("Choose a folder to import.");
