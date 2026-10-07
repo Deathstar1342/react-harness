@@ -1,0 +1,132 @@
+newuser@DG0354NBW3862:~/genai/abyssus/react-harness$ npm start
+npm notice run react-harness@0.1.0 start
+npm notice run tsx server/index.ts
+Harness backend: http://127.0.0.1:3000
+[Abyssus invalid model output] {
+  role: 'architect',
+  text: '```json\n' +
+    '{\n' +
+    '  "message": "Delegate testing of hello.py to the Coder to verify its execution and output.",\n' +
+    '  "action": "delegate",\n' +
+    '  "parameters": {\n' +
+    '    "objective": "Run the hello.py script and verify that it executes without errors and produces the expected output.",\n' +
+    '    "acceptanceCriteria": [\n' +
+    '      "hello.py executes successfully",\n' +
+    `      "The script's output is verified"\n` +
+    '    ],\n' +
+    '    "paths": [\n' +
+    '      "hello.py"\n' +
+    '    ]\n' +
+    '  }\n' +
+    '}\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+[Abyssus tool result] {
+  role: 'coder',
+  action: 'run_shell',
+  ok: true,
+  output: 'hello world\r\n'
+}
+^C
+newuser@DG0354NBW3862:~/genai/abyssus/react-harness$ 
