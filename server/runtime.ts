@@ -641,8 +641,13 @@ export class Runtime {
       For a delegate action, parameters is required and must contain:
       {"objective":"specific coder task","acceptanceCriteria":["one or more verifiable outcomes"],"paths":["optional file scope"]}
 
-      If delegation covers a plan step, add parameters.planStep={"planId":"current plan id","planVersion":1,"phaseId":"phase id","stepId":"step id"} using exact current identities. Omit it for unrelated work.
-      For set_plan, parameters must contain {"phases":[...]}. Recorded progress is owned by the application; structural revisions reset progress, identical structure preserves it.
+      For set_plan, parameters must contain:
+      {"phases":[{"id":"phase-1","title":"Short phase title","steps":[{"id":"phase-1-step-1","title":"Specific step","status":"pending"}]}]}
+
+      Each phase requires id, title, and steps.
+      Each step requires id, title, and status.
+      Status must be one of: "pending", "in_progress", "done", or "blocked".
+      Do not use plain strings for phases or steps.
       For review, parameters must contain {"focus":"what to review"}.
       For ask_user, parameters must contain {"question":"question for the user"}.
       For list_files and git_status, use {} when no arguments are needed.
@@ -650,6 +655,7 @@ export class Runtime {
       For search, use {"query":"...","path":"optional path"}.
       For git_diff, use {"path":"optional path"}.
       For complete, use {}.
+
 
       Use observed workspace evidence and the current objective to choose the next action. Do not repeat an unchanged discovery action. A missing README or empty workspace is an observation, not a blocker. When the objective is clear and implementation is needed, delegate a bounded coder task rather than repeatedly requesting project context.
 
