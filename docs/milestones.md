@@ -2,6 +2,8 @@
 
 ## Approved M12–M15 sequence (2026-10-13)
 
+Delivery: all four milestones are reviewed, integrated and published on GitHub main with exact Linux CI passing. M15 integration `141d8f4` passed run `38375035736`; detailed evidence and acceptance limits are in STATUS and each milestone report. A separately approved small visible-name/logo follow-up to **abysSUS** follows M15; it is not an additional numbered milestone. Containerization and executable packaging remain deferred.
+
 The user reports that `init_test` works with STARK at work and authorizes bringing it into `main` (this repository has no `master`). Preserve the advisor-style model wording and ordinary Chat Completions compatibility. Local main was fast-forwarded to `b12bb53`; publish the integration after M12 repairs and independent validation. The older delivery records below remain historical.
 
 Use the previous workflow: sequential dedicated chats named exactly `Milestone 12`, `Milestone 13`, `Milestone 14`, and `Milestone 15`, each in an isolated `codex/` branch/worktree. Children commit and report to coordinator `01a0dc0a-8866-7182-acd2-da997779962d`; the user explicitly authorizes messaging between these chats, routine coordinator decisions, commits and pushes. Children do not merge main or begin successor work. The coordinator independently reviews, requests corrections, validates and pushes integration before dispatching the successor. Check the active chat every 15 minutes, stay quiet when unchanged, pause immediately for a genuine user-assistance blocker, and pause after M15 delivery. Work-only live STARK access is a known acceptance limit, not an implementation blocker.

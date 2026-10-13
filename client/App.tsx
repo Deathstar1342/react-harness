@@ -37,6 +37,7 @@ import { useEditorLayout } from "./useEditorLayout";
 import { getPreferences } from './settings';
 import { conversationEntries, isToolProblem, toolMessageLabel } from './conversation';
 import { Overflow, RemovalDialog } from './RemovalDialog';
+import logo from './assets/abyssus-logo.png';
 
 export function Conversation({
   chatId,
@@ -238,7 +239,7 @@ export function Conversation({
           {entries.length === 0 ? (
             <div className="welcome">
               <span className="welcome-mark">
-                <Sparkles size={27} />
+                <img className="product-logo" src={logo} alt="abysSUS logo" />
               </span>
               <div className="eyebrow">Your architect</div>
               <h2>What are we working on?</h2>
@@ -691,10 +692,10 @@ export function App() {
       <aside className="sidebar" aria-label="Projects and chats">
         <div className="brand">
           <span className="brand-mark">
-            <Sparkles size={20} />
+            <img className="product-logo" src={logo} alt="" />
           </span>
           <span>
-            harness<span className="brand-period">.</span>
+            abysSUS<span className="brand-period">.</span>
           </span>
           <button
             className="icon-button close-sidebar"
@@ -864,7 +865,7 @@ export function App() {
               <header className="chat-header">
                 <div className="chat-title">
                   <div className="eyebrow">Your workspace</div>
-                  <h1>{project?.name ?? "Welcome to Harness"}</h1>
+                  <h1>{project?.name ?? "Welcome to abysSUS"}</h1>
                 </div>
                 {project && (
                   <div className="header-actions">
@@ -882,9 +883,9 @@ export function App() {
               </header>
               <div className="center-empty">
                 <span className="welcome-mark">
-                  <Sparkles size={30} />
+                  <img className="product-logo" src={logo} alt="" />
                 </span>
-                <div className="eyebrow">Harness</div>
+                <div className="eyebrow">abysSUS</div>
                 <h2>
                   {loading
                     ? "Opening your workspace…"

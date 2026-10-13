@@ -39,7 +39,7 @@ export function RemovalDialog({project,chat,blocked,onClose,onRemoved,onFailure}
       <pre className="removal-path">{preview.canonicalPath}</pre>
       <label className="field-label" htmlFor="confirm-removal-path">Type the exact directory path to confirm</label>
       <input id="confirm-removal-path" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" spellCheck={false} disabled={busy}/>
-    </> : <><p>Remove “{project.name}” and all its chats from Harness. Choose whether to keep the project files.</p><pre className="removal-path">{project.path}</pre></>}
+    </> : <><p>Remove “{project.name}” and all its chats from abysSUS. Choose whether to keep the project files.</p><pre className="removal-path">{project.path}</pre></>}
     {project.removalError && <p role="alert">{project.removalError}</p>}
     {blocked && <p role="alert">Save or discard your file edits before removing a chat or project.</p>}
     {error && <p role="alert">{error}</p>}
