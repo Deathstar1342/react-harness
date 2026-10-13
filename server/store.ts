@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { commandEvent, isCommand } from './command-events.js';
 import type { RunState } from './runtime.js';
-import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels } from '../shared/types.js';
+import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
 export class Store {
@@ -125,11 +125,11 @@ export class Store {
   }
   createChat(projectId: string, title: string, approvalMode: ApprovalMode): Chat {
     this.project(projectId);
-    const chat: Chat = { id: randomUUID(), projectId, title, approvalMode, status: 'idle', createdAt: now(), updatedAt: now(), ...(this.modelDefaults ? {models: {...this.modelDefaults}} : {}) };
+    const chat: Chat = { id: randomUUID(), projectId, title, approvalMode, status: 'idle', mode: 'execute', modeVersion: 0, createdAt: now(), updatedAt: now(), ...(this.modelDefaults ? {models: {...this.modelDefaults}} : {}) };
     this.db.prepare('INSERT INTO chats VALUES (?,?,?)').run(chat.id, projectId, JSON.stringify(chat));
     return chat;
   }
-  updateChat(id: string, patch: Partial<Pick<Chat,'title'|'approvalMode'|'status'>>): Chat {
+  updateChat(id: string, patch: Partial<Pick<Chat,'title'|'approvalMode'|'status'|'mode'|'modeVersion'>>): Chat {
     const chat = { ...this.chat(id), ...patch, updatedAt: now() };
     this.db.prepare('UPDATE chats SET data=? WHERE id=?').run(JSON.stringify(chat), id);
     this.event(id, 'status', chat);
@@ -177,6 +177,46 @@ export class Store {
       if (approval.status === 'pending' || approval.status === 'approved' && prepared.has(approval.id)) this.approval({...approval,status:'stale'});
     }
   }
+  initializePlanning() {
+    this.transaction(() => {
+      for (const chat of this.chats()) {
+        if (!chat.mode) {
+          const run = this.getState<RunState | null>(`run:${chat.id}`, null);
+          this.updateChat(chat.id, {mode: run?.planOnly ? 'plan' : 'execute', modeVersion: 0});
+        }
+        const plan = this.plan(chat.id);
+        if (plan.phases.length && !plan.id) this.revisePlan(chat.id, plan);
+      }
+    });
+  }
+  revisePlan(chatId: string, proposed: Plan): Plan {
+    if (!this.transactionEvents) return this.transaction(() => this.revisePlan(chatId, proposed));
+    const previous = this.plan(chatId);
+    const structure = (plan: Plan) => JSON.stringify(plan.phases.map(p => ({id:p.id,title:p.title,steps:p.steps.map(s=>({id:s.id,title:s.title}))})));
+    if (previous.id && structure(previous) === structure(proposed)) return previous;
+    const plan: Plan = {id: previous.id ?? randomUUID(), version: (previous.version ?? 0) + 1,
+      phases: proposed.phases.map(phase => ({id: phase.id, title: phase.title,
+        steps: phase.steps.map(step => ({id: step.id, title: step.title, status: step.status === 'blocked' ? 'blocked' : 'pending'}))}))};
+    this.setPlan(chatId, plan);
+    return plan;
+  }
+  planStep(chatId: string, ref: PlanStepRef): PlanStep | undefined {
+    const plan = this.plan(chatId);
+    if (plan.id !== ref.planId || plan.version !== ref.planVersion) return undefined;
+    return plan.phases.find(p => p.id === ref.phaseId)?.steps.find(s => s.id === ref.stepId);
+  }
+  progress(chatId: string, ref: PlanStepRef | undefined, delegationId: string, status: PlanStep['status'], outcome: string, summary: string, sourceEventId?: number): void {
+    if (!this.transactionEvents) return this.transaction(() => this.progress(chatId, ref, delegationId, status, outcome, summary, sourceEventId));
+    if (!ref || !this.planStep(chatId, ref)) return;
+    const plan = this.plan(chatId);
+    const step = plan.phases.find(p => p.id === ref.phaseId)!.steps.find(s => s.id === ref.stepId)!;
+    // An older delegation cannot overwrite a newer owner of the same step.
+    if (outcome !== 'started' && step.evidence?.delegationId !== delegationId) return;
+    const event = this.event(chatId, 'plan_progress', {...ref, delegationId, status, outcome, summary, sourceEventId});
+    step.status = status;
+    step.evidence = {eventId: event.id, delegationId, outcome, summary, ...(sourceEventId ? {sourceEventId} : {})} satisfies PlanEvidence;
+    this.setPlan(chatId, plan);
+  }
   plan(chatId: string): Plan { return this.getState(`plan:${chatId}`, { phases: [] }); }
   setPlan(chatId: string, plan: Plan) { this.setState(`plan:${chatId}`, plan); this.event(chatId,'plan',plan); }
   testReport(chatId: string, report: TestReport) {
@@ -191,6 +231,9 @@ export class Store {
     this.db.prepare("UPDATE file_changes SET status='unknown' WHERE status IN ('recording','undoing')").run();
     for (const chat of this.chats()) {
       const run = this.getState<RunState|null>(`run:${chat.id}`,null);
+      for (const frame of run?.frames ?? []) if (frame.planStep && (chat.status === 'running' || frame.pending?.stage === 'executing') && this.planStep(chat.id,frame.planStep)?.evidence?.outcome !== 'interrupted') {
+        this.progress(chat.id,frame.planStep,frame.id,'blocked','interrupted','Backend restarted; unfinished work must be reconciled before completion.');
+      }
       for (const frame of run?.frames ?? []) if (frame.pending?.stage === 'executing' && !frame.pending.commandOutcomeRecorded && isCommand(frame.pending.action)) {
         this.transaction(()=>{
           this.event(chat.id,'command',commandEvent(frame,frame.pending!,{ok:false,output:'Backend restarted during execution. Outcome is uncertain; this command will not be rerun automatically. Shell state was lost.',data:{uncertain:true,shellReset:true}}));

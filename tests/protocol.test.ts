@@ -86,7 +86,7 @@ describe('versioned strict action protocol', () => {
       expect(instructions).toContain('"action"');
       expect(instructions).toContain('"parameters"');
     }
-    expect(architect).toContain('delegate {objective:string,acceptanceCriteria:string[],paths?:string[]}');
+    expect(architect).toContain('delegate {objective:string,acceptanceCriteria:string[],paths?:string[],planStep?:{planId:string,planVersion:number,phaseId:string,stepId:string}}');
     expect(architect).toContain('Respect /plan: recommend planning only');
     expect(coder).toContain('assigned objective and file scope');
     expect(coder).toContain('write_file {path:string,content:string,baseHash:string|null}');

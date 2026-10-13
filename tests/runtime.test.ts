@@ -98,12 +98,12 @@ describe('durable architect orchestration',()=> {
     expect(t.store.events(t.chat.id).filter(event=>event.type==='review')).toHaveLength(3);
     expect(t.store.messages(t.chat.id).at(-1)?.content).toBe('Unresolved verification remains');
   });
-  it('reviews a newly completed plan step before accepting its status',async()=> {
+  it('does not accept model-authored completion without associated work',async()=> {
     const plan = {phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement',status:'done'}]}]};
-    const t = setup([action('set_plan',plan),action('review_result',{verdict:'changes_requested',findings:['No implementation evidence']}),final('Work remains')]);
+    const t = setup([action('set_plan',plan),final('Work remains')]);
     await t.runtime.submit(t.chat.id,'Build it');await t.runtime.wait(t.chat.id);
-    expect(t.store.plan(t.chat.id)).toEqual({phases:[]});
-    expect(t.store.events(t.chat.id).filter(event=>event.type==='review')).toHaveLength(1);
+    expect(t.store.plan(t.chat.id).phases[0].steps[0].status).toBe('pending');
+    expect(t.store.events(t.chat.id).filter(event=>event.type==='review')).toHaveLength(0);
     expect(t.store.chat(t.chat.id).status).toBe('idle');
   });
   it('notifies active agents of manual file edits and invalidates pending approvals',async()=> {

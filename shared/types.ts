@@ -12,11 +12,14 @@ export interface DirectoryListing { path: string; parentPath: string | null; ent
 export type RoleModels = Record<AgentRole, string>;
 export interface ProviderSettings { models: RoleModels; apiKeyConfigured: boolean; lockedFields: string[] }
 export interface ProviderSettingsPatch { models?: Partial<RoleModels>; apiKey?: string }
-export interface Chat { id: string; projectId: string; title: string; status: ChatStatus; approvalMode: ApprovalMode; createdAt: string; updatedAt: string; models?: RoleModels }
+export type ChatMode = 'plan' | 'execute';
+export interface Chat { mode?: ChatMode; modeVersion?: number; id: string; projectId: string; title: string; status: ChatStatus; approvalMode: ApprovalMode; createdAt: string; updatedAt: string; models?: RoleModels }
 export interface Message { id: string; chatId: string; role: 'user' | AgentRole | 'tool' | 'system'; content: string; createdAt: string; metadata?: Record<string, unknown> }
-export interface PlanStep { id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }
+export interface PlanStepRef { planId: string; planVersion: number; phaseId: string; stepId: string }
+export interface PlanEvidence { eventId: number; delegationId: string; outcome: string; summary: string; sourceEventId?: number }
+export interface PlanStep { evidence?: PlanEvidence; id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }
 export interface PlanPhase { id: string; title: string; steps: PlanStep[] }
-export interface Plan { phases: PlanPhase[] }
+export interface Plan { id?: string; version?: number; phases: PlanPhase[] }
 export interface Action { name: string; args: Record<string, unknown> }
 export interface AgentResponse { version: 1; type: 'message' | 'action' | 'final'; message: string; action?: Action }
 export interface ModelMessage { role: 'system' | 'user' | 'assistant'; content: string }

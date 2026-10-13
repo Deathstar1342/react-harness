@@ -135,6 +135,7 @@ export const actionSchema = z.discriminatedUnion('name', [
   z.strictObject({
     name: z.literal('delegate'),
     args: z.strictObject({
+      planStep: z.strictObject({planId: id, planVersion: z.number().int().positive(), phaseId: id, stepId: id}).optional(),
       objective: text(16_000),
       acceptanceCriteria: z.array(text(4_096)).min(1).max(100),
       paths: z.array(path).max(100).optional(),
@@ -348,7 +349,7 @@ const roleInstructions: Record<AgentRole, string> = {
 
 const roleActionGuide: Record<AgentRole, string> = {
   architect: `Allowed actions:
-delegate {objective:string,acceptanceCriteria:string[],paths?:string[]}
+delegate {objective:string,acceptanceCriteria:string[],paths?:string[],planStep?:{planId:string,planVersion:number,phaseId:string,stepId:string}}
 set_plan {phases:[{id:string,title:string,steps:[{id:string,title:string,status:"pending"|"in_progress"|"done"|"blocked"}]}]}
 review {focus:string}
 ask_user {question:string}
