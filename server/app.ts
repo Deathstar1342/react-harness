@@ -13,6 +13,7 @@ import { Runtime, type RuntimeHooks } from './runtime.js';
 import { Store } from './store.js';
 import { WorkspaceLocations } from './workspace.js';
 import { Settings } from './settings.js';
+import { ProviderSettings, type ProviderSettingsFile } from './provider-settings.js';
 import { ConnectionDiagnostics } from './diagnostics.js';
 import { Changes } from './changes.js';
 import { Removal } from './removal.js';
@@ -21,15 +22,17 @@ import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 
 const executeFile = promisify(execFile);
 const approvalMode = z.enum(['autonomous','balanced','review']);
-export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string }
+export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
+  store.initializeModels(config.models);
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
   const changes = new Changes(store,tools,runtime);
   const locations = new WorkspaceLocations(store,config.workspaceRoot);
   const settings = new Settings(store,config.approvalMode);
+  const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
   const watchers = new Map<string,FSWatcher>();
@@ -146,6 +149,8 @@ export async function createApp(options: AppOptions) {
   });
   app.get('/api/health',async()=>({ok:true}));
   app.get('/api/settings',async()=>({...publicSettings(config),approvalMode:settings.get().defaultApprovalMode}));
+  app.get('/api/provider-settings',async()=>providerSettings.get());
+  app.patch('/api/provider-settings',async request=>providerSettings.update(request.body));
   app.get('/api/preferences',async()=>settings.get());
   app.patch('/api/preferences',async request=>settings.update(z.object({debugMode:z.boolean().optional(),defaultApprovalMode:approvalMode.optional()}).strict().parse(request.body)));
   app.post('/api/connection-check',async(request,reply)=> {
@@ -196,7 +201,7 @@ export async function createApp(options: AppOptions) {
   });
   app.post('/api/chats/:id/messages',async(request,reply)=> {
     const body = z.object({content:z.string().trim().min(1).max(100000)}).strict().parse(request.body);
-    if (!config.baseUrl || !config.apiKey) return reply.code(503).send({error:'Configure STARK_BASE_URL and STARK_API_KEY in the backend .env, then restart the backend.'});
+    if (!config.baseUrl || !config.apiKey) return reply.code(503).send({error:'Set STARK_BASE_URL in the backend .env and restart for URL changes. Add the API key in Settings.'});
     await runtime.submit(paramId(request.params),body.content);
     return reply.code(202).send({accepted:true});
   });

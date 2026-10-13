@@ -806,7 +806,7 @@ export function App() {
               {error ||
                 (loading
                   ? "Connecting to the backend…"
-                  : "Connect your provider to start chatting. Set STARK_BASE_URL and STARK_API_KEY on the backend, then restart it.")}
+                  : "Connect your provider to start chatting. Set STARK_BASE_URL on the backend and restart for URL changes. Add the API key in Settings.")}
             </span>
             <button className="text-button" onClick={() => void initialize()}>
               Retry
@@ -916,7 +916,7 @@ export function App() {
           )}
         </div>
       </div>
-      {showSettings && <SettingsDialog chatId={chatId || undefined} onPreferences={setPreferences} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsDialog chatId={chatId || undefined} onPreferences={setPreferences} onSettings={setSettings} onClose={() => setShowSettings(false)} />}
       {removing && <RemovalDialog project={projects.find(p=>p.id===removing.project.id) ?? removing.project} chat={removing.chat} blocked={dirty}
         onClose={()=>setRemoving(undefined)} onFailure={()=>{void request<Project[]>('/projects').then(setProjects).catch(e=>setError(errorText(e)));}}
         onRemoved={()=>{

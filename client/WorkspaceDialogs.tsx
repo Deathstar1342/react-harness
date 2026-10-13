@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Folder, FolderOpen } from "lucide-react";
-import type { Preferences, Project, WorkspaceSettings } from "../shared/types";
+import type { Preferences, Project, WorkspaceSettings, PublicSettings } from "../shared/types";
 import { SettingsControls } from './SettingsControls';
+import { ProviderSettingsControls } from './ProviderSettingsControls';
 import { errorText } from "./api";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { Modal } from "./Modal";
@@ -63,7 +64,8 @@ export function ProjectDialog({ onCreated, onClose }: { onCreated: (project: Pro
   </Modal>;
 }
 
-export function SettingsDialog({ onClose, chatId, onPreferences }: { onClose: () => void; chatId?: string; onPreferences?: (value: Preferences) => void }) {
+export function SettingsDialog({ onClose, chatId, onPreferences, onSettings }: { onClose: () => void; chatId?: string; onPreferences?: (value: Preferences) => void; onSettings?: (value:PublicSettings)=>void }) {
+  const [providerRevision,setProviderRevision] = useState(0);
   const workspace = useWorkspaceSettings();
   const [selected, setSelected] = useState<string | null>(null);
   const [browse, setBrowse] = useState(false);
@@ -71,7 +73,8 @@ export function SettingsDialog({ onClose, chatId, onPreferences }: { onClose: ()
   const [error, setError] = useState("");
   const path = selected ?? workspace.settings?.workspaceRoot;
   return <Modal title="Settings" titleId="settings-dialog-title" onClose={onClose} busy={busy}>
-    <SettingsControls chatId={chatId} onPreferences={onPreferences} />
+    <ProviderSettingsControls onSettings={onSettings} onSaved={()=>setProviderRevision(value=>value+1)} />
+    <SettingsControls chatId={chatId} onPreferences={onPreferences} providerRevision={providerRevision} />
     <h3>Default workspace</h3>
     <p className="field-help">New projects are created inside this folder. Existing projects stay where they are.</p>
     <div className="project-destination"><code>{path ?? "Loading workspace…"}</code>

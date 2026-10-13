@@ -93,7 +93,7 @@ export class Runtime {
     readonly tools: ToolService,
     readonly config: Config,
     readonly hooks: RuntimeHooks,
-  ) {}
+  ) { store.initializeModels(config.models); }
 
   private load(chatId: string): RunState | null {
     const cached = this.runs.get(chatId);
@@ -701,7 +701,7 @@ export class Runtime {
         let announced = false;
 
         const input = {
-          model: this.config.models[frame.role],
+          model: this.store.chatModels(chatId)[frame.role],
           messages: requestMessages,
           signal,
           maxTokens: this.config.maxOutputTokens,

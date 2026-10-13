@@ -8,6 +8,16 @@ export class ProviderError extends Error {
   }
 }
 export interface StarkProviderOptions { baseUrl: string; apiKey: string; streaming?: boolean; timeoutMs?: number; maxRetries?: number }
+
+/** Capture once per invocation, including any internal retries. Old keys live only
+ * as long as their request. Errors never expose raw upstream text or credentials. */
+export class ReloadingProvider implements ModelProvider {
+  constructor(private options: () => StarkProviderOptions) {}
+  models(signal?: AbortSignal): Promise<string[]> { return new StarkProvider({...this.options()}).models(signal); }
+  complete(input: Parameters<ModelProvider['complete']>[0]): Promise<CompletionResult> {
+    return new StarkProvider({...this.options()}).complete(input);
+  }
+}
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_FRAME_CHARACTERS = 1024 * 1024;
 const MAX_RETRIES = 2;

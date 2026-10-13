@@ -5,13 +5,28 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { commandEvent, isCommand } from './command-events.js';
 import type { RunState } from './runtime.js';
-import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary } from '../shared/types.js';
+import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
 export class Store {
   readonly db: DatabaseSync;
   readonly changes = new EventEmitter();
   private transactionEvents?: RunEvent[];
+  private modelDefaults?: RoleModels;
+  initializeModels(models: RoleModels) {
+    this.transaction(() => {
+      for (const chat of this.chats()) if (!chat.models) {
+        this.db.prepare('UPDATE chats SET data=? WHERE id=?').run(JSON.stringify({...chat, models: {...models}}), chat.id);
+      }
+    });
+    this.modelDefaults = {...models};
+  }
+  setModelDefaults(models: RoleModels) { this.modelDefaults = {...models}; }
+  chatModels(chatId: string): RoleModels {
+    const models = this.chat(chatId).models;
+    if (!models) throw new Error('Chat model assignments have not been initialized');
+    return models;
+  }
   constructor(readonly filename: string) {
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new DatabaseSync(filename);
@@ -110,7 +125,7 @@ export class Store {
   }
   createChat(projectId: string, title: string, approvalMode: ApprovalMode): Chat {
     this.project(projectId);
-    const chat: Chat = { id: randomUUID(), projectId, title, approvalMode, status: 'idle', createdAt: now(), updatedAt: now() };
+    const chat: Chat = { id: randomUUID(), projectId, title, approvalMode, status: 'idle', createdAt: now(), updatedAt: now(), ...(this.modelDefaults ? {models: {...this.modelDefaults}} : {}) };
     this.db.prepare('INSERT INTO chats VALUES (?,?,?)').run(chat.id, projectId, JSON.stringify(chat));
     return chat;
   }

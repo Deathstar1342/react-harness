@@ -60,7 +60,17 @@ Use the API prefix supplied by your provider. If the discovery endpoint is `http
 
 Model IDs must match your STARK catalog exactly. The role names above are configurable defaults, not a guarantee that every STARK deployment exposes them. Requests use Chat Completions with ordinary-text JSON instructions; they do not send native tool definitions, `response_format`, or Responses API requests.
 
-Keep real keys in the local `.env`, which Git ignores. Do not put them in chat messages, screenshots, or repository files. Leaving `STARK_API_KEY` empty lets you explore the UI without calling models. Restart the backend after configuration changes.
+Keep real keys in the local `.env`, which Git ignores. Do not put them in chat messages, screenshots, or repository files. Leaving `STARK_API_KEY` empty lets you explore the UI without calling models. Restart after manual `.env` edits. Model defaults and the shared API key can also be saved through Settings without restarting, as described below.
+
+### Provider Settings
+
+Open Settings to select architect/coder/critic defaults from the discovered catalog or type exact model IDs manually when discovery is unavailable or incomplete. Choose **Save provider settings**. These defaults apply to **new chats only**; existing chats retain their saved role assignments through resume, compaction and restart. On the first M14 startup, older chats are assigned the effective models from the startup configuration before settings changes are accepted.
+
+The password field always starts empty. Leaving it blank keeps the saved key. Enter a replacement or explicitly select **Clear saved API key**, then save. The input is cleared after submission and the saved key is never sent back to the browser. A replacement/clear affects the next dispatched provider request in every chat; in-flight requests retain their captured credentials. Test connection remains a separate operation, and saving provider settings clears results that describe an older configuration. Approval, Debug and workspace controls retain their existing behavior.
+
+Settings updates this backend directory's `.env`, preserving unrelated configuration. Original process environment variables take precedence and lock the corresponding model/key controls, including externally supplied empty values. Remove such overrides from the launching shell/service and restart before editing those fields in Settings. A launcher that preloads dotenv also creates process overrides. Custom `DOTENV_PATH`, `DOTENV_ENCODING`, `DOTENV_OVERRIDE`, `DOTENV_FAST` and their `DOTENV_CONFIG_*` variants are unsupported; use the ordinary UTF-8 `.env` in the directory where you start the backend. Provider URL and transport remain backend-only configuration requiring restart.
+
+Use a regular private `.env`, not a symlink or hardlink, in a trusted writable backend folder. Values entered in Settings must be single-line; unsupported quote combinations/syntax reject explicitly. External edits while the backend is running cause saves to reject; restart to load those edits. A rare error saying **settings saved and active** means replacement completed but a subsequent file check failed: inspect the local file and restart before saving again. Do not run multiple backend instances against the same configuration/data directory. Windows file privacy depends on the directory ACL; Linux replacements use mode 0600.
 
 Useful optional settings:
 
