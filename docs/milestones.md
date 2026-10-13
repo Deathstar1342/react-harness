@@ -1,5 +1,47 @@
 # Delivery milestones
 
+## Approved M12–M15 sequence (2026-10-13)
+
+The user reports that `init_test` works with STARK at work and authorizes bringing it into `main` (this repository has no `master`). Preserve the advisor-style model wording and ordinary Chat Completions compatibility. Local main was fast-forwarded to `b12bb53`; publish the integration after M12 repairs and independent validation. The older delivery records below remain historical.
+
+Use the previous workflow: sequential dedicated chats named exactly `Milestone 12`, `Milestone 13`, `Milestone 14`, and `Milestone 15`, each in an isolated `codex/` branch/worktree. Children commit and report to coordinator `01a0dc0a-8866-7182-acd2-da997779962d`; the user explicitly authorizes messaging between these chats, routine coordinator decisions, commits and pushes. Children do not merge main or begin successor work. The coordinator independently reviews, requests corrections, validates and pushes integration before dispatching the successor. Check the active chat every 15 minutes, stay quiet when unchanged, pause immediately for a genuine user-assistance blocker, and pause after M15 delivery. Work-only live STARK access is a known acceptance limit, not an implementation blocker.
+
+### M12 — Error presentation and focused runtime corrections
+
+- Preserve the working advisor protocol, latest-user-message guidance and bounded format retries. Avoid wholesale prompt rewrites or telling models they directly execute actions.
+- Historical errors belong to their originating turn/action. Persistent composer notices represent unresolved current blockers only, with appropriate dismissal/resolution. Preserve approvals and uncertainty rather than hiding them.
+- Investigate false tool-failure labels with a bounded evidence-first pass; fix reproducible straightforward causes, record unresolved cases without speculative rewrites. Distinguish command exit success from report/format/UI failures.
+- Correct the checkpoint message that declares a preceding failed action successful; critic verdicts must not rewrite observed execution evidence.
+- Tighten JSON recovery at the parser boundary: accept a complete validated object or an unambiguous whole-message fenced object; never extract an executable nested action from incomplete outer JSON, arrays, examples or arbitrary surrounding prose. Formatting retries may request a complete recommendation. Preserve schema and policy checks and do not log raw rejected model content unconditionally.
+- Reconcile the three known baseline test failures with intended behavior: one obsolete protocol-wording assertion and two connection diagnostic retry-count assertions. Add meaningful regressions for the new parsing/error behavior, not merely weaker assertions.
+- Own `server/protocol.ts`, `server/runtime.ts`, error-related `client/**`, focused tests (including settings/protocol regression updates), scoped API/type changes only if necessary, and `docs/reports/milestone-12.md`. No project deletion, provider settings or plan workflow implementation yet.
+
+### M13 — Chat and project removal
+
+- Subtle accessible sidebar overflow menus, visible on hover/focus/selection; preserve the dark, flat design and navigation/editor guards.
+- Delete a chat and its dependent app records. Project confirmation offers **Remove from app only**, **Delete project and files**, and Cancel. App-only removal preserves every project file. File deletion shows the exact canonical directory and requires an additional explicit confirmation.
+- Destructive operations are server-validated and serialized against active work, pending operations and dirty editor leases; never delete a running workspace. Reject unsafe roots, the app/config/data directories, overlapping registered projects and link/path substitution hazards. Do not traverse links into other directories. Revalidate the exact confirmed target immediately before the operation.
+- Deletion applies only to the selected registered project, not its workspace parent. Imported projects may be deleted only with the same explicit exact-path confirmation. Partial failures must remain visible/recoverable; never report deletion as successful when files or records could not be removed.
+- Own scoped `client/**`, project/chat API/store/runtime lifecycle and tool/watch/session cleanup paths, shared contracts, targeted tests, relevant architecture/API/setup docs, and `docs/reports/milestone-13.md`. Do not broaden into arbitrary filesystem management.
+
+### M14 — Provider settings and per-chat model assignments
+
+- Settings selects architect/coder/critic defaults using `/models`, with manual ID entry when discovery is incomplete. Preserve connection-test behavior and allow a masked key to be replaced/cleared. Keep transport/JSON toggles out of this feature.
+- Persist defaults and the API key in the backend `.env`, preserving unrelated entries and using validated, atomic updates; prevent newline/config injection, unsafe file targets and accidental exposure. Never echo the stored key in API responses, logs, browser persistence, probes or child shell environments. The explicitly entered key necessarily travels in the protected settings request only.
+- Snapshot model IDs into durable chat records at creation. Changing defaults affects **new chats only**. Backfill existing chats with their pre-change effective assignments before accepting new defaults; use their saved models throughout runtime, critic and compaction calls and across restarts. The API key remains shared configuration, not a per-chat secret snapshot.
+- Configure the server safely without interrupting an in-flight request or mixing provider state. Document whether credential replacement takes effect on the next request; never silently migrate old chat model IDs.
+- Own scoped settings UI/API/config/provider/context/runtime/store wiring, shared contracts, targeted tests, architecture/API/setup docs and `docs/reports/milestone-14.md`. No native provider tools/Responses API or new secret-management dependency without coordinator review.
+
+### M15 — Planning to execution and accessible progress
+
+- Add **Start building** to explicitly transition a planning chat into execution using its existing plan/history. Support clear user intent such as “go ahead” through a validated mode-transition recommendation or equivalent coordinator-reviewed mechanism; ambiguous prose cannot override plan-only restrictions. Model-facing language must remain recommendation/advisor oriented.
+- Persist mode changes, enforce approvals and fresh versions, handle active requests/steering/restart and make repeated clicks idempotent. A generated plan alone never authorizes execution.
+- Move the plan from the beginning of the transcript into an on-demand collapsible panel reachable from a stable chat-header Plan control. Show compact phase/step progress without persistent large chrome or requiring a scroll to the top. Preserve editor state and narrow-screen access.
+- Associate delegated work with stable plan step identities and update progress from actual start/completion/review outcomes. A successful tool call alone is not a completed step. Preserve blockers, failures, manual plan revisions and critic acceptance; the architect can still revise scope. Avoid fabricated completion for legacy/unassociated work.
+- Own scoped plan UI/API/runtime/store/shared-contract changes, targeted tests, architecture/API/setup docs and `docs/reports/milestone-15.md`. Keep prompt changes minimal and explain each in the handoff.
+
+All deliveries require commit SHA, changed interfaces, typecheck, full tests, build and targeted evidence with explicit Windows/Linux/browser/STARK limitations. Coordinator owns `docs/STATUS.md` and milestone dispatch records. Additive contracts within each scope are preapproved subject to independent review; ask the coordinator about broader changes. Do not publish credentials, local databases, user project files or generated artifacts.
+
 | ID | Milestone | Acceptance |
 | --- | --- | --- |
 | M0 | Foundation and coordination | Reproducible Node/React scaffold, shared interfaces, CI, GitHub milestones, persistent coordination record |

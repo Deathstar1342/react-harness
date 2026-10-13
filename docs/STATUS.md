@@ -1,5 +1,15 @@
 # Coordinator status
 
+## Active sequence — 2026-10-13 (supersedes historical status below)
+
+- User approved M12–M15 using dedicated milestone chats and coordinator review, and explicitly approved integrating `init_test` into main. The actual integration branch is `main`, not master.
+- Local main fast-forwarded from `5ab43ff` to user branch `b12bb53`. Remote main publication waits for M12 repair and independent validation. Preserve advisor-style wording; the user reports the current branch works with STARK at work. This is user-reported live evidence, not coordinator live testing.
+- Independent baseline at `b12bb53`: Windows typecheck/build passed; 356 tests passed, 3 failed, 13 platform skips. Failures: protocol wording assertion and two diagnostic request-count assertions. Review also identified permissive substring JSON recovery and an inaccurate checkpoint-success message. M12 covers these narrowly alongside error presentation.
+- Sequence: M12 error presentation/runtime corrections; M13 chat/project deletion; M14 .env settings/per-chat model assignments; M15 plan-to-execution bridge and accessible progress. Full scope and ownership: `docs/milestones.md`.
+- Current dispatch: preparing Milestone 12 from local integrated main. No other milestone may start until coordinator-reviewed predecessor integration.
+- Existing 15-minute heartbeat will be resumed for this sequence; stop immediately for a genuine user-assistance blocker and after delivery. Known work-only STARK access does not block offline work.
+- Preserve earlier milestone and probe worktrees, branches, user project data and the unvalidated preparation branch. Never merge that preparation branch wholesale.
+
 - Coordinator: 01a0dc0a-8866-7182-acd2-da997779962d
 - Repository: https://github.com/Deathstar1342/react-harness
 - Integration branch: main. User authorization for public commits/pushes persists.

@@ -2,6 +2,8 @@
 
 ## Product direction
 
+Approved extension (2026-10-13, implementation tracked in M12–M15): contextual chat/project deletion with distinct app-only and explicitly confirmed disk deletion; `.env`-backed provider settings with durable per-chat model assignments; a persisted planning-to-execution transition; an on-demand header-accessible plan panel with evidence-linked progress; and turn-local historical errors separated from unresolved current blockers. These are planned changes, not delivered features. Preserve the `init_test` advisor-style wording: models recommend actions and the application separately validates and performs them. Keep ordinary text Chat Completions compatible with streaming disabled. See `milestones.md` for exact boundaries and acceptance.
+
 Build a local browser application with a Node.js/TypeScript backend running in WSL. Chat with the architect is the primary interaction. Files, diffs, plans, terminal output, and test results are optional supporting panels.
 
 The visual direction is a quiet, Codex-inspired dark workspace: charcoal surfaces, flat project/chat navigation, subtle separators, and contextual controls. Avoid a dashboard of boxed buttons or prominent implementation/status cards. Keep the conversation and composer central, with secondary controls in unobtrusive menus and collapsible panels. Preserve visible approval decisions, keyboard focus, and readable contrast.
@@ -11,7 +13,7 @@ This is a fresh implementation. There is no dependency on the previous Streamlit
 ## Provider contract
 
 - Use only `/models` and `/chat/completions` on a configurable STARK-compatible base URL.
-- Keep the API key in backend environment configuration; never expose it to the browser, logs, or child shell environments.
+- Keep the API key in backend environment configuration; never return the saved key to the browser or expose it to logs or child shell environments. The planned Settings flow accepts an explicitly entered replacement key in a protected request and never persists it in browser storage.
 - Use streaming ordinary text and a versioned JSON action protocol. Do not require native `tools` or `response_format` support.
 - Keep prompts configurable and validate actual provider behavior early. Optional ARCHITECT_PROMPT_FILE, CODER_PROMPT_FILE and CRITIC_PROMPT_FILE settings load bounded local UTF-8 guidance at startup, appended to the fixed JSON instructions. Prompt files never alter runtime permissions or parser validation and are not exposed through frontend settings.
 - Buffer complete actions before schema validation and authorization. Partial streamed JSON cannot execute.
