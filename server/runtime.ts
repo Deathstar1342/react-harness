@@ -631,7 +631,7 @@ export class Runtime {
         frame.role === 'architect'
           ? `You are a Senior Project Advisor. Recommend one next action for the calling application. The application performs recommended actions separately and returns resulting evidence in a later message.
 
-      Respond with one JSON recommendation in exactly this shape:
+      Respond with one JSON recommendation in exactly this shape, exactly from this list of allowed actions:
 
       {"message":"Brief recommendation.","action":"one allowed action name","parameters":{}}
 
@@ -650,12 +650,16 @@ export class Runtime {
       Do not use plain strings for phases or steps.
       For review, parameters must contain {"focus":"what to review"}.
       For ask_user, parameters must contain {"question":"question for the user"}.
-      For list_files and git_status, use {} when no arguments are needed.
-      For read_file, use {"path":"..."}.
+      For list_files, use {"path":"optional path"} or {} if no path is specified.
+      For git_status, use {}.
+      For read_file, use {"path":"required file path"}.
       For search, use {"query":"...","path":"optional path"}.
       For git_diff, use {"path":"optional path"}.
       For complete, use {}.
 
+      If you delegate, make sure to include acceptanceCriteria that are verifiable and specific and the contents of the plan phase, and a short description in the message.
+
+      When the plan is done be verbose in the message about what was accomplished and that the tasks within scope are complete.
 
       Use observed workspace evidence and the current objective to choose the next action. Do not repeat an unchanged discovery action. A missing README or empty workspace is an observation, not a blocker. When the objective is clear and implementation is needed, delegate a bounded coder task rather than repeatedly requesting project context.
 
@@ -663,14 +667,14 @@ export class Runtime {
           : frame.role === 'coder'
             ? `You are a Senior Coding Advisor. Recommend one next developer action for the calling application. The application performs recommended actions separately and returns resulting evidence in a later message.
 
-      Respond with one JSON recommendation in exactly this shape:
+      Respond with one JSON recommendation in exactly this shape, exactly from this list of allowed actions:
 
       {"message":"Brief recommendation.","action":"one allowed action name","parameters":{}}
 
       Allowed Coder actions:
       list_files, read_file, search, write_file, run_shell, execute_python, git_status, git_diff, run_tests, complete.
 
-      For list_files, use {"path":"optional path"}.
+      For list_files, use {"path":"optional path"} or {} if no path is specified.
       For read_file, use {"path":"required file path"}.
       For search, use {"query":"required query","path":"optional path"}.
       For write_file, use {"path":"...","content":"...","baseHash":"fresh hash or null for a new file"}.
@@ -681,19 +685,20 @@ export class Runtime {
       For run_tests, use {"command":"...","reportPath":"optional report path","timeoutMs":optional}.
       For complete, use {}.
 
+
       Use tool results and the assigned objective to choose the next action. Do not repeat an unchanged discovery action. If a write action fails because its baseHash is stale, do not retry the write; first use read_file for that path and use the returned fresh hash in any later write_file action. Once the acceptance criteria are satisfied by observed evidence, use complete.
 
       Never use "command", "tool", "type", or "execute" as an action name. To run a command, use action "run_shell" and put the command text inside parameters.command. Put all explanation in message. Do not claim the recommendation was already performed.`
             : `You are a Senior Review Advisor. Recommend one next read-only review action, or submit a review result based only on available evidence. The application performs recommended actions separately and returns resulting evidence in a later message.
 
-      Respond with one JSON recommendation in exactly this shape:
+      Respond with one JSON recommendation in exactly this shape, exactly from this list of allowed actions:
 
       {"message":"Brief review recommendation.","action":"one allowed action name","parameters":{}}
 
       Allowed Critic actions:
       list_files, read_file, search, git_status, git_diff, review_result.
 
-      For list_files, use {"path":"optional path"}.
+      For list_files, use {"path":"optional path"} or {} if no path is specified.
       For read_file, use {"path":"required file path"}.
       For search, use {"query":"required query","path":"optional path"}.
       For git_status, use {}.
