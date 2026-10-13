@@ -6,8 +6,8 @@
 - Local main fast-forwarded from `5ab43ff` to user branch `b12bb53`. Remote main publication waits for M12 repair and independent validation. Preserve advisor-style wording; the user reports the current branch works with STARK at work. This is user-reported live evidence, not coordinator live testing.
 - Independent baseline at `b12bb53`: Windows typecheck/build passed; 356 tests passed, 3 failed, 13 platform skips. Failures: protocol wording assertion and two diagnostic request-count assertions. Review also identified permissive substring JSON recovery and an inaccurate checkpoint-success message. M12 covers these narrowly alongside error presentation.
 - Sequence: M12 error presentation/runtime corrections; M13 chat/project deletion; M14 .env settings/per-chat model assignments; M15 plan-to-execution bridge and accessible progress. Full scope and ownership: `docs/milestones.md`.
-- Current dispatch: preparing Milestone 12 from local integrated main. No other milestone may start until coordinator-reviewed predecessor integration.
-- Existing 15-minute heartbeat will be resumed for this sequence; stop immediately for a genuine user-assistance blocker and after delivery. Known work-only STARK access does not block offline work.
+- Current dispatch: **Milestone 12**, chat `01a1340b-4552-7da1-a298-f1c311c45376`, worktree `D:/CodexData/.codex/worktrees/14ad/REACT harness`, starts from integrated local main/planning commit `d3bd8fc`. Requested branch `codex/milestone-12`. Creation is confirmed active; no other milestone may start until coordinator-reviewed predecessor integration.
+- Existing `react-harness-milestone-check-in` heartbeat is confirmed ACTIVE at a 15-minute interval for M12–M15; stop immediately for a genuine user-assistance blocker and after delivery. Known work-only STARK access does not block offline work.
 - Preserve earlier milestone and probe worktrees, branches, user project data and the unvalidated preparation branch. Never merge that preparation branch wholesale.
 
 - Coordinator: 01a0dc0a-8866-7182-acd2-da997779962d
