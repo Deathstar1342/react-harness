@@ -76,6 +76,18 @@ New `tool` events retain their existing fields and add exact commandId/sessionId
 
 Startup recovery emits `uncertain` for every persisted executing command, including paused/interrupted chats, before any resume. An additive internal `PendingAction.commandOutcomeRecorded` marker is committed with that event. Repeated recover/resume does not duplicate it, does not replay the command, and preserves executing/done recovery evidence. Previously completed actions are not retroactively assigned success; legacy unmatched output is never attached to a newly recovered identity. No SQLite schema, dependency, approval, model protocol, editor lease, or shell-environment changes.
 
+### Error identity and presentation (M12)
+
+New runtime `error` and completed/rejected `tool` events add optional `messageId`, identifying the exact durable transcript message for that evidence. Caught recommendation/policy/inspection errors now have a failed tool message at their original transcript position. Deduplication uses that identity and replayed event IDs only, never matching text. Legacy events without a link remain visible (potentially alongside an older duplicate message); missing linked messages do not hide errors. Event-only failures are placed using retained message event order, with timestamps as fallback when the bounded event history omits message events. Old event-only failures outside the existing 1,000-event window remain an existing history limit; no migration or fabricated attribution is performed.
+
+New tool message metadata may include `commandId`, `commandStatus` and `exitCode`, copied from the existing observed command lifecycle rules, or `rejected:true` for recommendation/policy/inspection rejection. `commandId` is the pending-action ID and can also identify a non-command workspace action, matching existing tool events. Exit 0 with `ok:false` is presented as a command success with a separate tool/report problem; failed reports, unknown outcomes, cancellation and timeout evidence are preserved. Legacy messages use a neutral tool-problem label without inferring command exit. Uncertain/interrupted/failed command messages remain visible with Debug off even if an inconsistent tool result says `ok:true`.
+
+The composer shows current connection/request problems only; a successful durable refresh clears connection errors and a local action error can be dismissed or cleared by a subsequent action. Dismissal does not change approvals, run status or durable evidence. Historical errors stay in the transcript. A stopped-run notice follows current chat status.
+
+Model action schemas and advisor wording remain compatible. Format recovery accepts only a complete schema-valid response inside a whole-message triple-backtick fence (optional `json` label, newline-separated delimiters, surrounding whitespace allowed). Prose examples, arrays, extra objects, malformed fences and unfinished outer objects cannot supply executable nested actions. Existing four runtime attempts (initial plus three formatting retries) and one diagnostic formatting retry remain bounded and unchanged. Rejected content and proposed actions are no longer unconditionally logged. Checkpoint verdict text preserves prior execution outcomes and useful findings.
+
+No new endpoint, shared type, SQLite schema, dependency, approval policy or shell environment change.
+
 ## Workspace module (M3)
 
 ### Root project instructions (M9)

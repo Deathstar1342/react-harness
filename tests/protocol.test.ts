@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionSchema, parseAgentResponse, PROTOCOL_LIMITS, ProtocolError, protocolInstructions } from '../server/protocol.js';
+import { actionSchema, parseAgentResponse, recoverSingleJsonObject, PROTOCOL_LIMITS, ProtocolError, protocolInstructions } from '../server/protocol.js';
 
 const action = (name: string, args: unknown) => ({ version: 1, type: 'action', message: 'Proposed action', action: { name, args } });
 const cases: [string, Record<string, unknown>][] = [
@@ -75,11 +75,51 @@ describe('versioned strict action protocol', () => {
     expect(() => parseAgentResponse(JSON.stringify({ 'secret-value': true }))).toThrow(expect.objectContaining({ message: expect.not.stringContaining('secret-value') }));
   });
   it('provides role-specific truthful instructions and bounded optional guidance', () => {
-    expect(protocolInstructions('architect')).toContain('Only the architect may delegate');
-    expect(protocolInstructions('coder')).toContain('Do not delegate');
-    expect(protocolInstructions('critic')).toContain('Conclude with a review_result action');
-    expect(protocolInstructions('critic')).toContain('Never write files');
+    const architect = protocolInstructions('architect');
+    const coder = protocolInstructions('coder');
+    const critic = protocolInstructions('critic');
+    for (const instructions of [architect, coder, critic]) {
+      expect(instructions).toContain('Advisor');
+      expect(instructions).toContain('The calling application performs recommended actions separately');
+      expect(instructions).toContain('Only confirmed tool results establish execution or test outcomes');
+      expect(instructions).toContain('"message"');
+      expect(instructions).toContain('"action"');
+      expect(instructions).toContain('"parameters"');
+    }
+    expect(architect).toContain('delegate {objective:string,acceptanceCriteria:string[],paths?:string[]}');
+    expect(architect).toContain('Respect /plan: recommend planning only');
+    expect(coder).toContain('assigned objective and file scope');
+    expect(coder).toContain('write_file {path:string,content:string,baseHash:string|null}');
+    expect(coder).not.toMatch(/^delegate /m);
+    expect(critic).toContain('Recommend only read-only review actions then submit review_result based on evidence');
+    expect(critic).toContain('review_result {verdict:"pass"|"changes_requested",findings:string[]}');
+    expect(critic).not.toMatch(/^(write_file|run_shell|execute_python|delegate) /m);
     expect(protocolInstructions('coder', 'Prefer small changes.')).toContain('Prefer small changes.');
     expect(() => protocolInstructions('coder', 'x'.repeat(32_001))).toThrow('size limit');
   });
+});
+
+describe('bounded whole-message fence recovery', () => {
+  const executable = JSON.stringify({ message: 'Recommend a read', action: 'read_file', parameters: { path: 'README.md' } });
+  it.each(['json', ''])('accepts a whole-message %s fence while preserving advisor normalization', language => {
+    const recovered = recoverSingleJsonObject(` \n\`\`\`${language}\r\n${executable}\r\n\`\`\`\n `);
+    expect(recovered).toBe(executable);
+    expect(parseAgentResponse(recovered!)).toMatchObject({ type: 'action', action: { name: 'read_file', args: { path: 'README.md' } } });
+  });
+  it('never recovers an executable nested action from any prefix of an outer object', () => {
+    const outer = JSON.stringify({ example: JSON.parse(executable), remaining: 'unfinished outer content' });
+    for (let end = 0; end <= outer.length; end++) {
+      expect(recoverSingleJsonObject(outer.slice(0, end))).toBeUndefined();
+      expect(recoverSingleJsonObject(`\`\`\`json\n${outer.slice(0, end)}\n\`\`\``)).toBeUndefined();
+    }
+  });
+  it.each([
+    executable, `[${executable}]`, `Example: ${executable}`, `${executable} trailing prose`,
+    `\`\`\`json\n[${executable}]\n\`\`\``, `\`\`\`json\n${executable}\n${executable}\n\`\`\``,
+    `Example:\n\`\`\`json\n${executable}\n\`\`\``, `\`\`\`json\n${executable}\n\`\`\`\nDone`,
+    `\`\`\`json\n${executable}`, `\`\`\`json\n${executable}\n\`\`\`\``,
+    `\`\`\`javascript\n${executable}\n\`\`\``, `\`\`\`json ${executable}\`\`\``,
+    `\`\`\`json\n${executable}\n\`\`\`\n\`\`\`json\n${executable}\n\`\`\``,
+    '```json\n{"message":"Invalid args","action":"write_file","parameters":{"path":"x"}}\n```',
+  ])('rejects ambiguous or invalid recovery %#', text => expect(recoverSingleJsonObject(text)).toBeUndefined());
 });

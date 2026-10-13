@@ -35,9 +35,9 @@ import { ProjectDialog, SettingsDialog } from "./WorkspaceDialogs";
 import { useConversation } from "./useConversation";
 import { useEditorLayout } from "./useEditorLayout";
 import { getPreferences } from './settings';
-import { visibleMessages, conversationErrors } from './conversation';
+import { conversationEntries, isToolProblem, toolMessageLabel } from './conversation';
 
-function Conversation({
+export function Conversation({
   chatId,
   project,
   configured,
@@ -132,6 +132,7 @@ function Conversation({
     .find((event) => event.type === "steering");
   const steeringData = steering?.data as
     { content?: string; delivered?: boolean } | undefined;
+  const entries = conversationEntries(detail.messages, detail.events, debug);
   return (
     <main className="conversation" aria-label="Architect conversation">
       <header className="chat-header">
@@ -223,7 +224,7 @@ function Conversation({
       >
         <div className="conversation-content">
           <PlanPanel plan={detail.plan} />
-          {detail.messages.length === 0 ? (
+          {entries.length === 0 ? (
             <div className="welcome">
               <span className="welcome-mark">
                 <Sparkles size={27} />
@@ -256,11 +257,19 @@ function Conversation({
             </div>
           ) : (
             <div className="messages">
-              {visibleMessages(detail.messages, debug).map((message) =>
-                message.role === "tool" ? (
-                  <details className={`tool-message ${message.metadata?.ok === false ? 'inline-error' : ''}`} key={message.id} open={message.metadata?.ok === false}>
+              {entries.map((entry) => {
+                if (entry.kind === 'failure') return (
+                  <div key={`event-${entry.id}`} className="inline-error">
+                    <strong>Recorded problem</strong>{" "}
+                    <time dateTime={entry.createdAt}>{formatTime(entry.createdAt)}</time>
+                    <p>{entry.message}</p>
+                  </div>
+                );
+                const message = entry.message;
+                return message.role === "tool" ? (
+                  <details className={`tool-message ${isToolProblem(message) ? 'inline-error' : ''}`} key={message.id} open={isToolProblem(message)}>
                     <summary>
-                      {message.metadata?.ok === false ? 'Tool action failed' : 'Tool result'} <span>{formatTime(message.createdAt)}</span>
+                      {toolMessageLabel(message)} <span>{formatTime(message.createdAt)}</span>
                     </summary>
                     <pre>{message.content}</pre>
                   </details>
@@ -293,11 +302,10 @@ function Conversation({
                       <div className="message-content">{message.content}</div>
                     </div>
                   </article>
-                ),
-              )}
+                );
+              })}
             </div>
           )}
-          {conversationErrors(detail.events, detail.messages).map(failure => <div key={failure.id} className="inline-error" role="alert">{failure.message}</div>)}
           {pending.map((approval) => (
             <ApprovalCard
               key={approval.id}
@@ -378,18 +386,23 @@ function Conversation({
             Latest messages
           </button>
         )}
-        {(error || actionError) && (
+        {error && (
           <div className="inline-error" role="alert">
-            {actionError || error}
+            {error}
             <button
               className="text-button"
               onClick={() => {
-                setActionError("");
                 void refresh();
               }}
             >
               Retry connection
             </button>
+          </div>
+        )}
+        {actionError && (
+          <div className="inline-error" role="alert">
+            {actionError}
+            <button className="text-button" onClick={() => setActionError("")}>Dismiss</button>
           </div>
         )}
         {steeringData && (

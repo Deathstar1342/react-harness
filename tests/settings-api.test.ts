@@ -112,13 +112,19 @@ describe('connection route transport and lifecycle', () => {
     expect(reply.statusCode).toBe(200);
     expect(reply.json().checks.map((item: { status: string }) => item.status)).toEqual(['passed', 'passed', 'failed', 'passed']);
     expect(reply.body).not.toMatch(/private-diagnostic-key|NEVER RUN|run_shell|Connection OK/);
-    expect(requests).toHaveLength(3);
+    expect(requests.map(request => request.model)).toEqual(['a', 'c', 'c', 'r']);
+    const initial = requests[1].messages as { role: string; content: string }[];
+    const repair = requests[2].messages as { role: string; content: string }[];
+    expect(repair.slice(0, 2)).toEqual(initial);
+    expect(repair[2]).toMatchObject({ role: 'assistant', content: expect.stringContaining('NEVER RUN') });
+    expect(repair[3]).toMatchObject({ role: 'user', content: expect.stringContaining('FORMAT REPAIR:') });
+    expect(repair[3].content).toContain('{"version":1,"type":"final","message":"Connection OK"}');
     for (const request of requests) {
       expect(request.stream).toBe(streaming);
       expect(request.max_tokens).toBe(1024);
       expect(request).not.toHaveProperty('tools'); expect(request).not.toHaveProperty('response_format');
     }
-    expect(store.getState<Reservation[]>(BUDGET_STATE_KEY, []).map(item => item.tokens)).toEqual([11, 11, 11]);
+    expect(store.getState<Reservation[]>(BUDGET_STATE_KEY, []).map(item => item.tokens)).toEqual([11, 11, 11, 11]);
     expect(tools.execute).not.toHaveBeenCalled();
     expect(store.chats()).toEqual([]);
   });

@@ -318,69 +318,21 @@ export function parseAgentResponse(text: string): AgentResponse {
 }
 
 /**
- * Finds exactly one top-level balanced JSON object inside prose or a Markdown
- * code fence. Nested objects inside that top-level object are not counted as
- * separate candidates.
+ * Unwraps only a whole-message Markdown fence containing a validated response.
+ * Never search inside prose, arrays, examples, or an unfinished outer object.
  */
 export function recoverSingleJsonObject(text: string): string | undefined {
   if (text.length > 128_000) return undefined;
 
-  const candidates: string[] = [];
-
-  for (let start = 0; start < text.length; start++) {
-    if (text[start] !== '{') continue;
-
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-
-    for (let end = start; end < text.length; end++) {
-      const char = text[end];
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (char === '\\') {
-          escaped = true;
-        } else if (char === '"') {
-          inString = false;
-        }
-
-        continue;
-      }
-
-      if (char === '"') {
-        inString = true;
-        continue;
-      }
-
-      if (char === '{') {
-        depth++;
-        continue;
-      }
-
-      if (char === '}') {
-        depth--;
-
-        if (depth === 0) {
-          const candidate = text.slice(start, end + 1);
-
-          try {
-            JSON.parse(candidate);
-            candidates.push(candidate);
-          } catch {
-            // Ignore malformed top-level candidate.
-          }
-
-          // Skip nested objects within this completed candidate.
-          start = end;
-          break;
-        }
-      }
-    }
+  const match = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/.exec(text.trim());
+  if (!match) return undefined;
+  const candidate = match[1].trim();
+  try {
+    parseAgentResponse(candidate);
+    return candidate;
+  } catch {
+    return undefined;
   }
-
-  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 const roleInstructions: Record<AgentRole, string> = {
