@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
-import type { Action, AgentResponse, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService } from '../shared/types.js';
+import type { Action, AgentResponse, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef } from '../shared/types.js';
 import type { Config } from './config.js';
 import { Store } from './store.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
@@ -8,7 +8,7 @@ import { hash } from './tools/paths.js';
 import { recoverSingleJsonObject } from './protocol.js';
 
 interface PendingAction { id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
-export interface Frame { id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'phase'; proposedPlan?: import('../shared/types.js').Plan }
+export interface Frame { evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'phase'; proposedPlan?: import('../shared/types.js').Plan }
 export interface RunState {
   frames: Frame[];
   steering: string[];
@@ -93,7 +93,7 @@ export class Runtime {
     readonly tools: ToolService,
     readonly config: Config,
     readonly hooks: RuntimeHooks,
-  ) { store.initializeModels(config.models); }
+  ) { store.initializeModels(config.models); store.initializePlanning(); }
 
   private load(chatId: string): RunState | null {
     const cached = this.runs.get(chatId);
@@ -101,7 +101,10 @@ export class Runtime {
 
     const saved = this.store.getState<RunState | null>(`run:${chatId}`, null);
 
-    if (saved) this.runs.set(chatId, saved);
+    if (saved) {
+      saved.planOnly = this.store.chat(chatId).mode === 'plan';
+      this.runs.set(chatId, saved);
+    }
 
     return saved;
   }
@@ -125,7 +128,29 @@ export class Runtime {
     };
   }
 
+  async startBuilding(chatId: string, expected: {planId: string; planVersion: number; modeVersion: number}) {
+    this.assertAvailable(chatId);
+    const chat = this.store.chat(chatId);
+    const plan = this.store.plan(chatId);
+    const previous = this.store.getState<unknown>(`build:${chatId}`, null);
+    if (chat.mode === 'execute' && chat.modeVersion === expected.modeVersion + 1 && JSON.stringify(previous) === JSON.stringify(expected)) return;
+    if (chat.mode !== 'plan' || chat.modeVersion !== expected.modeVersion || plan.id !== expected.planId || plan.version !== expected.planVersion || !plan.phases.some(p=>p.steps.length)) {
+      throw Object.assign(new Error('The plan or planning session changed; refresh before starting'), {statusCode:409});
+    }
+    if (this.decisions.has(chatId) || this.load(chatId)?.frames.some(f=>f.pending?.stage === 'executing')) {
+      throw Object.assign(new Error('Wait for the current operation to stop before starting'), {statusCode:409});
+    }
+    this.store.transaction(() => {
+      this.store.setState(`build:${chatId}`, expected);
+      this.submitInternal(chatId, 'Start building');
+    });
+  }
+
   async submit(chatId: string, content: string) {
+    this.store.transaction(() => this.submitInternal(chatId, content));
+  }
+
+  private submitInternal(chatId: string, content: string) {
     this.assertAvailable(chatId);
 
     const chat = this.store.chat(chatId);
@@ -134,6 +159,14 @@ export class Runtime {
     if (!text) throw new Error('Message must not be empty');
     if (text.length > 100000) throw new Error('Message is too large');
 
+    const planning = /^\/plan(?:\s|$)/.test(text);
+    const building = /^(?:start building|go ahead)[.!]?$/i.test(text);
+    const mode = planning ? 'plan' : building && chat.mode === 'plan' ? 'execute' : chat.mode ?? 'execute';
+    if (mode === 'execute' && chat.mode === 'plan') {
+      if (!this.store.plan(chatId).phases.some(p=>p.steps.length)) throw Object.assign(new Error('Create a plan before starting to build'), {statusCode:409});
+      if (this.decisions.has(chatId) || this.load(chatId)?.frames.some(f=>f.pending?.stage === 'executing')) throw Object.assign(new Error('Wait for the current operation to stop before starting'), {statusCode:409});
+    }
+    if (mode !== chat.mode) this.store.updateChat(chatId, {mode, modeVersion: (chat.modeVersion ?? 0) + 1});
     this.store.message(chatId, 'user', text);
 
     if (chat.title === 'New chat') {
@@ -145,7 +178,7 @@ export class Runtime {
     const existing = this.load(chatId);
 
     if (existing?.frames.length) {
-      if (/^\/plan(?:\s|$)/.test(text)) existing.planOnly = true;
+      existing.planOnly = mode === 'plan';
 
       existing.steering.push(text.replace(/^\/btw\s*/, '') || text);
       existing.generation++;
@@ -175,10 +208,10 @@ export class Runtime {
     const state: RunState = {
       frames: [this.frame('architect', history)],
       steering: [],
-      planOnly: /^\/plan(?:\s|$)/.test(text),
+      planOnly: mode === 'plan',
       steps: 0,
       generation: 0,
-      objective,
+      objective: building && existing?.objective ? existing.objective : objective,
     };
 
     this.save(chatId, state);
@@ -197,6 +230,7 @@ export class Runtime {
       .catch(error => {
         if (controller.signal.aborted) return;
 
+        for (const frame of this.load(chatId)?.frames ?? []) this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'error', 'Run stopped with an error; inspect recorded evidence.');
         this.store.updateChat(chatId, { status: 'error' });
         const message = this.store.message(
           chatId,
@@ -284,6 +318,7 @@ export class Runtime {
       status: action === 'pause' ? 'paused' : 'interrupted',
     });
 
+    for (const frame of this.load(chatId)?.frames ?? []) this.store.progress(chatId, frame.planStep, frame.id, 'blocked', action, 'Work stopped; completion has not been accepted.');
     running?.controller.abort(new Error(`Task ${action} requested`));
 
     this.store.invalidateApprovals(chatId);
@@ -389,6 +424,10 @@ export class Runtime {
     const guidance = state.steering.splice(0);
 
     for (const frame of state.frames) {
+      if (frame.planStep) {
+        this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'superseded', 'New guidance requires a fresh delegation before this step can be accepted.');
+        delete frame.planStep;
+      }
       if (frame.pending?.stage === 'prepared') frame.pending = undefined;
 
       frame.messages.push({
@@ -511,6 +550,7 @@ export class Runtime {
       }
 
       if (++state.steps > 100) {
+        for (const unfinished of state.frames) this.store.progress(chatId, unfinished.planStep, unfinished.id, 'blocked', 'budget', 'Task reached its safety budget; resume is required.');
         this.store.updateChat(chatId, { status: 'paused' });
         this.store.message(
           chatId,
@@ -579,7 +619,8 @@ export class Runtime {
       For a delegate action, parameters is required and must contain:
       {"objective":"specific coder task","acceptanceCriteria":["one or more verifiable outcomes"],"paths":["optional file scope"]}
 
-      For set_plan, parameters must contain {"phases":[...]}.
+      If delegation covers a plan step, add parameters.planStep={"planId":"current plan id","planVersion":1,"phaseId":"phase id","stepId":"step id"} using exact current identities. Omit it for unrelated work.
+      For set_plan, parameters must contain {"phases":[...]}. Recorded progress is owned by the application; structural revisions reset progress, identical structure preserves it.
       For review, parameters must contain {"focus":"what to review"}.
       For ask_user, parameters must contain {"question":"question for the user"}.
       For list_files and git_status, use {} when no arguments are needed.
@@ -796,6 +837,7 @@ export class Runtime {
             'architect',
             String(action.args.question),
           );
+          this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'awaiting_user', String(action.args.question).slice(0,2000));
           this.store.updateChat(chatId, { status: 'paused' });
           this.save(chatId, state);
           return;
@@ -806,47 +848,10 @@ export class Runtime {
             throw new Error('Only the architect can revise the plan');
           }
 
-          const proposedPlan = {
-            phases: action.args.phases as import('../shared/types.js').PlanPhase[],
-          };
-
+          const proposed = {phases: action.args.phases as import('../shared/types.js').PlanPhase[]};
           const previous = this.store.plan(chatId);
-          const completed = new Set(
-            previous.phases.flatMap(phase =>
-              phase.steps
-                .filter(step => step.status === 'done')
-                .map(step => step.id),
-            ),
-          );
-
-          if (
-            !state.planOnly &&
-            proposedPlan.phases.some(phase =>
-              phase.steps.some(
-                step => step.status === 'done' && !completed.has(step.id),
-              ),
-            )
-          ) {
-            const review = this.frame('critic', [
-              {
-                role: 'user',
-                content:
-                  `Verify this proposed phase/step completion against actual work and evidence before accepting it.\n` +
-                  `Proposed plan: ${JSON.stringify(proposedPlan)}\n` +
-                  `Conversation evidence: ${JSON.stringify(frame.messages).slice(-100000)}`,
-              },
-            ]);
-
-            review.reviewKind = 'phase';
-            review.proposedPlan = proposedPlan;
-            state.frames.push(review);
-          } else {
-            this.store.setPlan(chatId, proposedPlan);
-            frame.messages.push({
-              role: 'user',
-              content: 'Tool result: plan saved.',
-            });
-          }
+          const saved = this.store.revisePlan(chatId, proposed);
+          frame.messages.push({role: 'user', content: `Tool result: plan saved at revision ${saved.version}. ${saved.version !== previous.version ? 'Structural changes reset current progress; historical evidence is retained.' : 'Unchanged structure preserves recorded progress.'} Completion status is recorded only from associated delegation and review evidence.`});
         } else if (action.name === 'delegate') {
           if (frame.role !== 'architect' || state.planOnly) {
             throw new Error(
@@ -854,6 +859,8 @@ export class Runtime {
             );
           }
 
+          const reference = action.args.planStep as PlanStepRef | undefined;
+          if (reference && !this.store.planStep(chatId, reference)) throw new Error('Plan step is stale or missing; use the current plan identity and version');
           const objective = String(action.args.objective);
 
           const coder = this.frame(
@@ -876,11 +883,13 @@ export class Runtime {
             objective,
           );
 
+          coder.planStep = reference;
           coder.scope = action.args.paths as string[] | undefined;
           coder.shellId = 'coder-primary';
 
           state.frames.push(coder);
-          this.store.event(chatId, 'delegation', { objective });
+          const event = this.store.event(chatId, 'delegation', { objective, delegationId: coder.id, planStep: reference });
+          this.store.progress(chatId, reference, coder.id, 'in_progress', 'started', objective, event.id);
         } else if (action.name === 'review') {
           if (frame.role !== 'architect') {
             throw new Error('Only the architect can request an independent review');
@@ -1007,13 +1016,14 @@ export class Runtime {
         const message = this.store.message(chatId, 'tool', safeResult(error).output.slice(0, 32000), {
           agentId: frame.id, name: action.name, ok: false, rejected: true,
         });
-        this.store.event(chatId, 'tool', {
+        const rejectedEvent = this.store.event(chatId, 'tool', {
           agentId: frame.id,
           action,
           result: safeResult(error),
           messageId: message.id,
         });
 
+        this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'failed', safeResult(error).output.slice(0, 2000), rejectedEvent.id);
         frame.failures = (frame.failures ?? 0) + 1;
 
         if (frame.role === 'coder' && frame.failures >= 3) {
@@ -1074,6 +1084,7 @@ export class Runtime {
         const approval = this.store.getApproval(pending.approvalId);
 
         if (approval.status === 'pending') {
+          this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'awaiting_approval', 'Waiting for explicit approval of the proposed action.');
           this.store.updateChat(chatId, { status: 'awaiting_approval' });
           return false;
         }
@@ -1125,6 +1136,13 @@ export class Runtime {
 
         if (state.steering.length) {
           this.deliverSteering(chatId, state);
+          return true;
+        }
+
+        if (state.planOnly && !readTools.has(pending.action.name)) {
+          pending.result = {ok:false, output:'Planning mode forbids this prepared action; request a fresh delegation after Start building.'};
+          pending.stage = 'done';
+          this.save(chatId,state);
           return true;
         }
 
@@ -1320,7 +1338,7 @@ export class Runtime {
           },
         );
 
-        this.store.event(chatId, 'tool', {
+        const toolEvent = this.store.event(chatId, 'tool', {
           agentId: frame.id,
           commandId: pending.id,
           sessionId: frame.shellId ?? frame.id,
@@ -1328,6 +1346,9 @@ export class Runtime {
           result,
           messageId: message.id,
         });
+
+        frame.evidenceEventIds = [...(frame.evidenceEventIds ?? []), toolEvent.id].slice(-100);
+        this.store.progress(chatId, frame.planStep, frame.id, result.ok && !signal.aborted ? 'in_progress' : 'blocked', signal.aborted ? 'stopped' : result.ok ? 'working' : 'failed', outcome, toolEvent.id);
 
         if (result.ok && pending.action.name === 'write_file') {
           const projectId = this.store.chat(chatId).projectId;
@@ -1406,6 +1427,7 @@ export class Runtime {
   ) {
     if (frame.role === 'coder') {
       frame.final = text;
+      this.store.progress(chatId, frame.planStep, frame.id, 'in_progress', 'reviewing', 'Coder reported completion; independent review is pending.');
 
       state.frames.push(
         this.frame(
@@ -1424,6 +1446,7 @@ export class Runtime {
           frame.objective,
         ),
       );
+      state.frames.at(-1)!.reviewDelegationId = frame.id;
     } else if (frame.role === 'critic') {
       frame.messages.push({
         role: 'user',
@@ -1452,10 +1475,17 @@ export class Runtime {
     passed: boolean,
     findings: string[],
   ) {
+    this.store.transaction(() => {
+      this.finishReviewInternal(chatId,state,passed,findings);
+      this.save(chatId,state);
+    });
+  }
+
+  private finishReviewInternal(chatId: string, state: RunState, passed: boolean, findings: string[]) {
     const reviewer = state.frames.pop();
     const parent = state.frames.at(-1);
 
-    this.store.event(chatId, 'review', { passed, findings });
+    const reviewEvent = this.store.event(chatId, 'review', { passed, findings, delegationId: reviewer?.reviewDelegationId, planStep: parent?.planStep, reviewKind: reviewer?.reviewKind ?? 'completion', evidenceEventIds: [...(parent?.evidenceEventIds ?? []), ...(reviewer?.evidenceEventIds ?? [])] });
 
     this.store.message(
       chatId,
@@ -1464,14 +1494,12 @@ export class Runtime {
     );
 
     if (reviewer?.reviewKind === 'phase') {
-      if (passed && reviewer.proposedPlan) {
-        this.store.setPlan(chatId, reviewer.proposedPlan);
-      }
+      // Legacy phase reviews cannot establish associated completion or replace a current revision.
 
       parent?.messages.push({
         role: 'user',
         content:
-          `Phase completion review ${passed ? 'passed; plan saved' : 'failed; previous plan retained'}: ` +
+          `Phase completion review ${passed ? 'passed; current plan retained (legacy unassociated review)' : 'failed; previous plan retained'}: ` +
           findings.join('\n'),
       });
 
@@ -1479,6 +1507,7 @@ export class Runtime {
     }
 
     if (reviewer?.reviewKind === 'checkpoint') {
+      if (!passed && parent) this.store.progress(chatId,parent.planStep,parent.id,'blocked','checkpoint_changes_requested',findings.join('\n').slice(0,2000),reviewEvent.id);
       parent?.messages.push({
         role: 'user',
         content: passed
@@ -1505,6 +1534,10 @@ export class Runtime {
     }
 
     if (parent?.role === 'coder') {
+      if (reviewer?.reviewDelegationId === parent.id && parent.final !== undefined && !state.planOnly) {
+        const observed = (parent.evidenceEventIds?.length ?? 0) + (reviewer.evidenceEventIds?.length ?? 0) > 0;
+        this.store.progress(chatId, parent.planStep, parent.id, passed && observed ? 'done' : 'blocked', passed && observed ? 'accepted' : passed ? 'missing_evidence' : 'changes_requested', !observed && passed ? 'Review passed without recorded tool evidence; step completion remains unverified.' : findings.join('\n').slice(0,2000) || (passed ? 'Coder completion accepted by independent critic.' : 'Review requires changes.'), reviewEvent.id);
+      }
       if (!passed && parent.repairs++ < 2) {
         parent.messages.push({
           role: 'user',

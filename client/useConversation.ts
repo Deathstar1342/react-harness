@@ -99,6 +99,7 @@ export function useConversation(chatId: string, onChange: () => void) {
           "status",
           "delta",
           "plan",
+          "plan_progress",
           "approval",
           "tool",
           "tool_output",

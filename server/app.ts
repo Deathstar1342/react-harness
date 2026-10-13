@@ -205,6 +205,12 @@ export async function createApp(options: AppOptions) {
     await runtime.submit(paramId(request.params),body.content);
     return reply.code(202).send({accepted:true});
   });
+  app.post('/api/chats/:id/start-building', async(request, reply) => {
+    const body = z.object({planId:z.string().uuid(),planVersion:z.number().int().positive(),modeVersion:z.number().int().nonnegative()}).strict().parse(request.body);
+    if (!config.baseUrl || !config.apiKey) return reply.code(503).send({error:'Configure the provider before starting to build.'});
+    await runtime.startBuilding(paramId(request.params),body);
+    return reply.code(202).send({accepted:true});
+  });
   app.post('/api/chats/:id/control',async request=> {const {action} = z.object({action:z.enum(['pause','resume','interrupt'])}).strict().parse(request.body);await runtime.control(paramId(request.params),action);return {ok:true};});
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});

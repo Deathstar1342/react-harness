@@ -24,48 +24,27 @@ import {
 } from "./api";
 import { Diff } from "./FilePanel";
 
-export function PlanPanel({ plan }: { plan: Plan }) {
-  if (!plan.phases.length) return null;
-  const steps = plan.phases.flatMap((phase) => phase.steps);
-  return (
-    <details className="plan-card">
-      <summary>
-        <span>
-          <ChevronDown size={15} /> Plan
-        </span>
-        <span className="muted">
-          {steps.filter((step) => step.status === "done").length} /{" "}
-          {steps.length} steps
-        </span>
-      </summary>
-      <div className="plan-body">
-        {plan.phases.map((phase) => (
-          <section key={phase.id}>
-            <h3>{phase.title}</h3>
-            <ul>
-              {phase.steps.map((step) => (
-                <li key={step.id} className={`step ${step.status}`}>
-                  {step.status === "done" ? (
-                    <Check size={14} />
-                  ) : step.status === "in_progress" ? (
-                    <LoaderCircle size={14} />
-                  ) : step.status === "blocked" ? (
-                    <CircleAlert size={14} />
-                  ) : (
-                    <Circle size={14} />
-                  )}
-                  <span>{step.title}</span>
-                  <span className="status-label">
-                    {step.status.replaceAll("_", " ")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
-    </details>
-  );
+export function PlanPanel({ plan, events = [] }: { plan: Plan; events?: RunEvent[] }) {
+  const steps = plan.phases.flatMap(phase=>phase.steps);
+  const history = events.filter(event=>event.type === 'plan_progress');
+  return <div className="plan-body">
+    <p className="muted">{steps.filter(step=>step.status === 'done').length} / {steps.length} steps{plan.version ? ` · Revision ${plan.version}` : ''}</p>
+    {!steps.length && <p>No plan yet. Ask the architect to plan your task.</p>}
+    {(plan.version ?? 0)>1 && <p className="muted">Scope revisions reset current progress. Earlier evidence stays in progress history.</p>}
+    {plan.phases.map(phase=><section key={phase.id}>
+      <h3>{phase.title} <span className="muted">{phase.steps.filter(s=>s.status==='done').length}/{phase.steps.length}</span></h3>
+      <ul>{phase.steps.map(step=><li key={step.id} className={`step ${step.status}`}>
+        {step.status === 'done' ? <Check size={14}/> : step.status === 'in_progress' ? <LoaderCircle size={14}/> : step.status === 'blocked' ? <CircleAlert size={14}/> : <Circle size={14}/>}
+        <div className="plan-step-text"><span>{step.title}</span>{step.evidence && <details><summary>Evidence · {step.evidence.outcome.replaceAll('_',' ')}</summary><p>{step.evidence.summary}</p><p className="muted">Delegation {step.evidence.delegationId} · progress #{step.evidence.eventId}{step.evidence.sourceEventId ? ` · source #${step.evidence.sourceEventId}` : ''}</p></details>}</div>
+        <span className="status-label">{step.status.replaceAll('_',' ')}</span>
+      </li>)}</ul>
+    </section>)}
+    {history.length>0 && <details className="plan-history"><summary>Progress history ({history.length} recent records)</summary>{history.map(event=>{
+      const data=event.data as {planVersion?:number;stepId?:string;outcome?:string;summary?:string;sourceEventId?:number};
+      const source=events.find(e=>e.id===data.sourceEventId);
+      return <div key={event.id}><strong>#{event.id} · revision {data.planVersion} · {data.stepId} · {data.outcome}</strong><p>{data.summary}</p>{data.sourceEventId && <details><summary>Source evidence #{data.sourceEventId}</summary><pre>{source ? JSON.stringify(source.data,null,2) : 'Source is outside recent history; retained in the backend event archive.'}</pre></details>}</div>;
+    })}<p className="muted">Recent retained events only; older records remain in the backend event archive.</p></details>}
+  </div>;
 }
 
 export function ApprovalCard({

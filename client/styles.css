@@ -2025,3 +2025,21 @@ option {
 .change-diff .removed { color: #f0a6a6; }
 .change-diff .location { color: #a8bce8; }
 @media (max-width: 700px) { .changes-layout { grid-template-columns: 1fr; } .changes-layout nav { max-height: 25vh; } .changes-review { max-height: 40vh; } }
+
+/* Plan stays outside the transcript; toggling it leaves composer/editor mounted. */
+.chat-plan { flex: 0 1 auto; min-height: 0; max-height: 42vh; overflow: auto; border-bottom: 1px solid #383838; padding: 0 24px 12px; }
+.plan-toolbar { display:flex; align-items:center; gap:12px; padding:8px 0; }
+.plan-toolbar > span { flex:1; font-size:12px; color:#aaa; }
+.plan-body { padding: 0; }
+.plan-body p { font-size:12px; margin:6px 0; }
+.plan-step-text { flex:1; min-width:0; overflow-wrap:anywhere; }
+.plan-step-text details { margin-top:5px; font-size:11px; }
+.plan-step-text summary { cursor:pointer; color:#aaa; }
+.plan-history { font-size:11px; margin-top:12px; }
+.plan-history > div { padding:10px 0; border-bottom:1px solid #333; overflow-wrap:anywhere; }
+.plan-history pre { white-space:pre-wrap; max-height:180px; overflow:auto; }
+@media(max-width:700px) {
+  .conversation .chat-header { height:auto; min-height:72px; flex-wrap:wrap; padding-bottom:10px; gap:10px; }
+  .conversation .header-actions { flex-wrap:wrap; }
+  .chat-plan { padding-left:16px; padding-right:16px; }
+}

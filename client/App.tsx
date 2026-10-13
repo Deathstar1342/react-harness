@@ -65,6 +65,8 @@ export function Conversation({
     useConversation(chatId, onChange);
   const [busy, setBusy] = useState("");
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const planControl = useRef<HTMLButtonElement>(null);
   const [actionError, setActionError] = useState("");
   const [rename, setRename] = useState(false);
   const [title, setTitle] = useState("");
@@ -208,10 +210,19 @@ export function Conversation({
           <button className="icon-button" onClick={onFiles} aria-label="Toggle files" title="Files">
             <FileCode2 size={15} />
           </button>
+          <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>Plan</button>
           <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
         </div>
       </header>
+      {planOpen && <section id="chat-plan" className="chat-plan" aria-label="Current plan" onKeyDown={event=>{if(event.key==='Escape'){setPlanOpen(false);planControl.current?.focus();}}}>
+        <div className="plan-toolbar">
+          <span>{chat.mode === 'plan' ? 'Planning only' : 'Execution enabled'}</span>
+          {chat.mode === 'plan' && <button className="button primary" disabled={!!busy || !configured || !detail.plan.id || !detail.plan.phases.some(p=>p.steps.length)} onClick={()=>void act('build',()=>post(`/chats/${id(chatId)}/start-building`,{planId:detail.plan.id,planVersion:detail.plan.version,modeVersion:chat.modeVersion}))}>Start building</button>}
+          <button className="icon-button" aria-label="Close plan" onClick={()=>{setPlanOpen(false);planControl.current?.focus();}}><X size={15}/></button>
+        </div>
+        <PlanPanel plan={detail.plan} events={detail.events} />
+      </section>}
       <div
         className="conversation-scroll"
         ref={scroller}
@@ -224,7 +235,6 @@ export function Conversation({
         }}
       >
         <div className="conversation-content">
-          <PlanPanel plan={detail.plan} />
           {entries.length === 0 ? (
             <div className="welcome">
               <span className="welcome-mark">
