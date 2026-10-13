@@ -551,7 +551,13 @@ export class Runtime {
       For a delegate action, parameters is required and must contain:
       {"objective":"specific coder task","acceptanceCriteria":["one or more verifiable outcomes"],"paths":["optional file scope"]}
 
-      For set_plan, parameters must contain {"phases":[...]}.
+      For set_plan, parameters must contain:
+      {"phases":[{"id":"phase-1","title":"Short phase title","steps":[{"id":"phase-1-step-1","title":"Specific step","status":"pending"}]}]}
+
+      Each phase requires id, title, and steps.
+      Each step requires id, title, and status.
+      Status must be one of: "pending", "in_progress", "done", or "blocked".
+      Do not use plain strings for phases or steps.
       For review, parameters must contain {"focus":"what to review"}.
       For ask_user, parameters must contain {"question":"question for the user"}.
       For list_files and git_status, use {} when no arguments are needed.
