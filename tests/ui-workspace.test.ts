@@ -118,6 +118,6 @@ describe("backend filesystem navigation", () => {
     const settings = renderToStaticMarkup(createElement(SettingsDialog, { onClose: () => {} }));
     expect(settings).toContain("Change folder…");
     expect(settings).toContain("Existing projects stay where they are.");
-    expect(settings).not.toContain('<input');
+    expect(settings.slice(settings.indexOf('<h3>Default workspace</h3>'))).not.toContain('<input');
   });
 });

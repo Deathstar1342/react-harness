@@ -9,7 +9,10 @@ export interface Preferences { debugMode: boolean; defaultApprovalMode: Approval
 export interface ConnectionCheck { target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
 export interface ConnectionReport { ok: boolean; checks: ConnectionCheck[]; completedAt: string }
 export interface DirectoryListing { path: string; parentPath: string | null; entries: {name:string;path:string}[]; roots: {name:string;path:string}[]; truncated: boolean }
-export interface Chat { id: string; projectId: string; title: string; status: ChatStatus; approvalMode: ApprovalMode; createdAt: string; updatedAt: string }
+export type RoleModels = Record<AgentRole, string>;
+export interface ProviderSettings { models: RoleModels; apiKeyConfigured: boolean; lockedFields: string[] }
+export interface ProviderSettingsPatch { models?: Partial<RoleModels>; apiKey?: string }
+export interface Chat { id: string; projectId: string; title: string; status: ChatStatus; approvalMode: ApprovalMode; createdAt: string; updatedAt: string; models?: RoleModels }
 export interface Message { id: string; chatId: string; role: 'user' | AgentRole | 'tool' | 'system'; content: string; createdAt: string; metadata?: Record<string, unknown> }
 export interface PlanStep { id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }
 export interface PlanPhase { id: string; title: string; steps: PlanStep[] }

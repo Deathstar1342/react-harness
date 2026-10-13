@@ -14,7 +14,11 @@ describe('focused chat and settings', () => {
     const html = renderToStaticMarkup(createElement(SettingsDialog, { onClose() {} }));
     for (const text of ['Current chat', 'Default for future chats', 'Debug mode off', 'Test connection', 'Default workspace', 'Save workspace', 'account request and token budgets', 'changes save immediately']) expect(html).toContain(text);
     expect(html).toContain('role="switch" aria-checked="false"');
-    expect(html).not.toMatch(/streaming|JSON mode|API key.*input/i);
+    expect(html).not.toMatch(/streaming|JSON mode/i);
+    expect(html).toContain('aria-label="Replacement API key" type="password"');
+    expect(html).toContain('Leave blank to keep the current key');
+    expect(html).toContain('Model changes apply to new chats only');
+    for (const role of ['architect','coder','critic']) expect(html).toContain(`aria-label="${role} default model" list="provider-model-catalog"`);
   });
   it('shows user/architect/system and failed tools by default while preserving every message in Debug', () => {
     const messages: Message[] = ['user', 'architect', 'coder', 'critic', 'tool', 'system'].map((role, index) => ({ id: String(index), role: role as Message['role'], content: `${role} content`, chatId: 'c', createdAt: '' }));

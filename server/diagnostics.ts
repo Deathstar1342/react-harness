@@ -188,6 +188,9 @@ export class ConnectionDiagnostics {
     signal: AbortSignal,
     timedOut: () => boolean,
   ): Promise<ConnectionReport> {
+    // Keep role selection stable throughout a check. Credentials are captured by
+    // each provider request, so rotation applies to the next individual request.
+    const modelsByRole = {...this.config.models};
     const checks: ConnectionCheck[] = [];
 
     const failed = (target: ConnectionCheck['target'], error: unknown) =>
@@ -208,7 +211,7 @@ export class ConnectionDiagnostics {
         target: 'catalog',
         status: 'failed',
         message:
-          'Configure the provider URL and API key on the backend, then restart it.',
+          'Set the provider URL on the backend and restart for URL changes. Add the API key in Settings.',
       });
     } else {
       try {
@@ -236,8 +239,8 @@ export class ConnectionDiagnostics {
       }
 
       if (
-        !this.config.models[role] ||
-        !models.includes(this.config.models[role])
+        !modelsByRole[role] ||
+        !models.includes(modelsByRole[role])
       ) {
         checks.push({
           target: role,
@@ -251,7 +254,7 @@ export class ConnectionDiagnostics {
         const request = (messages: ModelMessage[]) =>
           bounded(signal, () =>
             this.complete(role, {
-              model: this.config.models[role],
+              model: modelsByRole[role],
               signal,
               maxTokens: Math.min(1024, this.config.maxOutputTokens),
               messages,

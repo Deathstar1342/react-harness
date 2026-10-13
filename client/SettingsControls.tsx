@@ -13,7 +13,7 @@ export function ConnectionResults({ report }: { report: ConnectionReport }) {
   </div>;
 }
 
-export function SettingsControls({ chatId, onPreferences }: { chatId?: string; onPreferences?: (value: Preferences) => void }) {
+export function SettingsControls({ chatId, onPreferences, providerRevision = 0 }: { chatId?: string; onPreferences?: (value: Preferences) => void; providerRevision?: number }) {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [detail, setDetail] = useState<ChatDetail | null>(null);
   const [error, setError] = useState('');
@@ -25,6 +25,9 @@ export function SettingsControls({ chatId, onPreferences }: { chatId?: string; o
   const mounted = useRef(false);
   const saveLock = useRef(false);
   const [revision, setRevision] = useState(0);
+  const currentProviderRevision = useRef(providerRevision);
+  currentProviderRevision.current = providerRevision;
+  useEffect(()=>{setReport(null);},[providerRevision]);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; check.current?.abort(); };
@@ -58,8 +61,9 @@ export function SettingsControls({ chatId, onPreferences }: { chatId?: string; o
       <button type="button" className="button" disabled={checking} onClick={() => {
         if (check.current) return;
         const controller = new AbortController(); check.current = controller;
+        const testedRevision = currentProviderRevision.current;
         setChecking(true); setReport(null); setError(''); setNotice('');
-        void testConnection(controller.signal).then(value => { if (mounted.current && !controller.signal.aborted) setReport(value); })
+        void testConnection(controller.signal).then(value => { if (mounted.current && !controller.signal.aborted && testedRevision === currentProviderRevision.current) setReport(value); })
           .catch(e => { if (mounted.current) setError(controller.signal.aborted ? 'Connection check cancelled.' : errorText(e)); })
           .finally(() => { if (check.current === controller) check.current = null; if (mounted.current) setChecking(false); });
       }}>{checking ? 'Testing connection…' : 'Test connection'}</button>
