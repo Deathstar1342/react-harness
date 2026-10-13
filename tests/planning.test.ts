@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,7 +15,7 @@ const pass = ()=>action('review_result',{verdict:'pass',findings:[]});
 const fail = ()=>action('review_result',{verdict:'changes_requested',findings:['Missing acceptance evidence']});
 const shape = ():Plan=>({phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement and verify',status:'pending'}]}]});
 const cleanups:(()=>Promise<void>)[]=[];
-afterEach(async()=>{for(const fn of cleanups.splice(0).reverse())await fn();});
+afterEach(async()=>{vi.restoreAllMocks();for(const fn of cleanups.splice(0).reverse())await fn();});
 function fixture(filename=':memory:') {
   const store=new Store(filename);
   const project=store.createProject('Fixture','/fixture');
@@ -194,4 +194,85 @@ it('persists the completed transition epoch and mode through a physical database
   }finally{reopened.close();}
   // Insert cleanup before fixture disposal so the database is closed first.
   cleanups.splice(cleanups.length-1,0,()=>rm(root,{recursive:true,force:true}));
+});
+
+// Fail after the run write has reached SQLite, or just before COMMIT. Both
+// exercise real rollback; a pre-write failure alone would miss orphan progress.
+function failRunPersistence(t: ReturnType<typeof fixture>, point: 'write'|'commit', matches: (run: RunState) => boolean) {
+  let fired=false;
+  if(point==='write') {
+    const original=t.store.setState.bind(t.store);
+    vi.spyOn(t.store,'setState').mockImplementation((key,value)=>{
+      original(key,value);
+      if(!fired && key===`run:${t.chat.id}` && matches(value as RunState)){fired=true;throw new Error('Injected run write failure');}
+    });
+  } else {
+    const original=t.store.db.exec.bind(t.store.db);
+    vi.spyOn(t.store.db,'exec').mockImplementation(sql=>{
+      const run=sql==='COMMIT' ? t.store.getState<RunState|null>(`run:${t.chat.id}`,null) : null;
+      if(!fired && run && matches(run)){fired=true;throw new Error('Injected commit failure');}
+      return original(sql);
+    });
+  }
+  return ()=>expect(fired).toBe(true);
+}
+
+it.each([['write','button'],['commit','button'],['write','text'],['commit','text']] as const)('failed active build %s via %s preserves durable AND live planning before provider reply resolves',async (point,input)=>{
+  const t=fixture();let reply!:(response:AgentResponse)=>void;let entered!:()=>void;const pending=new Promise<void>(r=>entered=r);
+  t.queue.push(()=>{entered();return new Promise(r=>reply=r);},action('write_file',{path:'x',content:'must not execute',baseHash:null}),final(),pass(),final());
+  await t.runtime.submit(t.chat.id,'/plan fixture');await pending;
+  const live=(t.runtime as unknown as {runs:Map<string,RunState>}).runs.get(t.chat.id)!;
+  const before=structuredClone(live), chat=t.store.chat(t.chat.id), events=t.store.events(t.chat.id),messages=t.store.messages(t.chat.id);
+  const fired=failRunPersistence(t,point,run=>!run.planOnly);
+  await expect(input==='button' ? t.runtime.startBuilding(t.chat.id,t.expected()) : t.runtime.submit(t.chat.id,'go ahead')).rejects.toThrow('Injected');fired();
+  expect(t.store.chat(t.chat.id)).toEqual(chat);expect(t.store.messages(t.chat.id)).toEqual(messages);expect(t.store.events(t.chat.id)).toEqual(events);
+  expect(t.store.getState(`build:${t.chat.id}`,null)).toBeNull();expect(t.store.getState(`run:${t.chat.id}`,null)).toEqual(before);
+  expect(live).toEqual(before);expect((t.runtime as unknown as {runs:Map<string,RunState>}).runs.get(t.chat.id)).toBe(live);
+  reply(t.delegate());await t.runtime.wait(t.chat.id);
+  expect(t.executed).toEqual([]);expect(t.store.events(t.chat.id).some(e=>e.type==='delegation')).toBe(false);
+  expect(t.store.chat(t.chat.id).mode).toBe('plan');expect(live.planOnly).toBe(true);
+});
+
+it.each(['write','commit'] as const)('failed idle build %s never queues a loop or publishes a speculative cached run',async point=>{
+  const t=fixture();t.queue.push(final());await t.submit('/plan fixture');
+  const before=t.store.getState(`run:${t.chat.id}`,null);
+  t.queue.push(t.delegate(),action('write_file',{path:'x',content:'must not execute',baseHash:null}),final(),pass(),final());
+  const fired=failRunPersistence(t,point,run=>!run.planOnly);
+  await expect(t.runtime.startBuilding(t.chat.id,t.expected())).rejects.toThrow('Injected');fired();await t.runtime.wait(t.chat.id);
+  expect(t.queue).toHaveLength(5);expect(t.executed).toEqual([]);expect(t.store.getState(`run:${t.chat.id}`,null)).toEqual(before);
+  expect((t.runtime as unknown as {runs:Map<string,RunState>}).runs.get(t.chat.id)).toEqual(before);
+  expect(t.store.chat(t.chat.id).mode).toBe('plan');
+});
+
+it.each(['write','commit'] as const)('failed delegation creation %s cannot leave progress ownership or a live/durable coder',async point=>{
+  const t=fixture();const fired=failRunPersistence(t,point,run=>run.frames.some(f=>f.role==='coder'));
+  const emitted:string[]=[];t.store.changes.on(t.chat.id,event=>emitted.push(event.type));
+  t.queue.push(t.delegate(),final());await t.submit('Build');fired();
+  expect(t.step().status).toBe('pending');expect(t.step().evidence).toBeUndefined();
+  expect(t.store.events(t.chat.id).filter(e=>['delegation','plan_progress'].includes(e.type))).toEqual([]);
+  expect(emitted).not.toContain('delegation');expect(emitted).not.toContain('plan_progress');
+  expect(t.store.getState<RunState>(`run:${t.chat.id}`,null!).frames).toEqual([]);
+  expect((t.runtime as unknown as {runs:Map<string,RunState>}).runs.get(t.chat.id)!.frames).toEqual([]);expect(t.executed).toEqual([]);
+});
+
+it.each(['write','commit'] as const)('failed completion-review creation %s rolls back coder final, critic and reviewing progress',async point=>{
+  const t=fixture();const fired=failRunPersistence(t,point,run=>!!run.frames.at(-1)?.reviewDelegationId);
+  t.queue.push(t.delegate(),action('read_file',{path:'x'}),final());await t.submit('Build');fired();
+  const run=t.store.getState<RunState>(`run:${t.chat.id}`,null!);
+  expect(run.frames.map(f=>f.role)).toEqual(['architect','coder']);expect(run.frames.at(-1)?.final).toBeUndefined();
+  const live=(t.runtime as unknown as {runs:Map<string,RunState>}).runs.get(t.chat.id)!;
+  expect(live.frames.map(f=>f.role)).toEqual(['architect','coder']);expect(live.frames.at(-1)?.final).toBeUndefined();
+  expect(t.store.events(t.chat.id).some(e=>e.type==='plan_progress'&&(e.data as {outcome:string}).outcome==='reviewing')).toBe(false);
+  expect(t.step().status).toBe('blocked');expect(t.step().evidence?.outcome).toBe('error');expect(t.store.chat(t.chat.id).status).toBe('error');
+});
+
+it.each(['write','commit'] as const)('failed accepted-review consumption %s preserves the reviewer and cannot record done',async point=>{
+  const t=fixture();const fired=failRunPersistence(t,point,run=>run.frames.length===1&&t.step().status==='done');
+  t.queue.push(t.delegate(),action('read_file',{path:'x'}),final(),pass());await t.submit('Build');fired();
+  const run=t.store.getState<RunState>(`run:${t.chat.id}`,null!);
+  expect(run.frames.map(f=>f.role)).toEqual(['architect','coder','critic']);
+  expect((t.runtime as unknown as {runs:Map<string,RunState>}).runs.get(t.chat.id)!.frames.map(f=>f.role)).toEqual(['architect','coder','critic']);
+  expect(t.store.events(t.chat.id).some(e=>e.type==='review'&&(e.data as {passed:boolean}).passed)).toBe(false);
+  expect(t.store.events(t.chat.id).some(e=>e.type==='plan_progress'&&(e.data as {outcome:string}).outcome==='accepted')).toBe(false);
+  expect(t.step().status).not.toBe('done');
 });

@@ -23,15 +23,23 @@ The advisor/recommendation vocabulary, role introductions, ordinary Chat Complet
 3. Its existing set_plan line adds: `Recorded progress is owned by the application; structural revisions reset progress, identical structure preserves it.` The plan-save tool response now states the saved revision and whether progress reset or was preserved.
 4. The old newly-done set_plan path no longer creates a phase-review prompt that could accept unassociated completion. A recovered legacy phase-review result retains the current plan and explicitly says so. Completion uses the existing coder-completion review prompt, with application-owned identity linking; no model mode-transition action or direct-execution claim was added.
 
+## Coordinator review correction
+
+Independent review of initial delivery `f49c4121d5f53562688b93eff43db7801ad5a037` found that its claimed atomic delegation creation was not implemented: progress could commit before the run snapshot. Coder final/review creation had the same gap. Submission also mutated cached permissions and queued a loop before the database commit, allowing a rolled-back build transition to leave a live loop in execution mode. The initial report overstated these boundaries; this correction supersedes that claim.
+
+Submission now prepares a separate run draft without changing cached permissions, generation, steering or frames. Durable mode, message, receipt and run commit first. Only then are the changes published to the live root and the loop launched. Active submissions preserve existing frame identities; failed writes/commits leave the objects already held by an in-flight provider request untouched. Delegation creation, coder-final/completion-critic creation, and accepted-review consumption use cloned run drafts and one transaction for frame state, ownership and progress/events; the live root is updated only after successful commit. No speculative cache mutation needs to be repaired on rollback.
+
+Twelve new deterministic regressions inject failures after the run write reaches SQLite and immediately before COMMIT. They cover both button and whole-message build intent during an active planning request, idle build failures that must never queue provider work, orphan-free delegation creation, coder-final/review creation rollback, and accepted-review consumption rollback. Assertions check durable mode/messages/receipts/events, live root/frame state, absence of emitted orphan events and no writes when the pending provider reply resolves. Current full checks pass as listed below. No prompt, UI, API contract, branding or scope expansion accompanies this correction.
+
 ## Validation
 
 Native Windows, Node `v24.16.0`:
 
 - `npm run typecheck`: passed.
-- `npm test -- --reporter=dot`: **483 passed, 15 skipped**, 33 test files passed / 2 opt-in files skipped. Final suite completed in 25.84 seconds.
+- `npm test -- --reporter=dot`: **495 passed, 15 skipped**, 33 test files passed / 2 opt-in files skipped. Final suite completed in 23.99 seconds.
 - `npm run build`: passed; existing large Monaco/chunk advisory remains.
 - `git diff --check`: passed (Git reports existing LF-to-CRLF normalization notices).
-- Added 26 runtime/API/store planning tests and 2 panel-render tests. Coverage includes mode persistence and physical DB reopen/backfill, explicit/quoted intent, no-plan refusal, duplicate/concurrent/restarted requests, stale mode epochs and plan revisions, in-flight generation invalidation, approval invalidation, uncertain recovery, prepared-write mode enforcement, tool-success versus completion, missing evidence, failures/repair limits, exact critic identity, legacy/checkpoint reviews, new delegation ownership, revised reused IDs, protocol/API injection and escaped/omitted source evidence. Existing full-suite stale-file, steering, approval, project removal, provider settings, secrecy and restart regressions remain passing.
+- Added 38 runtime/API/store planning cases and 2 panel-render tests, including 12 persistence fault-injection cases. Coverage includes mode persistence and physical DB reopen/backfill, explicit/quoted intent, no-plan refusal, duplicate/concurrent/restarted requests, stale mode epochs and plan revisions, in-flight generation invalidation, approval invalidation, uncertain recovery, prepared-write mode enforcement, tool-success versus completion, missing evidence, failures/repair limits, exact critic identity, legacy/checkpoint reviews, new delegation ownership, revised reused IDs, protocol/API injection and escaped/omitted source evidence. Existing full-suite stale-file, steering, approval, project removal, provider settings, secrecy and restart regressions remain passing.
 
 Failed attempts retained in this report: initial sandbox `npm ci` ended with npm's `Exit handler never called`; host retry succeeded. Initial sandbox test execution failed loading temporary transformed modules (`ENOENT`) and realpath (`EPERM`), so it is not counted as a code pass. The first production build caught a Windows-script encoding error in newly added middle-dot text; UTF-8 was fixed, and host build also avoided the sandbox Monaco realpath failure. The first host full suite had 477 passes and one outdated exact delegate-guide assertion; the assertion now checks the intended optional argument and the final full suite passes. No test was weakened to accept invalid execution.
 
@@ -39,7 +47,7 @@ Failed attempts retained in this report: initial sandbox `npm ci` ended with npm
 
 Used Chrome Hands Free only, a task-owned background tab and `tests/planning-browser-fixture.ts`, which creates a temporary project/database with explicit synthetic provider responses. No user files, real API credentials, live provider requests, OS input, focus-control fallback or unrelated tab navigation.
 
-Observed on the real production UI/backend:
+Observed on the initial production UI/backend candidate `f49c412` before the coordinator persistence correction:
 
 - Plan initially collapsed, reachable in stable chat header. With the long transcript at scrollTop 1338, the Plan button remained at viewport top 22.5px; the panel is outside `.conversation-scroll`.
 - Start building changed the same chat to execution and reached idle with one accepted step. Durable progress sequence was `started`, `working`, `reviewing`, `accepted`, with a matching review source event. UI showed `1 / 1 steps` and evidence/history disclosures.
@@ -47,7 +55,7 @@ Observed on the real production UI/backend:
 - Closing the panel and Escape from inside it returned focus to the header Plan control.
 - A same-origin 390x844 iframe exercised actual narrow viewport CSS: document width 390, panel bounds 0..390, visible Plan control, and Start building button within x=215.30..330 and y=118..159. This is a browser viewport check, not physical mobile acceptance.
 - After `/plan`, replaying the old build receipt returned HTTP 409 with the stale planning-session message.
-- Replayed the core same-chat transition against the final runtime transaction changes before delivery.
+- Replayed the core same-chat transition before initial delivery. The coordinator persistence correction is covered by the new fault-injection/full regression runs; this browser pass was not rerun against the corrected backend. UI source is unchanged.
 
 Browser limitations: Monaco's background automation click on the editor textbox timed out, and the subsequent scoped keyboard/focus attempt did not establish a dirty buffer. A Chrome aria-hidden focus warning followed that forced Monaco focus attempt. Mounted-editor preservation is verified; actual dirty-editor typing/toggle acceptance is not claimed. No screenshot/pixel audit or physical-device test was performed. Recent plan history retains the existing 1,000-event HTTP bound and explicitly labels omitted source evidence; old events remain in SQLite. Fixture tabs/processes and their exact temporary directories were cleaned up.
 

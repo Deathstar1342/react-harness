@@ -140,17 +140,30 @@ export class Runtime {
     if (this.decisions.has(chatId) || this.load(chatId)?.frames.some(f=>f.pending?.stage === 'executing')) {
       throw Object.assign(new Error('Wait for the current operation to stop before starting'), {statusCode:409});
     }
-    this.store.transaction(() => {
-      this.store.setState(`build:${chatId}`, expected);
-      this.submitInternal(chatId, 'Start building');
-    });
+    this.commitSubmission(chatId, 'Start building', expected);
   }
 
   async submit(chatId: string, content: string) {
-    this.store.transaction(() => this.submitInternal(chatId, content));
+    this.commitSubmission(chatId, content);
   }
 
-  private submitInternal(chatId: string, content: string) {
+  private commitSubmission(chatId: string, content: string, receipt?: {planId: string; planVersion: number; modeVersion: number}) {
+    // Load before changing durable mode. Never expose speculative permissions to
+    // a loop which may already hold this cached object across a provider await.
+    const previous = this.load(chatId);
+    const next = this.store.transaction(() => {
+      if (receipt) this.store.setState(`build:${chatId}`, receipt);
+      return this.prepareSubmission(chatId, content, previous);
+    });
+    if (previous?.frames.length) {
+      // prepareSubmission preserves frame identities held by the active loop.
+      Object.assign(previous, next);
+      this.runs.set(chatId, previous);
+    } else this.runs.set(chatId, next);
+    this.launch(chatId);
+  }
+
+  private prepareSubmission(chatId: string, content: string, previous: RunState | null): RunState {
     this.assertAvailable(chatId);
 
     const chat = this.store.chat(chatId);
@@ -175,7 +188,7 @@ export class Runtime {
       });
     }
 
-    const existing = this.load(chatId);
+    const existing = previous && {...previous, steering: [...previous.steering]};
 
     if (existing?.frames.length) {
       existing.planOnly = mode === 'plan';
@@ -184,12 +197,9 @@ export class Runtime {
       existing.generation++;
 
       this.store.invalidateApprovals(chatId);
-      this.save(chatId, existing);
+      this.store.setState(`run:${chatId}`, existing);
       this.store.event(chatId, 'steering', { content: text, delivered: false });
-
-      if (!this.active.has(chatId)) this.launch(chatId);
-
-      return;
+      return existing;
     }
 
     const history: ModelMessage[] = this.store
@@ -214,8 +224,20 @@ export class Runtime {
       objective: building && existing?.objective ? existing.objective : objective,
     };
 
-    this.save(chatId, state);
-    this.launch(chatId);
+    this.store.setState(`run:${chatId}`, state);
+    return state;
+  }
+
+  private commitRunTransition(chatId: string, state: RunState, change: (draft: RunState) => void) {
+    // Events/progress and the corresponding frame snapshot commit together.
+    // Rollback leaves both the live loop's root and every frame untouched.
+    const draft = structuredClone(state);
+    this.store.transaction(() => {
+      change(draft);
+      this.store.setState(`run:${chatId}`, draft);
+    });
+    Object.assign(state, draft);
+    this.runs.set(chatId, state);
   }
 
   private launch(chatId: string) {
@@ -887,9 +909,11 @@ export class Runtime {
           coder.scope = action.args.paths as string[] | undefined;
           coder.shellId = 'coder-primary';
 
-          state.frames.push(coder);
-          const event = this.store.event(chatId, 'delegation', { objective, delegationId: coder.id, planStep: reference });
-          this.store.progress(chatId, reference, coder.id, 'in_progress', 'started', objective, event.id);
+          this.commitRunTransition(chatId, state, draft => {
+            draft.frames.push(coder);
+            const event = this.store.event(chatId, 'delegation', { objective, delegationId: coder.id, planStep: reference });
+            this.store.progress(chatId, reference, coder.id, 'in_progress', 'started', objective, event.id);
+          });
         } else if (action.name === 'review') {
           if (frame.role !== 'architect') {
             throw new Error('Only the architect can request an independent review');
@@ -1426,27 +1450,31 @@ export class Runtime {
     text: string,
   ) {
     if (frame.role === 'coder') {
-      frame.final = text;
-      this.store.progress(chatId, frame.planStep, frame.id, 'in_progress', 'reviewing', 'Coder reported completion; independent review is pending.');
+      this.commitRunTransition(chatId, state, draft => {
+        const coder = draft.frames.find(item => item.id === frame.id)!;
+        coder.final = text;
+        this.store.progress(chatId, frame.planStep, frame.id, 'in_progress', 'reviewing', 'Coder reported completion; independent review is pending.');
 
-      state.frames.push(
-        this.frame(
-          'critic',
-          [
-            {
-              role: 'user',
-              content:
-                `Review this completed coder task before accepting it.\n` +
-                `Objective: ${frame.objective}\n` +
-                `Original assignment and evidence:\n` +
-                `${JSON.stringify(frame.messages).slice(-150000)}\n` +
-                'Inspect relevant files and git diff. Conclude with review_result.',
-            },
-          ],
-          frame.objective,
-        ),
-      );
-      state.frames.at(-1)!.reviewDelegationId = frame.id;
+        draft.frames.push(
+          this.frame(
+            'critic',
+            [
+              {
+                role: 'user',
+                content:
+                  `Review this completed coder task before accepting it.\n` +
+                  `Objective: ${frame.objective}\n` +
+                  `Original assignment and evidence:\n` +
+                  `${JSON.stringify(frame.messages).slice(-150000)}\n` +
+                  'Inspect relevant files and git diff. Conclude with review_result.',
+              },
+            ],
+            frame.objective,
+          ),
+        );
+        draft.frames.at(-1)!.reviewDelegationId = frame.id;
+      });
+      return;
     } else if (frame.role === 'critic') {
       frame.messages.push({
         role: 'user',
@@ -1475,9 +1503,8 @@ export class Runtime {
     passed: boolean,
     findings: string[],
   ) {
-    this.store.transaction(() => {
-      this.finishReviewInternal(chatId,state,passed,findings);
-      this.save(chatId,state);
+    this.commitRunTransition(chatId, state, draft => {
+      this.finishReviewInternal(chatId,draft,passed,findings);
     });
   }
 
