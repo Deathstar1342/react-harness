@@ -36,6 +36,7 @@ import { useConversation } from "./useConversation";
 import { useEditorLayout } from "./useEditorLayout";
 import { getPreferences } from './settings';
 import { conversationEntries, isToolProblem, toolMessageLabel } from './conversation';
+import { Overflow, RemovalDialog } from './RemovalDialog';
 
 export function Conversation({
   chatId,
@@ -569,6 +570,7 @@ export function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [removing, setRemoving] = useState<{project:Project;chat?:Chat}>();
   const project = projects.find((item) => item.id === projectId);
   const mounted = useRef(true);
   const projectRef = useRef(projectId);
@@ -579,7 +581,7 @@ export function App() {
       const next = await request<Chat[]>(`/projects/${id(projectId)}/chats`);
       if (mounted.current && projectRef.current === projectId) setChats(next);
     } catch (e) {
-      if (mounted.current) setError(errorText(e));
+      if (mounted.current && projectRef.current === projectId) setError(errorText(e));
     }
   }, [projectId]);
   const initialize = useCallback(async () => {
@@ -693,6 +695,7 @@ export function App() {
           </button>
         </div>
         <div className="workspace-label">WORKSPACE</div>
+        <div className="project-navigation-row">
         <div className="project-select-wrap">
           <select
             aria-label="Select project"
@@ -708,6 +711,9 @@ export function App() {
           </select>
           <ChevronsUpDown size={14} />
         </div>
+        {project && <Overflow label={`Project ${project.name}`} onRemove={()=>setRemoving({project})}/>}
+        </div>
+        {project?.removalError && <button className="navigation-row danger-text" onClick={()=>setRemoving({project})}>Review incomplete removal</button>}
         <button
           className="new-chat navigation-row"
           onClick={() => void newChat()}
@@ -722,8 +728,8 @@ export function App() {
         </div>
         <nav className="chat-list" aria-label="Conversations">
           {chats.map((chat) => (
+            <div key={chat.id} className={`chat-navigation-row ${chat.id===chatId ? 'selected' : ''}`}>
             <button
-              key={chat.id}
               className={`chat-item ${chat.id === chatId ? "active" : ""}`}
               onClick={() => {
                 setChatId(chat.id);
@@ -740,6 +746,8 @@ export function App() {
                 />
               )}
             </button>
+            <Overflow label={`Chat ${chat.title}`} onRemove={()=>{if(project) setRemoving({project,chat});}}/>
+            </div>
           ))}
           {chats.length === 0 && (
             <p className="sidebar-hint">
@@ -909,6 +917,21 @@ export function App() {
         </div>
       </div>
       {showSettings && <SettingsDialog chatId={chatId || undefined} onPreferences={setPreferences} onClose={() => setShowSettings(false)} />}
+      {removing && <RemovalDialog project={projects.find(p=>p.id===removing.project.id) ?? removing.project} chat={removing.chat} blocked={dirty}
+        onClose={()=>setRemoving(undefined)} onFailure={()=>{void request<Project[]>('/projects').then(setProjects).catch(e=>setError(errorText(e)));}}
+        onRemoved={()=>{
+          const removed=removing;
+          setError('');
+          setRemoving(undefined);
+          setDrafts(current=>Object.fromEntries(Object.entries(current).filter(([id])=>removed.chat ? id!==removed.chat.id : !chats.some(chat=>chat.id===id))));
+          if(removed.chat) {
+            const remaining=chats.filter(chat=>chat.id!==removed.chat!.id);setChats(remaining);
+            if(chatId===removed.chat.id) setChatId(remaining[0]?.id ?? '');
+          } else {
+            const remaining=projects.filter(p=>p.id!==removed.project.id);setProjects(remaining);
+            setProjectId(remaining[0]?.id ?? '');setChatId('');setChats([]);setFiles(false);setChanges(false);
+          }
+        }}/>}
       {changes && project && <ChangesPanel key={project.id} projectId={project.id} revision={fileRevision} onClose={()=>setChanges(false)} />}
       {showProject && (
         <ProjectDialog

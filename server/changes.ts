@@ -16,6 +16,12 @@ export function boundedDiff(filename: string, before: string, after: string, cre
 export class Changes {
   private previews = new Map<string,{projectId:string;changeId:string;hash:string;expires:number}>();
   constructor(private store: Store, private tools: ToolService, private runtime: Runtime) {}
+  forget(projectId: string) {
+    for (const [id,preview] of this.previews) {
+      // A removed chat may own a preview; discard this project's bounded cache.
+      if (preview.projectId===projectId) this.previews.delete(id);
+    }
+  }
   async list(projectId: string): Promise<ProjectChanges> {
     const root = this.store.project(projectId).path;
     const result = await this.tools.execute({projectRoot:root,chatId:'changes',agentId:'changes'},{name:'git_status',args:{}});

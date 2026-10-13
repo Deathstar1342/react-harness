@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises';
+import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { z } from 'zod';
 import type { Action, FileSnapshot, ToolContext, ToolInspection, ToolResult, ToolService, TestReport } from '../../shared/types.js';
@@ -34,6 +35,20 @@ export class WorkspaceTools implements ToolService {
   private files: WorkspaceFiles;
   private shells: ShellPool;
   private disposed = false;
+  private operations = new Map<string,number>();
+  private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
+    const id = key(path.resolve(root));
+    this.operations.set(id,(this.operations.get(id) ?? 0)+1);
+    try { return await operation(); }
+    finally { const count = this.operations.get(id)!-1; if (count) this.operations.set(id,count); else this.operations.delete(id); }
+  }
+  removeScope<T>(root: string, chatId: string | undefined, mutation: () => T): T {
+    this.check();
+    if (this.operations.has(key(path.resolve(root)))) throw new ToolError('A workspace operation is still pending.','CONFLICT');
+    this.files.assertRemovable(root);
+    this.shells.removeScope(root,chatId);
+    return mutation();
+  }
   private maxOutputBytes: number;
   private maxReportBytes: number;
   constructor(options: WorkspaceToolsOptions = {}) {
@@ -44,15 +59,18 @@ export class WorkspaceTools implements ToolService {
     this.shells = new ShellPool({ maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash' });
   }
   private check(): void { if (this.disposed) throw new ToolError('Tool service has been disposed.'); }
-  read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.files.read(root, path); }
-  list(root: string, path = '') { this.check(); return this.files.list(root, path); }
-  save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.files.save(root, path, content, baseHash, owner); }
+  read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.tracked(root,()=>this.files.read(root, path)); }
+  list(root: string, path = '') { this.check(); return this.tracked(root,()=>this.files.list(root, path)); }
+  save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.tracked(root,()=>this.files.save(root, path, content, baseHash, owner)); }
   setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); this.files.setDirty(root, path, owner, dirty); }
   restore(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void) {
     this.check();
-    return this.files.save(root, path, before.content, expectedHash, undefined, beforeMutation, before.hash === null);
+    return this.tracked(root,()=>this.files.save(root, path, before.content, expectedHash, undefined, beforeMutation, before.hash === null));
   }
   async inspect(context: ToolContext, action: Action): Promise<ToolInspection> {
+    return this.tracked(context.projectRoot,()=>this.inspectInternal(context,action));
+  }
+  private async inspectInternal(context: ToolContext, action: Action): Promise<ToolInspection> {
     this.check(); const args = validate(action);
     await rootPath(context.projectRoot);
     if (args.path !== undefined) await scoped(context.projectRoot, args.path, ['list_files', 'search', 'git_diff'].includes(action.name));
@@ -71,6 +89,9 @@ export class WorkspaceTools implements ToolService {
   }
   // This is an execution primitive for the trusted runtime, never a model-facing approval bypass.
   async execute(context: ToolContext, action: Action): Promise<ToolResult> {
+    return this.tracked(context.projectRoot,()=>this.executeInternal(context,action));
+  }
+  private async executeInternal(context: ToolContext, action: Action): Promise<ToolResult> {
     let fileMutationStarted = false;
     try {
       this.check(); const args = validate(action);

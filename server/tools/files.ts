@@ -10,6 +10,14 @@ const leases = new Map<string, { owner: string; expires: number }>();
 export interface FileOptions { maxFileBytes: number; maxEntries: number; maxSearchFiles: number; leaseMs: number }
 export class WorkspaceFiles {
   constructor(readonly options: FileOptions) {}
+  assertRemovable(root: string) {
+    const prefix = key(path.resolve(root)) + path.sep;
+    for (const [id,lease] of leases) {
+      if (lease.expires <= Date.now()) leases.delete(id);
+      else if (id.startsWith(prefix)) throw new ToolError('An editor has unsaved changes; save or discard them before removal.','CONFLICT');
+    }
+    if ([...locks.keys()].some(id=>id.startsWith(prefix))) throw new ToolError('A file operation is still pending.','CONFLICT');
+  }
   async read(root: string, input: string): Promise<FileSnapshot> {
     const target = await scoped(root, input);
     let handle;

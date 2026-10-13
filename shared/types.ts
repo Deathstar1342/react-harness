@@ -1,7 +1,9 @@
 export type AgentRole = 'architect' | 'coder' | 'critic';
 export type ApprovalMode = 'autonomous' | 'balanced' | 'review';
 export type ChatStatus = 'idle' | 'running' | 'awaiting_approval' | 'paused' | 'interrupted' | 'error';
-export interface Project { id: string; name: string; path: string; createdAt: string }
+export interface Project { id: string; name: string; path: string; createdAt: string; removalError?: string }
+export interface DeletionPreview { canonicalPath: string; confirmationToken: string; expiresAt: string }
+export type ProjectRemoval = { mode: 'app-only' } | { mode: 'disk'; canonicalPath: string; confirmationToken: string };
 export interface WorkspaceSettings { workspaceRoot: string; defaultWorkspaceRoot: string }
 export interface Preferences { debugMode: boolean; defaultApprovalMode: ApprovalMode }
 export interface ConnectionCheck { target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
@@ -38,6 +40,8 @@ export interface ToolService {
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot>;
   setDirty(root: string, path: string, owner: string, dirty: boolean): void;
   restore?(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void): Promise<FileSnapshot>;
+  // Trusted synchronous lifecycle boundary; reject active operations and dirty leases.
+  removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T;
   dispose(): Promise<void>;
 }
 export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string }
