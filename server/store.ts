@@ -12,7 +12,7 @@ export class Store {
   readonly db: DatabaseSync;
   readonly changes = new EventEmitter();
   private transactionEvents?: RunEvent[];
-  constructor(filename: string) {
+  constructor(readonly filename: string) {
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new DatabaseSync(filename);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
@@ -74,6 +74,31 @@ export class Store {
     const project = { id: randomUUID(), name, path: root, createdAt: now() };
     this.db.prepare('INSERT INTO projects VALUES (?,?,?)').run(project.id, root, JSON.stringify(project));
     return project;
+  }
+  removalError(projectId: string, message: string) {
+    const project = {...this.project(projectId), removalError: message};
+    this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(project),projectId);
+  }
+  private deleteChatRecords(chatId: string) {
+    for (const table of ['messages','events','approvals','test_reports']) this.db.prepare(`DELETE FROM ${table} WHERE chat_id=?`).run(chatId);
+    this.db.prepare("DELETE FROM file_changes WHERE json_extract(summary,'$.chatId')=?").run(chatId);
+    // Run, plan, summary and archived context keys are scoped by exact chat ID.
+    for (const row of this.db.prepare('SELECT key FROM state').all()) {
+      if (String(row.key).split(':').includes(chatId)) this.db.prepare('DELETE FROM state WHERE key=?').run(row.key);
+    }
+    this.db.prepare('DELETE FROM chats WHERE id=?').run(chatId);
+  }
+  deleteChat(chatId: string) {
+    this.chat(chatId);
+    this.transaction(()=>this.deleteChatRecords(chatId));
+  }
+  deleteProject(projectId: string) {
+    this.project(projectId);
+    this.transaction(()=>{
+      for (const chat of this.chats(projectId)) this.deleteChatRecords(chat.id);
+      this.db.prepare('DELETE FROM file_changes WHERE project_id=?').run(projectId);
+      this.db.prepare('DELETE FROM projects WHERE id=?').run(projectId);
+    });
   }
   chats(projectId?: string): Chat[] {
     return (projectId ? this.db.prepare('SELECT data FROM chats WHERE project_id=?').all(projectId) : this.db.prepare('SELECT data FROM chats').all()).map(row => JSON.parse(String(row.data))).sort((a: Chat,b: Chat) => b.updatedAt.localeCompare(a.updatedAt));

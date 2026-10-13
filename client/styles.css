@@ -17,6 +17,18 @@
   --border: #343434;
   --panel: #222;
 }
+.project-navigation-row, .chat-navigation-row { display: flex; align-items: center; gap: 3px; }
+.project-navigation-row .project-select-wrap, .chat-navigation-row .chat-item { flex: 1; min-width: 0; }
+.row-overflow { position: relative; flex: 0 0 auto; }
+.overflow-trigger { opacity: 0; }
+.project-navigation-row:hover .overflow-trigger, .project-navigation-row:focus-within .overflow-trigger,
+.chat-navigation-row:hover .overflow-trigger, .chat-navigation-row:focus-within .overflow-trigger,
+.chat-navigation-row.selected .overflow-trigger, .overflow-trigger[aria-expanded="true"] { opacity: 1; }
+.overflow-popover { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 160px; padding: 5px; background: #292929; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px #0006; }
+.danger-text { color: #f3a5a5; }
+.removal-path { user-select: all; padding: 12px; background: #181818; border-radius: 6px; overflow-wrap: anywhere; }
+.removal-actions { flex-wrap: wrap; }
+@media (hover: none) { .overflow-trigger { opacity: 1; } }
 * {
   box-sizing: border-box;
 }

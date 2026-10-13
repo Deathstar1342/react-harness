@@ -15,6 +15,7 @@ import { WorkspaceLocations } from './workspace.js';
 import { Settings } from './settings.js';
 import { ConnectionDiagnostics } from './diagnostics.js';
 import { Changes } from './changes.js';
+import { Removal } from './removal.js';
 import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 
@@ -35,6 +36,22 @@ export async function createApp(options: AppOptions) {
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
   const recentWrites = new Map<string,{hash:string|null;at:number}>();
   const eventStreams = new Set<ServerResponse>();
+  const chatStreams = new Map<string,Map<ServerResponse,()=>void>>();
+  const removedProjects = new Set<string>();
+  const requests = new Map<string,string>();
+  const removal = new Removal(store,runtime,tools,config,locations,(projectId,chatIds,wholeProject)=>{
+    for (const chatId of chatIds) for (const [stream,cleanup] of chatStreams.get(chatId) ?? []) {
+      cleanup();
+      if (!stream.destroyed) stream.end(`event: chat_removed\ndata: ${JSON.stringify({chatId,projectId,projectRemoved:wholeProject})}\n\n`);
+    }
+    changes.forget(projectId);
+    if (wholeProject) {
+      removedProjects.add(projectId);
+      watchers.get(projectId)?.close();watchers.delete(projectId);
+      for (const [key,timer] of pendingChanges) if (key.startsWith(`${projectId}:`)) { clearTimeout(timer);pendingChanges.delete(key); }
+      for (const key of recentWrites.keys()) if (key.startsWith(`${projectId}:`)) recentWrites.delete(key);
+    }
+  });
   let closing = false;
   store.changes.on('event',(event: RunEvent)=> {
     if (event.type !== 'file_changed') return;
@@ -55,13 +72,13 @@ export async function createApp(options: AppOptions) {
         clearTimeout(pendingChanges.get(key));
         pendingChanges.set(key,setTimeout(async()=> {
           pendingChanges.delete(key);
-          if (closing) return;
+          if (closing || removedProjects.has(projectId)) return;
           const ownWrite = recentWrites.get(key);
           if (ownWrite) {
             const current = await tools.read(project.path,file).catch(()=>undefined);
             if (current && current.hash===ownWrite.hash) return;
           }
-          if (closing) return;
+          if (closing || removedProjects.has(projectId)) return;
           recentWrites.delete(key);
           runtime.notifyFileChange(projectId,file,'external');
           for (const chat of store.chats(projectId)) store.event(chat.id,'file_changed',{path:file,source:'external'});
@@ -93,6 +110,40 @@ export async function createApp(options: AppOptions) {
     reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({error:e.message.replaceAll(config.apiKey || '\u0000','[redacted]')});
   });
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
+  // Track complete request lifetimes, including awaits before a save or registration.
+  app.addHook('preHandler',async request=>{
+    const route=request.routeOptions.url ?? '';
+    if (request.method==='DELETE' || route.endsWith('/deletion-preview') || route.endsWith('/events')) return;
+    if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { requests.set(request.id,'*');return; }
+    const params=request.params as {id?:string};
+    if (!params?.id) return;
+    let projectId:string|undefined;
+    if (route.startsWith('/api/projects/:id')) projectId=store.project(params.id).id;
+    else if (route.startsWith('/api/chats/:id')) projectId=store.chat(params.id).projectId;
+    else if (route.startsWith('/api/approvals/:id')) projectId=store.chat(store.getApproval(params.id).chatId).projectId;
+    if (projectId) {
+      if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
+      requests.set(request.id,projectId);
+    }
+  });
+  app.addHook('onResponse',async request=>{requests.delete(request.id);});
+  app.addHook('onError',async request=>{requests.delete(request.id);});
+  const assertNoRequests=(projectId:string)=>{
+    if ([...requests.values()].some(id=>id==='*' || id===projectId)) throw Object.assign(new Error('A project request is still pending; wait before removal'),{statusCode:409});
+  };
+  app.post('/api/projects/:id/deletion-preview',async request=>{
+    z.object({}).strict().parse(request.body);return removal.preview(paramId(request.params));
+  });
+  app.delete('/api/projects/:id',async request=>{
+    const body=z.discriminatedUnion('mode',[
+      z.object({mode:z.literal('app-only')}).strict(),
+      z.object({mode:z.literal('disk'),canonicalPath:z.string().min(1).max(4096),confirmationToken:z.string().uuid()}).strict(),
+    ]).parse(request.body);
+    const id=paramId(request.params);assertNoRequests(id);return removal.project(id,body);
+  });
+  app.delete('/api/chats/:id',async request=>{
+    z.object({}).strict().parse(request.body);const id=paramId(request.params);assertNoRequests(store.chat(id).projectId);return removal.chat(id);
+  });
   app.get('/api/health',async()=>({ok:true}));
   app.get('/api/settings',async()=>({...publicSettings(config),approvalMode:settings.get().defaultApprovalMode}));
   app.get('/api/preferences',async()=>settings.get());
@@ -198,7 +249,9 @@ export async function createApp(options: AppOptions) {
     while (batch.length) { for (const event of batch) send(event); if (batch.length < 2000) break; batch = store.events(id,cursor); }
     reply.raw.write(': connected\n\n');
     const heartbeat = setInterval(()=>{if (!reply.raw.destroyed) reply.raw.write(': heartbeat\n\n');},15000);
-    const cleanup = () => {clearInterval(heartbeat);store.changes.off(id,send);eventStreams.delete(reply.raw);};
+    const cleanup = () => {clearInterval(heartbeat);store.changes.off(id,send);eventStreams.delete(reply.raw);chatStreams.get(id)?.delete(reply.raw);if (!chatStreams.get(id)?.size) chatStreams.delete(id);};
+    if (!chatStreams.has(id)) chatStreams.set(id,new Map());
+    chatStreams.get(id)!.set(reply.raw,cleanup);
     reply.raw.on('close',cleanup);
   });
   const staticRoot = options.staticRoot ?? path.resolve('dist/client');

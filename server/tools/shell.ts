@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { IPty } from 'node-pty';
 import type { ToolContext } from '../../shared/types.js';
-import { rootPathSync, ToolError } from './paths.js';
+import { rootPathSync, key, ToolError } from './paths.js';
 
 export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const result: Record<string, string> = {};
@@ -18,6 +18,10 @@ class PersistentShell {
   private active?: { nonce: string; output: string; buffer: string; bytes: number; truncated: boolean; finish: (result: CommandResult) => void; onOutput?: (output: string) => void };
   private dead = false;
   private terminated = false;
+  private backgroundPids: number[] = [];
+  get hasBackgroundWork(): boolean {
+    return this.backgroundPids.some(pid=>{try {process.kill(pid,0);return true;} catch(error) {return (error as NodeJS.ErrnoException).code!=='ESRCH';}});
+  }
   private readyResolve?: () => void;
   private readyReject?: (error: Error) => void;
   private startup = '';
@@ -67,7 +71,8 @@ class PersistentShell {
         const boundary = active.buffer.slice(start + prefix.length, end);
         const match = /^(\d+):([\d,]*)$/.exec(boundary);
         if (!match) { this.kill(); active.finish({ output: active.output, truncated:active.truncated, error: 'Invalid command boundary; shell state was discarded.', shellReset: true }); return; }
-        active.finish({ output: active.output, exitCode: Number(match[1]), truncated: active.truncated, backgroundPids: match[2].split(',').filter(Boolean).map(Number) });
+        this.backgroundPids=match[2].split(',').filter(Boolean).map(Number);
+        active.finish({ output: active.output, exitCode: Number(match[1]), truncated: active.truncated, backgroundPids: this.backgroundPids });
         return;
       }
     }
@@ -155,6 +160,13 @@ export class ShellPool {
     }).finally(() => { queue.count--; });
     queue.tail = result.then(() => {}, () => {});
     return result;
+  }
+  removeScope(root: string, chatId?: string) {
+    const matches = (id: string) => { const [storedRoot,storedChat] = JSON.parse(id); return key(storedRoot)===key(root) && (!chatId || storedChat===chatId); };
+    for (const [id,queue] of this.queues) if (matches(id) && queue.count) throw new ToolError('A shell command is still pending.','CONFLICT');
+    for (const [id,session] of this.sessions) if (matches(id) && session.hasBackgroundWork) throw new ToolError('A shell still has background work; finish it before removal.','CONFLICT');
+    for (const [id,session] of this.sessions) if (matches(id)) { session.dispose(); this.sessions.delete(id); }
+    for (const id of this.queues.keys()) if (matches(id)) this.queues.delete(id);
   }
   async dispose(): Promise<void> { this.disposed = true; for (const session of this.sessions.values()) session.dispose(); await Promise.all([...this.queues.values()].map(q => q.tail)); this.sessions.clear(); this.queues.clear(); }
 }

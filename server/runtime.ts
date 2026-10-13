@@ -35,22 +35,35 @@ const safeResult = (error: unknown): ToolResult => ({
 export class Runtime {
   private active = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private runs = new Map<string, RunState>();
-  private projectEdits = new Set<string>();
+  private projectEdits = new Map<string,'undo'|'removal'>();
+  private decisions = new Map<string, number>();
 
   private assertAvailable(chatId: string) {
-    if (this.projectEdits.has(this.store.chat(chatId).projectId)) {
+    const projectId = this.store.chat(chatId).projectId;
+    if (this.store.project(projectId).removalError) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
+    if (this.projectEdits.has(projectId)) {
       throw Object.assign(
-        new Error('An undo is in progress; wait before starting project work'),
+        new Error(`${this.projectEdits.get(projectId)==='undo' ? 'An undo' : 'A removal'} is in progress; wait before starting project work`),
         { statusCode: 409 },
       );
     }
   }
 
+  async exclusiveRemoval<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+    if (this.store.chats(projectId).some(chat => this.decisions.has(chat.id) || this.store.approvals(chat.id).some(a=>a.status==='pending') || this.load(chat.id)?.frames.some(f=>f.pending?.stage==='executing'))) {
+      throw Object.assign(new Error('Resolve pending project operations before removal'),{statusCode:409});
+    }
+    return this.exclusiveProjectEdit(projectId, operation, true);
+  }
+
+  forgetChats(chatIds: string[]) { for (const id of chatIds) this.runs.delete(id); }
+
   async exclusiveProjectEdit<T>(
     projectId: string,
     operation: () => Promise<T>,
+    removalRecovery = false,
   ): Promise<T> {
-    this.store.project(projectId);
+    if (this.store.project(projectId).removalError && !removalRecovery) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
 
     if (
       this.projectEdits.has(projectId) ||
@@ -60,12 +73,12 @@ export class Runtime {
       )
     ) {
       throw Object.assign(
-        new Error('Pause all active project chats and wait for their actions to stop before undoing'),
+        new Error('Pause all active project chats and wait for their actions to stop before changing the project'),
         { statusCode: 409 },
       );
     }
 
-    this.projectEdits.add(projectId);
+    this.projectEdits.set(projectId,removalRecovery ? 'removal' : 'undo');
 
     try {
       return await operation();
@@ -209,6 +222,7 @@ export class Runtime {
     source: 'editor' | 'external' | 'agent' | 'undo',
     excludeChatId?: string,
   ) {
+    if (this.store.project(projectId).removalError) return;
     for (const chat of this.store.chats(projectId)) {
       if (chat.id === excludeChatId) continue;
 
@@ -235,6 +249,13 @@ export class Runtime {
   }
 
   async control(chatId: string, action: 'pause' | 'resume' | 'interrupt') {
+    this.store.chat(chatId);
+    this.decisions.set(chatId,(this.decisions.get(chatId) ?? 0)+1);
+    try { return await this.controlInternal(chatId,action); }
+    finally { const remaining=this.decisions.get(chatId)!-1;if(remaining)this.decisions.set(chatId,remaining);else this.decisions.delete(chatId); }
+  }
+
+  private async controlInternal(chatId: string, action: 'pause' | 'resume' | 'interrupt') {
     this.store.chat(chatId);
 
     if (action === 'resume') {
@@ -270,6 +291,14 @@ export class Runtime {
   }
 
   async decide(approvalId: string, decision: 'approve' | 'deny') {
+    const chatId = this.store.getApproval(approvalId).chatId;
+    this.assertAvailable(chatId);
+    this.decisions.set(chatId,(this.decisions.get(chatId) ?? 0)+1);
+    try { return await this.decideInternal(approvalId,decision); }
+    finally { const remaining = this.decisions.get(chatId)!-1; if (remaining) this.decisions.set(chatId,remaining); else this.decisions.delete(chatId); }
+  }
+
+  private async decideInternal(approvalId: string, decision: 'approve' | 'deny') {
     const approval = this.store.getApproval(approvalId);
 
     this.assertAvailable(approval.chatId);

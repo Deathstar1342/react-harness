@@ -198,3 +198,19 @@ Undo compares the current content hash with the recorded result and checks all d
 The panel displays the latest 100 history records and explicitly indicates omitted older entries. Git output is bounded to 1 MB; individual review diffs are limited to 200 KB with a one-second computation budget for snapshot diffs. Oversized review returns an explicit message and no undo button. Stored snapshots retain full file content within the existing 2 MB file-tool limit and are private data in the backend SQLite database. Keep backups private; history is not currently pruned automatically.
 
 These content checks and in-process file locks do not atomically exclude external programs. A change after the last filesystem check, or a change reverted to identical bytes between checks, may escape detection. Use one backend instance per data directory/project and avoid external writers during undo. File permissions are retained by the existing save primitive, but undo is content restoration, not restoration of original filesystem metadata, directory creation, or arbitrary shell state.
+
+## Remove chats and projects
+
+Use the sidebar's **…** button beside a chat or selected project. It appears on hover or keyboard focus (and for the selected chat). Tab reaches the button and its action; Escape closes the disclosure or confirmation. Cancel returns focus to the overflow button.
+
+**Delete chat** removes its conversation and associated app history, leaving project files and other chats intact. **Remove from app only** removes the project registration and all its chats while preserving the folder, Git history, hidden files and other contents. Importing that folder later starts fresh app history.
+
+**Delete project and files** is permanent, including for imported folders. A second dialog shows the canonical backend directory, and requires that exact directory to be typed before enabling the final button. Cancel at either stage leaves files intact. This deletes only the chosen project's directory, never its workspace parent, and does not use a recycle bin.
+
+Save or discard unsaved editor buffers first. Pause active project chats and wait for their actions and background jobs to finish; requesting Pause alone does not prove work stopped. Resolve pending proposals and uncertain execution records before removal. The backend independently rejects dirty leases and pending work even if another browser attempts the request. Finish pending file saves, imports or workspace preference changes before retrying.
+
+Disk deletion refuses unsafe roots, application/config/data folders, overlapping registered projects, symbolic links/junctions, special entries, mounted subtrees and oversized trees. Remove an overlapping registration from the app first, or use app-only removal and manage the files externally. The app does not follow links to remove their destinations. Stop external writers and use only one backend instance; native path checks cannot exclude every external filesystem race.
+
+If deletion is interrupted or partially fails, the project remains listed with **Review incomplete removal**. Inspect the actual remaining folder. Either retry **Delete project and files** with a fresh confirmation, or choose **Remove from app only**. When all files were removed but app-record cleanup failed, use app-only recovery. No retry happens automatically after restart, and new work stays blocked until recovery. Keep independent backups of files and private app data you need.
+
+For disposable browser verification, build the client and run `node --import tsx tests/removal-browser-fixture.ts`. It serves the real app on `http://127.0.0.1:3183` using fresh temporary projects/database and no provider. Press Enter in its terminal to stop and remove only that fixture; it also expires after 15 minutes. Never test deletion against real projects.
