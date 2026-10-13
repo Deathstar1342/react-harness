@@ -12,6 +12,8 @@ This is a fresh implementation. There is no dependency on the previous Streamlit
 
 ## Provider contract
 
+M12 now preserves the advisor protocol while accepting recovery only for a complete schema-valid response inside a whole-message JSON/plain Markdown fence. Nested fragments, incomplete outer objects and prose examples cannot supply executable actions. Existing bounded formatting retries and policy checks remain in force. Historical errors are attached to durable transcript positions with identity-based deduplication; current connection/request problems remain separate. Command exit evidence and test-report availability are displayed independently, and critic checkpoint verdicts never rewrite a recorded execution result.
+
 - Use only `/models` and `/chat/completions` on a configurable STARK-compatible base URL.
 - Keep the API key in backend environment configuration; never return the saved key to the browser or expose it to logs or child shell environments. The planned Settings flow accepts an explicitly entered replacement key in a protected request and never persists it in browser storage.
 - Use streaming ordinary text and a versioned JSON action protocol. Do not require native `tools` or `response_format` support.
