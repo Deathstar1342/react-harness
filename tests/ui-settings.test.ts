@@ -32,14 +32,14 @@ describe('focused chat and settings', () => {
     ];
     expect(conversationErrors(events)).toEqual([{ id: 2, message: 'Stale file version' }, { id: 3, message: 'Provider unavailable' }]);
   });
-  it('deduplicates durable system/tool failures while retaining event-only errors in both views', () => {
+  it('deduplicates durable system/tool failures only by identity in both views', () => {
     const messages: Message[] = [
       { id: 'system', chatId: 'c', role: 'system', content: 'Provider failed', createdAt: '' },
       { id: 'tool', chatId: 'c', role: 'tool', content: 'Runner failed: ', metadata: { ok: false, agentId: 'coder-1', name: 'run_tests' }, createdAt: '' },
     ];
     const events: RunEvent[] = [
-      { id: 1, chatId: 'c', type: 'error', data: { message: 'Provider failed' }, createdAt: '' },
-      { id: 2, chatId: 'c', type: 'tool', data: { agentId: 'coder-1', action: { name: 'run_tests' }, result: { ok: false, output: 'Runner failed: truncated long output' } }, createdAt: '' },
+      { id: 1, chatId: 'c', type: 'error', data: { message: 'Provider failed', messageId: 'system' }, createdAt: '' },
+      { id: 2, chatId: 'c', type: 'tool', data: { messageId: 'tool', agentId: 'coder-1', action: { name: 'run_tests' }, result: { ok: false, output: 'Runner failed: truncated long output' } }, createdAt: '' },
       { id: 3, chatId: 'c', type: 'tool', data: { agentId: 'coder-2', action: { name: 'run_tests' }, result: { ok: false, output: 'Runner failed: other attempt' } }, createdAt: '' },
       { id: 4, chatId: 'c', type: 'error', data: { message: 'Event-only failure' }, createdAt: '' },
     ];
