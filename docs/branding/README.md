@@ -9,3 +9,5 @@ User approved on 2026-10-13, to implement **after M15 delivery**.
 - This is a small authorized follow-up, not another numbered milestone. Review, validate and push it to GitHub main after M15; then pause the check-in automation.
 
 Implemented after M15: sidebar wordmark/logo, welcome names/logos, project-removal copy, browser title and favicon. The existing decorative wordmark period is retained. Internal names and application behavior are unchanged.
+
+Published on GitHub main at `9415356`. Typecheck, 495 tests / 15 Windows skips, build and diff-check passed; exact Linux CI run `38375882798` succeeded. Production HTTP checks returned the expected title and image/png logo. The image SHA-256 remains `AF93154F660312B00D02DF528CC878050DF577C236144F3E53ABA27D1CA1283F`. Coordinator browser connection did not complete, so no visual acceptance is claimed. The milestone check-in is paused after delivery.
