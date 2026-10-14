@@ -1,0 +1,37 @@
+name: Privileged helper validation
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  helper:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Disposable runner prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-apt acl build-essential
+          test "$(id -u)" != 0
+      - run: npm ci
+      - name: Portable helper state tests
+        run: python3 -m unittest discover -s helper -p test_core.py
+      - name: Build and explicitly stage trusted helper artifact
+        run: |
+          mkdir -p build/helper
+          cc -static -O2 -Wall -Wextra -Werror helper/launcher.c -o build/helper/launcher
+          file build/helper/launcher | tee build/helper/launcher-type.txt
+          grep -q 'statically linked' build/helper/launcher-type.txt
+          sudo install -d -m 0755 /usr/lib/abyssus-helper
+          sudo install -m 0755 build/helper/launcher /usr/lib/abyssus-helper/launcher
+          sudo install -m 0644 helper/core.py helper/service.py helper/admin.py helper/apt_adapter.py helper/apt.conf helper/abyssus-helper.service /usr/lib/abyssus-helper/
+      - name: Required real helper service/install/repair/removal tests
+        run: node --import tsx tests/helper-linux.ts
+      - name: Safe service failure diagnostics
+        if: failure()
+        run: |
+          sudo systemctl status abyssus-helper.service --no-pager || true
+          # No config/descriptor, package output, journal, credentials or audit contents.
+          sudo /usr/lib/abyssus-helper/launcher serve || true
+        timeout-minutes: 1

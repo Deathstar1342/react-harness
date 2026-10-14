@@ -1,0 +1,21 @@
+[Unit]
+Description=abysSUS narrow package install helper
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/abyssus-helper/launcher serve
+WorkingDirectory=/
+UMask=0077
+RuntimeDirectory=abyssus-helper
+RuntimeDirectoryMode=0711
+Restart=no
+KillMode=control-group
+TimeoutStopSec=10
+StandardOutput=null
+StandardError=null
+# apt/dpkg and approved package maintainer scripts deliberately run as root.
+# No socket activation and no app-start dependency; explicit setup enables this.
+
+[Install]
+WantedBy=multi-user.target
