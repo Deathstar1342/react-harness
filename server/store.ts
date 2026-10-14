@@ -4,6 +4,8 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { commandEvent, isCommand } from './command-events.js';
+import { definitionFor } from './tool-registry.js';
+import {recoverProcessJobs} from './process-jobs.js';
 import { addGoalUncertainty, goalOf, goalStatus, protectPlan, saveGoal } from './goals.js';
 import type { RunState } from './runtime.js';
 import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
@@ -78,8 +80,8 @@ export class Store {
   }
   recordFileChange(change: FileChange) {
     if (this.chat(change.chatId).projectId !== change.projectId) throw new Error('Change project ownership mismatch');
-    const {before,after,...summary} = change;
-    this.db.prepare('INSERT INTO file_changes VALUES (?,?,?,?,?)').run(change.id,change.projectId,change.status,JSON.stringify(summary),JSON.stringify({before,after}));
+    const {before,after,destination,...summary} = change;
+    this.db.prepare('INSERT INTO file_changes VALUES (?,?,?,?,?)').run(change.id,change.projectId,change.status,JSON.stringify({...summary,...(destination ? {destinationPath: destination.after.path} : {})}),JSON.stringify({before,after,...(destination ? {destination} : {})}));
   }
   fileChange(projectId: string, id: string): FileChange {
     const row = this.db.prepare('SELECT summary,snapshots,status FROM file_changes WHERE id=? AND project_id=?').get(id,projectId);
@@ -266,13 +268,14 @@ export class Store {
   }
   recover():void {
     if(!this.transactionEvents)return this.transaction(()=>this.recover());
+    recoverProcessJobs(this);
     this.db.prepare("UPDATE file_changes SET status='unknown' WHERE status IN ('recording','undoing')").run();
     for (const chat of this.chats()) {
       const run = this.getState<RunState|null>(`run:${chat.id}`,null);
       const goal=goalOf(this,chat.id);
       if(goal && ['running','waiting_for_approval'].includes(goal.status))goalStatus(this,chat.id,'paused','Backend restarted. Explicit resume is required; uncertain effects will not be replayed.');
       const uncertainInstalls=this.installs().filter(item=>item.chatId===chat.id && (item.recoveryRequired || ['authorizing','dispatching','uncertain'].includes(item.state)));
-      const uncertainEffects=[...(run?.frames??[]).filter(frame=>frame.pending?.stage==='executing' && ['write_file','run_shell','run_tests','execute_python'].includes(frame.pending.action.name)).map(frame=>({id:frame.pending!.id,installId:undefined as string|undefined})),...uncertainInstalls.map(item=>({id:item.id,installId:item.id}))];
+      const uncertainEffects=[...(run?.frames??[]).filter(frame=>frame.pending?.stage==='executing' && definitionFor(frame.pending.action.name).effect!=='read').map(frame=>({id:frame.pending!.id,installId:undefined as string|undefined})),...uncertainInstalls.map(item=>({id:item.id,installId:item.id}))];
       for(const effect of goal?uncertainEffects:[]) {
         const key=`goal-recovery:${chat.id}:${effect.id}`;
         let eventId=this.getState<number|null>(key,null);

@@ -135,7 +135,7 @@ it('tool operations are counted before their first await, preventing save/delete
   const t=await fixture();const read=t.tools.read(t.root,'keep.txt');
   await expect(t.removal.project(t.project.id,{mode:'app-only'})).rejects.toThrow('pending');await read;
   const snapshot=await t.tools.read(t.root,'keep.txt'),save=t.tools.save(t.root,'keep.txt','new',snapshot.hash,'editor');
-  await expect(t.disk()).rejects.toThrow('pending');await save;expect(await readFile(path.join(t.root,'keep.txt'),'utf8')).toBe('new');
+  await expect(t.disk()).rejects.toThrow('mutation');await save;expect(await readFile(path.join(t.root,'keep.txt'),'utf8')).toBe('new');
 });
 
 it('excludes concurrent launches/deletions and rejects stopping work until its promise settles',async()=>{
@@ -208,8 +208,9 @@ it('a database failure after disk deletion keeps the recovery marker and permits
 
 it('counts approval decision awaits even after pause makes their approval stale',async()=>{
   const t=await fixture();
-  t.store.setState(`run:${t.chat.id}`,nativeState({...paused,frames:[{...paused.frames[0],pending:{id:'pending',stage:'prepared',approvalId:'approval',action:{name:'write_file',args:{}}}}]}));
-  t.store.approval({id:'approval',chatId:t.chat.id,agentId:'frame',action:{name:'write_file',args:{}},inspection:{effect:'write',risk:'routine',description:''},status:'pending',createdAt:''});
+  const action={name:'write_file',args:{path:'new.txt',content:'new',baseHash:null}};
+  t.store.setState(`run:${t.chat.id}`,nativeState({...paused,frames:[{...paused.frames[0],pending:{id:'pending',stage:'prepared',approvalId:'approval',action}}]}));
+  t.store.approval({id:'approval',chatId:t.chat.id,agentId:'frame',action,inspection:{effect:'write',risk:'routine',description:''},status:'pending',createdAt:''});
   let entered!:()=>void,release!:()=>void;const ready=new Promise<void>(resolve=>entered=resolve),original=t.tools.read.bind(t.tools);
   vi.spyOn(t.tools,'read').mockImplementation(async(...args)=>{entered();await new Promise<void>(resolve=>release=resolve);return original(...args);});
   const deciding=t.runtime.decide('approval','approve').catch(error=>error);await ready;
@@ -289,9 +290,9 @@ it.skipIf(process.platform!=='linux')('scoped PTY cleanup preserves sibling sess
   await t.tools.removeScope(t.root,t.chat.id,()=>{});
   expect((await t.tools.execute(context,shell('printf "%s" "${REMOVAL_TEST-fresh}"'))).output).toContain('fresh');
   expect((await t.tools.execute(sibling,shell('printf "%s" "$REMOVAL_TEST"'))).output).toContain('sibling');
-  const running=t.tools.execute(context,shell('sleep 0.2'));expect(()=>t.tools.removeScope(t.root,undefined,()=>{})).toThrow('pending');await running;
+  const running=t.tools.execute(context,shell('sleep 0.2'));await expect(t.tools.removeScope(t.root,undefined,()=>{})).rejects.toThrow('mutation');await running;
   expect((await t.tools.execute(context,shell('sleep 30 &'))).ok).toBe(true);
-  expect(()=>t.tools.removeScope(t.root,undefined,()=>{})).toThrow('background');
+  await expect(t.tools.removeScope(t.root,undefined,()=>{})).rejects.toThrow('background');
   expect((await t.tools.execute(context,shell('kill $(jobs -pr); wait'))).ok).toBe(true);
   await t.tools.removeScope(t.root,undefined,()=>{});
   expect((await t.tools.execute(otherProject,shell('printf "%s" "$REMOVAL_TEST"'))).output).toContain('other-project');

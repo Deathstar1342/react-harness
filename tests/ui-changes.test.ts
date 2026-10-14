@@ -9,18 +9,18 @@ const preview: ChangePreview={change:{id:'write',projectId:'p',chatId:'chat',pat
 it('labels current Git attribution separately from recorded writes and keeps undo behind selection',()=>{
   const html=renderToStaticMarkup(createElement(ChangesPanel,{projectId:'p',revision:0,onClose:()=>{}}));
   expect(html).toContain('Current project Git changes');expect(html).toContain('pre-existing work, manual edits and shell effects');
-  expect(html).toContain('Recorded agent writes');expect(html).toContain('Older actions without snapshots have no undo');
-  expect(html).not.toContain('Undo this write');
+  expect(html).toContain('Recorded agent writes');expect(html).toContain('Recorded file edits, deletions and moves');
+  expect(html).not.toContain('Undo this change');
 });
 it('shows explicit forward and undo previews with escaped content and a human undo action',()=>{
   const html=renderToStaticMarkup(createElement(ChangeReview,{preview,busy:false,onUndo:()=>{}}));
-  expect(html).toContain('Undo preview');expect(html).toContain('Recorded write');expect(html).toContain('Undo this write');
+  expect(html).toContain('Undo preview');expect(html).toContain('Recorded write');expect(html).toContain('Undo this change');
   expect(html).toContain('Pause all active project chats first');expect(html).toContain('Shell effects cannot be undone');
   expect(html).toContain('&lt;script&gt;agent&lt;/script&gt;');expect(html).not.toContain('<script>');
 });
 it('does not offer undo for stale or uncertain records and disables it during submission',()=>{
   const blocked=renderToStaticMarkup(createElement(ChangeReview,{preview:{...preview,previewToken:undefined,reason:'Later saved edits must be preserved.'},busy:false,onUndo:()=>{}}));
-  expect(blocked).toContain('Later saved edits');expect(blocked).not.toContain('Undo this write');
+  expect(blocked).toContain('Later saved edits');expect(blocked).not.toContain('Undo this change');
   const busy=renderToStaticMarkup(createElement(ChangeReview,{preview,busy:true,onUndo:()=>{}}));
   expect(busy).toContain('disabled=""');expect(busy).toContain('Undoing');
 });

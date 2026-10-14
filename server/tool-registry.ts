@@ -42,6 +42,8 @@ const timeoutMs = z
   .optional();
 
 const id = text(200);
+const baseHash = z.string().regex(/^[a-f0-9]{64}$/);
+const edits = z.array(z.strictObject({startLine: z.number().int().min(1).max(1_000_001), deleteCount: z.number().int().min(0).max(1_000_000), text: z.string().max(128_000).refine(value => Buffer.byteLength(value) <= 128_000)})).min(1).max(100);
 
 const stepSchema = z.strictObject({
   id,
@@ -85,6 +87,16 @@ const phases = z.array(planPhaseSchema).max(50).superRefine(
 );
 
 export const actionSchema = z.discriminatedUnion('name', [
+  z.strictObject({name:z.literal('start_process'),args:z.strictObject({command:text(PROTOCOL_LIMITS.commandCharacters),timeoutMs})}),
+  z.strictObject({name:z.literal('process_status'),args:z.strictObject({processId:z.string().uuid(),waitMs:z.number().int().min(0).max(1000).optional()})}),
+  z.strictObject({name:z.literal('process_output'),args:z.strictObject({processId:z.string().uuid(),offset:z.number().int().min(0).max(64_000),limit:z.number().int().min(4).max(16_000).optional(),waitMs:z.number().int().min(0).max(1000).optional()})}),
+  z.strictObject({name:z.literal('cancel_process'),args:z.strictObject({processId:z.string().uuid()})}),
+  z.strictObject({name: z.literal('read_file_range'), args: z.strictObject({path, startLine: z.number().int().positive().max(2_000_001), count: z.number().int().min(1).max(500)})}),
+  z.strictObject({name: z.literal('search_page'), args: z.strictObject({path: z.union([path,z.literal('')]).optional(), query: text(1000), offset: z.number().int().min(0).max(10_000).optional(), limit: z.number().int().min(1).max(100).optional(), revision: baseHash.optional()})}),
+  z.strictObject({name: z.literal('patch_file'), args: z.strictObject({path, baseHash: baseHash.nullable(), edits})}),
+  z.strictObject({name: z.literal('maintain_instructions'), args: z.strictObject({path: path.refine(value => value === 'AGENTS.md' || /^(?:[^\\/]+\/)+AGENTS\.md$/.test(value)), baseHash: baseHash.nullable(), edits})}),
+  z.strictObject({name: z.literal('delete_file'), args: z.strictObject({path, baseHash})}),
+  z.strictObject({name: z.literal('rename_file'), args: z.strictObject({path, destination: path, baseHash})}),
   z.strictObject({ name: z.literal('request_goal_completion'), args: z.strictObject({goalId:id,goalRevision:z.number().int().positive(),planId:id,planVersion:z.number().int().positive(),modeVersion:z.number().int().nonnegative(),reviewEventIds:z.array(z.number().int().positive()).min(1).max(256)}) }),
   z.strictObject({ name: z.literal('submit_completion'), args: z.strictObject({ summary: text(64_000) }) }),
   z.strictObject({ name: z.literal('install_decision'), args: z.strictObject({ decision: z.enum(['approve','reject','ask']), reason: text(400) }) }),
@@ -182,6 +194,7 @@ export interface RegistryDispatch {
   workspace: ToolService;
   context: ToolContext;
   control: (action: Action) => Promise<ToolResult>;
+  process?: (action:Action) => Promise<ToolResult>;
 }
 export interface ToolDefinition {
   name: string;
@@ -194,6 +207,11 @@ export interface ToolDefinition {
   risk: ToolInspection['risk'];
   kind: 'workspace' | 'control' | 'decision';
   terminal: boolean;
+  fileMutation: boolean;
+  command: boolean;
+  managedProcess: boolean;
+  approval: 'normal'|'owned_stop';
+  affectedPaths: (action: Action) => string[];
   inspect: (dispatch: RegistryDispatch, action: Action) => Promise<ToolInspection>;
   handler: (dispatch: RegistryDispatch, action: Action) => Promise<ToolResult>;
 }
@@ -220,10 +238,22 @@ export function validateToolResult(result:unknown):ToolResult {
   if(!parsed.success)throw new Error('Invalid native tool result; effects may have occurred. Inspect state before deciding what work remains.');
   return parsed.data;
 }
-const read = new Set(['list_files','read_file','search','git_status','git_diff']);
+const read = new Set(['list_files','read_file','read_file_range','search','search_page','git_status','git_diff']);
+const fileMutations = new Set(['write_file','patch_file','maintain_instructions','rename_file','delete_file']);
+const processes = new Set(['start_process','process_status','process_output','cancel_process']);
 const execute = new Set(['run_shell','execute_python','run_tests']);
 const terminal = new Set(['delegate','review','review_result','submit_completion','ask_user','request_goal_completion']);
 const descriptions: Record<string,string> = {
+  start_process:'Start one owned long command in the existing Linux sandbox after approval. Returns a process handle, never completed verification. At most one project mutation owner; while active only observations and exact owned cancellation are available. Maximum 600 seconds. Inspect status/output; do not run another mutation or complete the assignment until terminal evidence is recorded.',
+  process_status:'Observe an exact same-task process handle; optionally wait at most 1000 ms. Status cannot reconcile uncertainty or prove tests passed. Architects/critics can inspect only their current same-chat assignment evidence.',
+  process_output:'Read up to 16000 retained UTF-8 output bytes using exact byte cursor, with base/end/next offsets and truncation. At most 64000 bytes retained. No process execution or replay.',
+  cancel_process:'Stop only the requesting coder frame’s exact already-authorized process handle and await actual namespace cleanup. No additional approval; stop does not roll back effects or prove completion. Interrupted evidence conservatively blocks assignment acceptance.',
+  read_file_range:'Read 1–500 lines with the whole-file SHA-256 hash. Output is bounded to 64,000 bytes; request fewer lines if necessary. Does not imply the complete file was returned.',
+  search_page:'Page through bounded literal text matches. Continue using returned revision and nextOffset; a changed scope rejects the cursor. Incomplete means coverage was omitted or limits were reached, never proof of absence.',
+  patch_file:'Apply ordered nonoverlapping original-file line intervals using a fresh whole-file baseHash. startLine is one-based, deleteCount counts complete lines, text is literal replacement including intended newline bytes. Insertion at EOF uses original line count + 1. Retains all other bytes.',
+  maintain_instructions:'Architect maintenance of only canonical AGENTS.md files: ordered literal line patches for structure, commands, conventions and durable decisions. Preserve user guidance and keep live goals/progress in database. Fresh baseHash, editor leases and ordinary diff/approval checks apply. Planning may draft prose only.',
+  delete_file:'Remove one regular text file only at its freshly observed baseHash. Preview includes all deleted text. Dirty buffers and changed identity reject; uncertain effects cannot be retried.',
+  rename_file:'Move a regular text file to an absent destination, using fresh source baseHash and protecting both editor leases. Exclusive destination creation then source removal prevents overwriting collisions; partial effects remain uncertain. Both paths must be in assignment scope.',
   request_goal_completion:'Request whole-goal completion using the exact current goal and plan revisions and recorded accepted review event IDs. Runtime checks all protected criteria/steps, current evidence and uncertainty. Claims, removed steps and critic PASS alone do not suffice. Must be last in a batch.',
   list_files:'List a confined project directory. Omit path for the root.',
   read_file:'Read a project file and its current SHA-256 hash. Missing files return a null hash.',
@@ -245,16 +275,20 @@ const descriptions: Record<string,string> = {
 };
 export const toolRegistry: ReadonlyMap<string,ToolDefinition> = new Map(actionSchema.options.map(option => {
   const name = option.shape.name.value;
-  const workspace = read.has(name) || execute.has(name) || name === 'write_file';
-  const effect = execute.has(name) || name === 'recommend_packages' ? 'execute' : name === 'write_file' ? 'write' : 'read';
-  const roles: ToolRole[] = name === 'install_decision' ? ['install_reviewer'] : read.has(name) ? ['architect','coder','critic'] : name === 'review_result' ? ['critic'] : name === 'submit_completion' || name === 'recommend_packages' ? ['architect','coder'] : workspace ? ['coder'] : ['architect'];
+  const workspace = read.has(name) || execute.has(name) || fileMutations.has(name) || processes.has(name);
+  const effect = execute.has(name) || name === 'recommend_packages' || name === 'start_process' || name === 'cancel_process' ? 'execute' : fileMutations.has(name) ? 'write' : 'read';
+  const roles: ToolRole[] = name === 'maintain_instructions' ? ['architect'] : name === 'install_decision' ? ['install_reviewer'] : read.has(name) || name === 'process_status' || name === 'process_output' ? ['architect','coder','critic'] : name === 'review_result' ? ['critic'] : name === 'submit_completion' || name === 'recommend_packages' ? ['architect','coder'] : workspace ? ['coder'] : ['architect'];
   const definition: ToolDefinition = {
     name, description:descriptions[name], arguments:option.shape.args, result:resultSchema, roles,
+    fileMutation: fileMutations.has(name), command: execute.has(name),
+    managedProcess: processes.has(name), approval: name==='cancel_process'?'owned_stop':'normal',
+    affectedPaths: action => [action.args.path, action.args.destination].filter((value): value is string => typeof value === 'string'),
     modes: effect !== 'read' || name === 'delegate' || name === 'request_goal_completion' ? ['execute'] : ['plan','execute'],
     effect, risk:effect === 'execute' ? 'elevated' : 'routine', kind:workspace ? 'workspace' : name === 'install_decision' ? 'decision' : 'control', terminal:terminal.has(name),
-    inspect:async (dispatch,action) => workspace ? dispatch.workspace.inspect(dispatch.context,action) : {effect,risk:effect === 'execute' ? 'elevated' : 'routine',description:descriptions[name]},
+    inspect:async (dispatch,action) => workspace && !processes.has(name) ? dispatch.workspace.inspect(dispatch.context,action) : {effect,risk:effect === 'execute' ? 'elevated' : 'routine',description:descriptions[name]},
     handler:async (dispatch,action) => {
-      const result=await (workspace ? dispatch.workspace.execute(dispatch.context,action) : dispatch.control(action));
+      if(processes.has(name)&&!dispatch.process)throw new Error('Trusted process lifecycle is unavailable');
+      const result=await (processes.has(name) ? dispatch.process!(action) : workspace ? dispatch.workspace.execute(dispatch.context,action) : dispatch.control(action));
       return validateToolResult(result);
     },
   };

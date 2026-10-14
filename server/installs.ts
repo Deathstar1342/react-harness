@@ -7,6 +7,8 @@ import { PackageHelperClient, PackageHelperError, helperCanonical, helperProtoco
 import { checkedRecord, targetSchema } from './install-validation.js';
 import { packageRecommendation, reviewInstall } from './install-review.js';
 import type { InstallRecoveryReceipt } from './goals.js';
+import {reserveMutation} from './tools/mutations.js';
+import {processBlocking,processRecords} from './process-jobs.js';
 
 export type InstallHelper = Pick<PackageHelperClient,'hello'|'prepare'|'authorize'|'execute'|'status'|'reconcile'>;
 const key = 'system-installs:v1';
@@ -116,7 +118,10 @@ export class InstallService {
   advance(id: string, guard: () => boolean, signal: AbortSignal, refreshContext: () => Promise<unknown> = async()=>{}): Promise<ToolResult|null> {
     // A duplicate caller cannot start a second helper dispatch.
     if (this.active.has(id)) return Promise.reject(conflict('System install is already in progress'));
-    const promise = this.perform(id,guard,signal,refreshContext).finally(()=>this.active.delete(id));
+    const item=this.store.install(id);
+    if(processRecords(this.store,item.projectId).some(processBlocking))return Promise.reject(conflict('A project process is active or uncertain.'));
+    const reservation=reserveMutation(this.store.project(item.projectId).path);
+    const promise = this.perform(id,guard,signal,refreshContext).finally(()=>{this.active.delete(id);reservation.release();});
     this.active.set(id,promise);return promise;
   }
   private async perform(id: string, guard: () => boolean, signal: AbortSignal, refreshContext: () => Promise<unknown>): Promise<ToolResult|null> {
@@ -187,6 +192,8 @@ export class InstallService {
     if(this.closing || this.active.has(id) || this.recovering.has(id))throw conflict('Wait for the active install operation to stop');
     const item=this.store.install(id);
     if(!['uncertain','failed','succeeded'].includes(item.state))throw conflict('This request does not need outcome recovery');
+    if(processRecords(this.store,item.projectId).some(processBlocking))throw conflict('A project process is active or uncertain.');
+    const reservation=reserveMutation(this.store.project(item.projectId).path);
     this.recovering.add(id);
     try {
       const {client,target}=await this.discover();
@@ -202,7 +209,7 @@ export class InstallService {
       });
       return this.store.install(id);
     } catch { throw conflict('Helper outcome is unavailable; original recovery gate is retained'); }
-    finally {this.recovering.delete(id);}
+    finally {this.recovering.delete(id);reservation.release();}
   }
   beginClose() { if(this.closing)return;this.closing=true;this.invalidate(undefined,'BACKEND_SHUTDOWN'); }
   async close() {

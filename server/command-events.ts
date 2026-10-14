@@ -1,6 +1,7 @@
 import type { Action, AgentRole, CommandEvent, ToolResult } from '../shared/types.js';
+import { toolRegistry } from './tool-registry.js';
 
-export const isCommand = (action: Action) => ['run_shell', 'execute_python', 'run_tests'].includes(action.name);
+export const isCommand = (action: Action) => toolRegistry.get(action.name)?.command === true;
 export const commandOutputLimit = 64_000;
 export function commandEvent(frame: {id:string; shellId?:string; role:AgentRole}, pending: {id:string; action:Action}, result?: ToolResult): CommandEvent {
   const base = {commandId:pending.id,agentId:frame.id,sessionId:frame.shellId ?? frame.id,role:frame.role,action:pending.action};

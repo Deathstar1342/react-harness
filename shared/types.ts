@@ -46,16 +46,29 @@ export interface ModelProvider { complete(input: { model: string; messages: Mode
 export interface FileEntry { path: string; name: string; type: 'file' | 'directory'; size?: number }
 export interface FileSnapshot { path: string; content: string; hash: string | null }
 export type FileChangeStatus = 'recording' | 'confirmed' | 'rejected' | 'unknown' | 'undoing' | 'undone';
-export interface FileChange { id: string; projectId: string; chatId: string; path: string; createdAt: string; status: FileChangeStatus; before: FileSnapshot; after: FileSnapshot }
-export type FileChangeSummary = Omit<FileChange, 'before' | 'after'>;
+export interface FileChange { id: string; projectId: string; chatId: string; path: string; createdAt: string; status: FileChangeStatus; before: FileSnapshot; after: FileSnapshot; destination?: {before: FileSnapshot; after: FileSnapshot} }
+export type FileChangeSummary = Omit<FileChange, 'before' | 'after' | 'destination'> & {destinationPath?: string};
 export interface ProjectChanges { git: { status: string; path: string; originalPath?: string }[]; gitError?: string; history: FileChangeSummary[]; historyTruncated: boolean }
 export interface ChangePreview { change: FileChangeSummary; diff: string; undoDiff: string; expectedHash: string | null; previewToken?: string; reason?: string }
-export interface ToolContext { projectRoot: string; chatId: string; agentId: string; signal?: AbortSignal; onOutput?: (output: string) => void }
-export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; before?: string; after?: string; diff?: string }
+export interface ToolContext {
+  projectRoot: string; chatId: string; agentId: string; signal?: AbortSignal; onOutput?: (output: string) => void;
+  /** Trusted in-memory capabilities; never serialized or accepted as native arguments. */
+  mutationOwner?: symbol; prepareCommand?: () => Promise<void>; beforeCommand?: () => void;
+}
+export interface ProcessJob {
+  id:string; projectId:string; chatId:string; frameId:string; callId:string; commandId:string;
+  status:'starting'|'running'|'completed'|'failed'|'not_started'|'interrupted'|'uncertain';
+  createdAt:string; updatedAt:string; output:string; baseOffset:number; endOffset:number; truncated:boolean;
+  exitCode?:number; message?:string;
+}
+export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; before?: string; after?: string; diff?: string; changes?: {before: FileSnapshot; after: FileSnapshot}[] }
 export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }
 export interface TestReport { id: string; runner: string; command: string; createdAt: string; status: 'passed' | 'failed' | 'error' | 'cancelled'; tests: TestCase[]; output: string; exitCode?: number }
 export interface ToolService {
+  readonly processLifecycle?: 'sandbox-dispatch-v1';
+  configureMutationGuard?(guard:(root:string, owner?:symbol)=>void):void;
+  closeCommandContext?(context:ToolContext):Promise<void>;
   /** Trusted backend-only policy, never accepted from model/browser input. */
   configureSandbox?(policy:{home:string;protectedPaths:string[];projects:()=>string[]}):void;
   resetSandbox?(root:string):Promise<void>;
@@ -65,7 +78,8 @@ export interface ToolService {
   list(root: string, path?: string): Promise<FileEntry[]>;
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot>;
   setDirty(root: string, path: string, owner: string, dirty: boolean): void;
-  restore?(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void): Promise<FileSnapshot>;
+  restore?(root: string, path: string, before: FileSnapshot, expectedHash: string | null, beforeMutation: () => void): Promise<FileSnapshot>;
+  restoreMove?(root: string, change: FileChange, beforeMutation: () => void): Promise<void>;
   // Trusted lifecycle boundary; reject active operations/leases, await resource
   // teardown, then revalidate and invoke the mutation synchronously under a gate.
   removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T | Promise<T>;
@@ -74,6 +88,7 @@ export interface ToolService {
 export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string; install?: InstallRecord }
 export interface RunEvent { id: number; chatId: string; type: string; data: unknown; createdAt: string }
 export interface CommandEvent {
+  processId?:string;
   commandId: string; agentId: string; sessionId: string; role: AgentRole; action: Action;
   status: 'running' | 'completed' | 'failed' | 'interrupted' | 'uncertain';
   output?: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean;

@@ -3,6 +3,7 @@ import type { Action, ToolResult } from '../shared/types.js';
 import { commandEvent, isCommand } from './command-events.js';
 import type { Frame } from './runtime.js';
 import type { ScopeSnapshot, VerificationSnapshot } from './verification-scope.js';
+import { definitionFor } from './tool-registry.js';
 
 interface Coverage { id: string; seen: number; required: number; }
 interface Check { key: string; eventId: number; status: 'passed'|'failed'|'missing_report'|'coverage_reduced'|'stale'|'scope_unknown'; coverage: Coverage[]; scopeDigest?: string; scopeReason?: string; }
@@ -23,11 +24,11 @@ export function recordAssignmentEvidence(frame: Frame, action: Action, result: T
   const data = (result.data && typeof result.data === 'object' ? result.data : {}) as Record<string, unknown>;
   const notStarted = data.status === 'not_started' || data.mutation === 'not_started';
   const command = isCommand(action) ? commandEvent(frame, {id: String(eventId), action}, result) : undefined;
-  if (!notStarted && (data.uncertain === true || command && ['uncertain','interrupted'].includes(command.status))) {
+  if (!notStarted && (data.uncertain === true || data.mutation === 'uncertain' || command && ['uncertain','interrupted'].includes(command.status))) {
     if (evidence.uncertainEventIds.length < limit) evidence.uncertainEventIds.push(eventId);
     else evidence.overflow = true;
   }
-  if (!notStarted && ['write_file','run_shell','execute_python'].includes(action.name)) {
+  if (!notStarted && definitionFor(action.name).effect !== 'read' && action.name !== 'run_tests') {
     for (const check of evidence.checks) if (check.status === 'passed') check.status = 'stale';
   }
   if (action.name !== 'run_tests' || notStarted) return;

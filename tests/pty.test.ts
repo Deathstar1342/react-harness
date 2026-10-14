@@ -73,7 +73,7 @@ describe.skipIf(process.platform !== 'linux')('Linux persistent PTY integration'
     const first = tools.execute({ ...context, onOutput: () => started() }, { name: 'run_tests', args: { command: `printf ready; sleep 0.2; printf '<testsuite><testcase name="first"/></testsuite>' > shared.xml`, reportPath: 'shared.xml' } });
     await ready;
     const conflict = await tools.execute({ ...context, agentId: 'other' }, { name: 'run_tests', args: { command: 'true', reportPath: 'shared.xml' } });
-    expect(conflict.ok).toBe(false); expect(conflict.output).toContain('Another test run');
+    expect(conflict.ok).toBe(false); expect(conflict.output).toContain('project mutation');
     expect((await first).ok).toBe(true);
   });
   it('parses a freshly generated JUnit artifact and rejects stale or absent artifacts', async () => {

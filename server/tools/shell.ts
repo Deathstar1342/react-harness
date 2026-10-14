@@ -179,6 +179,8 @@ export class ShellPool {
       if (!session) { session = await PersistentShell.create(root, this.options); this.sessions.set(id, session);this.layouts.set(id,layout); }
       if (this.disposed) { await session.dispose(); this.sessions.delete(id); return { output: '', cancelled: true, error: 'Tool service disposed before execution.' }; }
       await beforeRun?.();
+      await context.prepareCommand?.();
+      context.beforeCommand?.();
       const outcome = await session.run(command, Math.min(timeoutMs, this.options.maxTimeoutMs), context.signal, context.onOutput);
       if (outcome.shellReset) { await session.dispose(); this.sessions.delete(id); queue.generation++; }
       await afterRun?.(outcome);
@@ -186,6 +188,15 @@ export class ShellPool {
     }).catch(error=>{if(error instanceof ToolError && error.code==='SANDBOX_CLEANUP_FAILED')this.quarantined.add(key(root));throw error;}).finally(() => { queue.count--; });
     queue.tail = result.then(() => {}, () => {});
     return result;
+  }
+  async closeContext(context:ToolContext) {
+    const root=rootPathSync(context.projectRoot),id=JSON.stringify([root,context.chatId,context.agentId]);
+    const queue=this.queues.get(id);
+    if(queue)await queue.tail;
+    const session=this.sessions.get(id);
+    try {if(session)await session.dispose();}
+    catch(error) {this.quarantined.add(key(root));throw error;}
+    this.sessions.delete(id);this.queues.delete(id);this.layouts.delete(id);
   }
   removeScope(root: string, chatId?: string) {
     if(this.quarantined.has(key(root)))throw new ToolError('Sandbox cleanup is uncertain; scope is quarantined until backend recovery.','SANDBOX_CLEANUP_FAILED');

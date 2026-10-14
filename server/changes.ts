@@ -5,7 +5,7 @@ import { Store } from './store.js';
 import { Runtime } from './runtime.js';
 
 const conflict = (message: string) => Object.assign(new Error(message),{statusCode:409});
-const summary = ({before: _before,after: _after,...item}: FileChange): FileChangeSummary => item;
+const summary = ({before: _before,after: _after,destination,...item}: FileChange): FileChangeSummary => ({...item,...(destination ? {destinationPath: destination.after.path} : {})});
 const DIFF_LIMIT = 200_000;
 export function boundedDiff(filename: string, before: string, after: string, created = false, removed = false): string {
   if (Buffer.byteLength(before) + Buffer.byteLength(after) > DIFF_LIMIT) throw new Error('Diff exceeds the 200 KB review limit. Inspect this file with an external editor; undo is unavailable here.');
@@ -14,7 +14,7 @@ export function boundedDiff(filename: string, before: string, after: string, cre
   return diff;
 }
 export class Changes {
-  private previews = new Map<string,{projectId:string;changeId:string;hash:string;expires:number}>();
+  private previews = new Map<string,{projectId:string;changeId:string;hash:string|null;expires:number}>();
   constructor(private store: Store, private tools: ToolService, private runtime: Runtime) {}
   forget(projectId: string) {
     for (const [id,preview] of this.previews) {
@@ -55,13 +55,20 @@ export class Changes {
     const change = this.store.fileChange(projectId,changeId);
     const preview: ChangePreview = {change:summary(change),diff:'',undoDiff:'',expectedHash:null};
     try {
-      preview.diff = boundedDiff(change.path,change.before.content,change.after.content,change.before.hash === null);
-      preview.undoDiff = boundedDiff(change.path,change.after.content,change.before.content,false,change.before.hash === null);
+      preview.diff = boundedDiff(change.path,change.before.content,change.after.content,change.before.hash === null,change.after.hash === null);
+      preview.undoDiff = boundedDiff(change.path,change.after.content,change.before.content,change.after.hash === null,change.before.hash === null);
+      if (change.destination) {
+        const {before,after} = change.destination;
+        preview.diff += '\n' + boundedDiff(after.path,before.content,after.content,true);
+        preview.undoDiff += '\n' + boundedDiff(after.path,after.content,before.content,false,true);
+        const destination = await this.tools.read(root,after.path);
+        if (destination.hash !== after.hash || destination.content !== after.content) throw conflict('Rename destination changed; later edits must be preserved.');
+      }
       const current = await this.tools.read(root,change.path);
       preview.expectedHash = current.hash;
       if (change.status !== 'confirmed') preview.reason = `Undo unavailable: recorded state is ${change.status}. Uncertain actions are never retried.`;
       else if (current.hash !== change.after.hash) preview.reason = 'The file changed after this write. Later saved edits must be preserved.';
-      else if (!this.tools.restore) preview.reason = 'This backend does not support safe undo.';
+      else if (!this.tools.restore || change.destination && !this.tools.restoreMove) preview.reason = 'This backend does not support safe undo.';
       else {
         for (const [token,item] of this.previews) if (item.expires<Date.now()) this.previews.delete(token);
         while (this.previews.size >= 200) this.previews.delete(this.previews.keys().next().value!);
@@ -71,7 +78,7 @@ export class Changes {
     } catch (error) { preview.reason = error instanceof Error ? error.message : 'Preview unavailable'; }
     return preview;
   }
-  async undo(projectId: string, changeId: string, expectedHash: string, previewToken: string) {
+  async undo(projectId: string, changeId: string, expectedHash: string | null, previewToken: string) {
     return this.runtime.exclusiveProjectEdit(projectId,async()=>{
       const root = this.store.project(projectId).path;
       const change = this.store.fileChange(projectId,changeId);
@@ -81,20 +88,32 @@ export class Changes {
       if (!this.tools.restore) throw new Error('Safe undo is unavailable');
       let claimed = false;
       try {
-        const result = await this.tools.restore(root,change.path,change.before,expectedHash,()=>{
-          this.store.transitionFileChange(change.id,'confirmed','undoing');
+        const claim = () => {
+          this.store.transaction(()=>this.store.transitionFileChange(change.id,'confirmed','undoing'));
           claimed = true;
           this.previews.delete(previewToken);
-        });
+        };
+        let result;
+        if (change.destination) {
+          if (!this.tools.restoreMove) throw new Error('Safe move undo is unavailable');
+          await this.tools.restoreMove(root,change,claim);
+          result = await this.tools.read(root,change.path);
+        } else result = await this.tools.restore(root,change.path,change.before,expectedHash,claim);
         if (!claimed) throw new Error('Restore did not claim its mutation');
         if (result.path !== change.path || result.hash !== change.before.hash || result.content !== change.before.content) throw new Error('Restore result did not match the recorded target');
         this.store.transaction(()=>{
           this.store.transitionFileChange(change.id,'undoing','undone');
-          this.runtime.notifyFileChange(projectId,change.path,'undo');
           for (const chat of this.store.chats(projectId)) this.store.event(chat.id,'file_changed',{path:change.path,source:'undo',hash:result.hash});
+          if(change.destination)for(const chat of this.store.chats(projectId))this.store.event(chat.id,'file_changed',{path:change.destination.after.path,source:'undo',hash:null});
         });
+        this.runtime.notifyFileChange(projectId,change.path,'undo');
+        if(change.destination)this.runtime.notifyFileChange(projectId,change.destination.after.path,'undo');
         return {ok:true};
       } catch (error) {
+        if (claimed && (error as {mutation?:string})?.mutation === 'not_started') {
+          this.store.transitionFileChange(change.id,'undoing','confirmed');
+          throw conflict('Undo did not start; refresh the preview.');
+        }
         if (claimed) {
           // An event listener can fail after COMMIT. Never downgrade a durable
           // completed undo or attempt the filesystem operation again.
@@ -102,6 +121,7 @@ export class Changes {
           this.store.transitionFileChange(change.id,'undoing','unknown');
           this.runtime.notifyFileChange(projectId,change.path,'undo');
           for (const chat of this.store.chats(projectId)) this.store.event(chat.id,'file_changed',{path:change.path,source:'undo'});
+          if(change.destination){this.runtime.notifyFileChange(projectId,change.destination.after.path,'undo');for(const chat of this.store.chats(projectId))this.store.event(chat.id,'file_changed',{path:change.destination.after.path,source:'undo'});}
           throw conflict('Undo outcome is uncertain. It will not be retried. Inspect the file and recorded snapshots.');
         }
         throw error;

@@ -72,6 +72,8 @@ describe('terminal projection and read-only markup',()=>{
     expect(app).toContain('terminalOpen && <TerminalPanel');expect(app).toContain('onClose={()=>setTerminalOpen(false)}');
     expect(app).toContain('<ActivityDrawer events={detail.events} tests={detail.tests} debug={debug} />');expect(app).toMatch(/<Conversation\s+key={chatId}/);
     const panel=readFileSync(new URL('../client/TerminalPanel.tsx',import.meta.url),'utf8');
-    expect(panel).not.toMatch(/\b(fetch|post|request|EventSource)\s*\(/);
+    expect(panel).not.toMatch(/\b(fetch|request|EventSource)\s*\(/);
+    expect(panel).toContain('/processes/${id(processId)}/cancel');
+    expect(panel).not.toContain('<textarea');expect(panel).not.toContain('<input');
   });
 });

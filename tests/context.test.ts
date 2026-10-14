@@ -27,7 +27,7 @@ function fixture(complete?: ModelProvider['complete'], filename = ':memory:') {
   const state: RunState = { frames: [frame], steering: ['Keep manual edits'], generation: 2, planOnly: true, steps: 9 };
   store.setState(`run:${chat.id}`,nativeState( state));
   const provider: ModelProvider = { models: async () => ['test'], complete: vi.fn(complete ?? (async () => ({ text: 'Model-written continuation: improve layout; preserve manual files; verification remains incomplete. Evidence is in the original transcript.', finishReason: 'stop' }))) };
-  const config = readConfig({ ARCHITECT_INPUT_TOKEN_LIMIT: '10000', CODER_INPUT_TOKEN_LIMIT: '10000', CRITIC_INPUT_TOKEN_LIMIT: '10000', MODEL_MAX_OUTPUT_TOKENS: '256' });
+  const config = readConfig({ ARCHITECT_INPUT_TOKEN_LIMIT: '18000', CODER_INPUT_TOKEN_LIMIT: '18000', CRITIC_INPUT_TOKEN_LIMIT: '18000', MODEL_MAX_OUTPUT_TOKENS: '256' });
   const hooks = createManagedHooks(provider, store, config);
   const prepare = (signal = new AbortController().signal) => hooks.prepareMessages!(chat.id, frame, [...prefix, ...frame.messages], signal);
   return { store, chat, frame, state, provider, config, hooks, prepare };
@@ -148,10 +148,10 @@ describe('model-written continuation contexts', () => {
   });
   it('does not silently truncate protected user instructions or send oversized regular requests', async () => {
     const t = fixture();
-    t.frame.messages = [{ role: 'user', content: 'A'.repeat(15000) }];
+    t.frame.messages = [{ role: 'user', content: 'A'.repeat(30000) }];
     await expect(t.prepare()).rejects.toThrow('exceed context');
     await expect(async () => t.hooks.complete!('architect', { model: 'test', messages: t.frame.messages })).rejects.toThrow('exceeds model context');
-    expect(t.provider.complete).not.toHaveBeenCalled(); expect(t.frame.messages[0].content.length).toBe(15000);
+    expect(t.provider.complete).not.toHaveBeenCalled(); expect(t.frame.messages[0].content.length).toBe(30000);
   });
   it('runtime persists compacted frames but cannot execute an action embedded in summary prose', async () => {
     const t = fixture(async input => input.messages[0].content.startsWith('Write a factual continuation')
@@ -159,7 +159,7 @@ describe('model-written continuation contexts', () => {
       : nativeReply('submit_completion',{summary:'No changes made.'},'No changes made.'));
     // M24 adds goal bindings/completion schemas and fixed architect policy.
     // Leave room for protected controls while still forcing real compaction.
-    t.config.contextLimits.architect = 24000;
+    t.config.contextLimits.architect = 34000;
     const inspect = vi.fn(), execute = vi.fn();
     const tools: ToolService = { inspect, execute, read: vi.fn(async (_root, path) => {
       if (path !== 'AGENTS.md') throw new Error('Unexpected file read');
