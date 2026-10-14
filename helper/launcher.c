@@ -123,6 +123,7 @@ int main(int argc,char **argv) {
     hierarchy("/usr/bin/systemctl"); hierarchy("/usr/bin/setfacl");
     hierarchy("/var/lib"); hierarchy("/var/lib/dpkg"); hierarchy("/var/lib/dpkg/status");
     hierarchy("/etc/systemd/system"); hierarchy("/run");
+    hierarchy("/etc/os-release"); hierarchy("/etc/machine-id");
     hierarchy("/lib64/ld-linux-x86-64.so.2");
     loader_cache();
     tree("/usr/lib/apt",0); tree("/etc/apt",0); tree("/etc/dpkg",0);

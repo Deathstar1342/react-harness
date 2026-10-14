@@ -12,7 +12,8 @@ jobs:
       - name: Disposable runner prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-apt acl build-essential
+          sudo apt-get install -y python3-apt acl build-essential bubblewrap socat
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           # First adapter supports fixed HTTP(S) repositories, not mirror-list indirection.
           sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
@@ -22,6 +23,9 @@ jobs:
           sudo chown root:root /usr/share
           sudo setfacl -b -k /usr/share
           sudo chmod 0755 /usr/share
+          # Hosted Swift cache entries resolve into writable runner toolchains.
+          # Test a distro-only loader cache; production never changes loader policy.
+          sudo /usr/sbin/ldconfig -C /etc/ld.so.cache -f /dev/null /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
           test "$(id -u)" != 0
       - run: npm ci
       - name: Portable helper state tests

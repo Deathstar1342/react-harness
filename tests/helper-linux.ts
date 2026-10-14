@@ -7,6 +7,7 @@ import { readFileSync,writeFileSync,mkdtempSync,existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { connect as socketConnect } from 'node:net';
 import { once } from 'node:events';
+import { LinuxSandbox } from '../server/tools/sandbox.js';
 import type { PackageHelperRecord } from '../shared/types.js';
 
 assert.equal(process.env.GITHUB_ACTIONS,'true','Disposable GitHub runner required');
@@ -49,6 +50,12 @@ sudo('/usr/bin/chmod','0666','/usr/lib/python3/dist-packages/abyssus_unvalidated
 execFileSync('/usr/bin/python3',['-I','-S','-c',"import sys,importlib.util;sys.path.insert(0,'/usr/lib/abyssus-helper');import apt_adapter;assert importlib.util.find_spec('abyssus_unvalidated_sentinel') is None;assert '/usr/lib/python3/dist-packages' not in sys.path"]);
 sudo('/usr/bin/rm','/usr/lib/python3/dist-packages/abyssus_unvalidated_sentinel.py');
 console.log('PASS private apt import directory excludes unrelated writable distro module');
+const project=mkdtempSync(tmpdir()+'/abyssus-project-');
+writeFileSync(project+'/source.txt','visible project');
+const sandbox=new LinuxSandbox();
+const confined=await sandbox.launch(project,['/usr/bin/bash','--noprofile','--norc','-c','test -f source.txt && test ! -e /etc/abyssus-helper/client.json && test ! -e /var/lib/abyssus-helper/audit.sqlite && test ! -e /run/abyssus-helper/control.sock && test ! -e /usr/lib/abyssus-helper/launcher && printf M18_CONFINED']);
+try{assert.equal(execFileSync(confined.file,confined.args,{env:confined.env,cwd:project,encoding:'utf8'}),'M18_CONFINED');}finally{await confined.close();}
+console.log('PASS live helper credentials/socket/audit/code absent inside actual agent namespace');
 // Credential read and socket connection both fail for a different local UID.
 assert.throws(()=>sudo('-u','nobody','/usr/bin/cat','/etc/abyssus-helper/client.json'));
 assert.throws(()=>sudo('-u','nobody','/usr/bin/python3','-I','-S','-c',"import socket;s=socket.socket(socket.AF_UNIX);s.connect('/run/abyssus-helper/control.sock')"));
