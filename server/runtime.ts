@@ -641,6 +641,8 @@ export class Runtime {
       For a delegate action, parameters is required and must contain:
       {"objective":"specific coder task","acceptanceCriteria":["one or more verifiable outcomes"],"paths":["optional file scope"]}
 
+      If delegation covers a plan step, add parameters.planStep={"planId":"current plan id","planVersion":1,"phaseId":"phase id","stepId":"step id"} using exact current identities. Omit it for unrelated work.
+
       For set_plan, parameters must contain:
       {"phases":[{"id":"phase-1","title":"Short phase title","steps":[{"id":"phase-1-step-1","title":"Specific step","status":"pending"}]}]}
 
