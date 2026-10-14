@@ -21,6 +21,7 @@ from core import require, digest, Rejected
 
 def hash_files(roots):
     result = hashlib.sha256()
+    count = total = 0
     for root in roots:
         path = Path(root)
         files = sorted(path.rglob("*")) if path.is_dir() else [path]
@@ -29,6 +30,9 @@ def hash_files(roots):
                 continue
             require(not file.is_symlink(), "UNSAFE_APT_STATE")
             require(file.stat().st_uid == 0 and file.stat().st_mode & 0o022 == 0, "UNSAFE_APT_STATE")
+            count += 1
+            total += file.stat().st_size
+            require(count <= 5000 and total <= 1024 * 1024 * 1024, "APT_STATE_LIMIT")
             result.update(str(file).encode())
             with file.open("rb") as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b""):

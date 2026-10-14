@@ -135,6 +135,7 @@ int main(int argc,char **argv) {
     }
     closedir(lib);
     hierarchy("/usr/bin/python3"); hierarchy("/usr/bin/dpkg");
+    hierarchy("/usr/share"); /* Common privileged package-data parent. */
     hierarchy("/usr/bin/systemctl"); hierarchy("/usr/bin/setfacl");
     hierarchy("/var/lib"); hierarchy("/var/lib/dpkg"); hierarchy("/var/lib/dpkg/status");
     hierarchy("/etc/systemd/system"); hierarchy("/run");
