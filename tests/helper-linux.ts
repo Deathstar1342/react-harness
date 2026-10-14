@@ -102,9 +102,11 @@ console.log('PASS real apt install, authenticated preview, forged/expired/reused
 // Normal-user writable code/config must fail before Python imports.
 for(const file of ['/usr/lib/abyssus-helper/core.py','/usr/lib/abyssus-helper','/etc/abyssus-helper/config.json','/usr/share','/usr/lib/python3/dist-packages/apt/__init__.py','/usr/lib/x86_64-linux-gnu/libz.so.1']){
   sudo('/usr/bin/chmod','g+w',file);
-  assert.throws(()=>admin('repair'),/UNTRUSTED_HELPER_PATH/);
-  sudo('/usr/bin/chmod','g-w',file);
+  try{assert.throws(()=>admin('repair'),/UNTRUSTED_HELPER_PATH/);}finally{sudo('/usr/bin/chmod','g-w',file);}
 }
+assert(!existsSync('/etc/ld.so.preload'),'fixture requires absent loader preload');
+sudo('/usr/bin/touch','/etc/ld.so.preload');sudo('/usr/bin/chmod','0666','/etc/ld.so.preload');
+try{assert.throws(()=>admin('repair'),/UNTRUSTED_HELPER_PATH/);}finally{sudo('/usr/bin/rm','/etc/ld.so.preload');}
 const hostileCwd=mkdtempSync(tmpdir()+'/abyssus-hostile-');
 writeFileSync(hostileCwd+'/sitecustomize.py',"open('/tmp/abyssus-hostile-loaded','w').write('bad')");
 writeFileSync(hostileCwd+'/apt.py',"open('/tmp/abyssus-hostile-loaded','w').write('bad')");

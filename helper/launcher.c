@@ -130,7 +130,7 @@ int main(int argc,char **argv) {
     DIR *lib=opendir("/usr/lib");
     if(!lib) fail("/usr/lib");
     struct dirent *entry;
-    while((entry=readdir(lib))) if(!strncmp(entry->d_name,"python3.",8)) {
+    while((entry=readdir(lib))) if(!strncmp(entry->d_name,"python3",7) && (entry->d_name[7]=='.' || strstr(entry->d_name,".zip"))) {
         char path[PATH_MAX]; snprintf(path,sizeof(path),"/usr/lib/%s",entry->d_name); tree(path,0);
     }
     closedir(lib);
@@ -145,7 +145,10 @@ int main(int argc,char **argv) {
     tree("/usr/lib/apt",0); tree("/etc/apt",0); tree("/etc/dpkg",0);
     hierarchy("/etc/ld.so.conf"); tree("/etc/ld.so.conf.d",0);
     struct stat preload;
-    if(!stat("/etc/ld.so.preload",&preload) && preload.st_size) fail("/etc/ld.so.preload unsupported");
+    if(!lstat("/etc/ld.so.preload",&preload)) {
+        hierarchy("/etc/ld.so.preload");
+        if(stat("/etc/ld.so.preload",&preload) || preload.st_size) fail("/etc/ld.so.preload unsupported");
+    } else if(errno!=ENOENT) fail("/etc/ld.so.preload");
     if(!strcmp(argv[1],"serve") || !strcmp(argv[1],"repair") || !strcmp(argv[1],"uninstall")) {
         tree("/etc/abyssus-helper",0); tree("/var/lib/abyssus-helper",0);
     }
