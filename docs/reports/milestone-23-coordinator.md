@@ -1,6 +1,6 @@
 # M23 independent coordinator review
 
-Review checkpoint: 2026-10-14. Candidate source `8ce986a236857243477a3659203c2930d284be1a`, isolated `b10a` / `codex/milestone-23`, from kickoff `9d9f7793c07546d3eb5b5058d3418d957345db30`. Integration and exact-main CI are not yet accepted at this checkpoint. M21 remains paused.
+Review checkpoint: 2026-10-14. Tested source `8ce986a236857243477a3659203c2930d284be1a`, isolated `b10a` / `codex/milestone-23`, from kickoff `9d9f7793c07546d3eb5b5058d3418d957345db30`. Clean report-only handoff `7279d5084b44503bd0a029624c75b3b620318c89` is independently reviewed and published as main `f4662a530465fcd6977d18564852dff52995ba6e`. Implementation matches tested source; only documentation differs. Integration typecheck and 41 context/orchestration tests passed. Exact-main CI acceptance is pending at this checkpoint. M21 remains paused.
 
 ## Source review
 
@@ -23,6 +23,8 @@ Child self-review identified that managed context also copied the private testca
 Coordinator receipts live outside Git in physical `D:/CodexData/.codex/visualizations/2026/09/26/01a0dc0a-8866-7182-acd2-da997779962d/m23-coordinator`. Retain `tests-fd09b13.json`: the earlier full run overlapped the child's new context test/correction and returned 724 pass / 1 fail / 33 skips. The new large-ledger test encountered the earlier loaded context implementation. This is mixed-source intermediate evidence, not an exact-source result; the frozen replacement focused checks passed. Retain the child's earlier failed receipts listed in its report as well.
 
 ## Acceptance boundaries
+
+Exact-main runs awaiting every applicable step verification: [Validate 38644621783](https://github.com/Deathstar1342/react-harness/actions/runs/38644621783), [Desktop 38644621962](https://github.com/Deathstar1342/react-harness/actions/runs/38644621962), [helper 38644621985](https://github.com/Deathstar1342/react-harness/actions/runs/38644621985). M24 dispatch waits for that acceptance. The child is idle; preserve its branch/worktree and all receipts.
 
 Explicit scoped snapshots do not prove outside-scope dependencies, filtered entries, persistent shell cwd/environment, report authenticity or freedom from external filesystem races. Full protected original criteria/human context can exceed a model budget and must fail visibly. Routine nonzero discovery is not automatically failed verification, and a new delegation does not reconcile historical uncertainty.
 
