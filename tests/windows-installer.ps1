@@ -37,4 +37,6 @@ node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') verify
 if ($LASTEXITCODE -ne 0) { throw 'Reinstalled executable check failed' }
 node tests/packaged-crash.ts (Join-Path $install 'abysSUS.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Owned crash recovery check failed' }
+node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') verify
+if ($LASTEXITCODE -ne 0) { throw 'Actual restart after crash failed' }
 Write-Output 'PASS actual NSIS install, repeat-install refusal, uninstall/reinstall and data-location preservation'
