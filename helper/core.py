@@ -163,6 +163,7 @@ class Engine:
             return record
         require(record["state"] == "authorized" and record["decision"] == body, "INVALID_STATE")
         # A failed execute consumes this decision; no implicit retry.
+        effects_started = False
         try:
             with self.adapter.lock():
                 require(record["request"]["targetId"] == self.adapter.target()["id"], "WRONG_TARGET")
@@ -171,13 +172,14 @@ class Engine:
                 require(now() < body["expiresAt"], "DECISION_EXPIRED")
                 record.update(state="running", code="RUNNING")
                 self.audit.save(record)  # Must be durable before any package effect.
+                effects_started = True
                 self.adapter.install()
                 observed = self.adapter.reconcile(record["preview"])
                 require(observed["matches"] and observed["healthy"], "OUTCOME_MISMATCH")
                 record.update(state="succeeded", code="INSTALLED", reconciliation=observed)
                 self.audit.save(record)
         except Exception as error:
-            record.update(state="uncertain" if record["state"] == "running" else "failed",
+            record.update(state="uncertain" if effects_started else "failed",
                           code=str(error) if isinstance(error, Rejected) else "PACKAGE_OPERATION_FAILED")
             self.audit.save(record)
         return record

@@ -88,6 +88,18 @@ class CoreTest(unittest.TestCase):
         with patch.object(self.audit, "save", fail_running):
             result = self.engine.dispatch("execute", decision)
         self.assertEqual(self.adapter.calls, 0)
+        self.assertEqual(result["state"], "failed")
+    def test_final_commit_failure_preserves_post_effect_uncertainty(self):
+        decision = self.prepare()
+        self.engine.dispatch("authorize", decision)
+        original = self.audit.save
+        def fail_success(record, new=False):
+            if record["state"] == "succeeded":
+                raise OSError("disk failed after package effects")
+            return original(record, new)
+        with patch.object(self.audit, "save", fail_success):
+            result = self.engine.dispatch("execute", decision)
+        self.assertEqual(self.adapter.calls, 1)
         self.assertEqual(result["state"], "uncertain")
     def test_interrupt_restart_never_replays(self):
         decision = self.prepare()
