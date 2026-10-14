@@ -73,6 +73,10 @@ describe.skipIf(process.platform!=='linux')('real Linux sandbox security',()=>{
     const {root,sandbox}=await fixture();const launch=await sandbox.launch(root,['/usr/bin/true']);
     try{const result=spawnSync(launch.file,launch.args,{env:launch.env,encoding:'utf8',timeout:5000});expect(result.status,result.stderr).toBe(0);}finally{await launch.close();}
   });
+  it('rejects sensitive configuration nested beneath a proposed toolchain mount',async()=>{
+    const {root,home,sandbox}=await fixture();sandbox.configure({home,protectedPaths:['/usr/lib/abyssus-private-state'],projects:()=>[]});
+    await expect(sandbox.launch(root,['/usr/bin/true'])).rejects.toMatchObject({code:'SANDBOX_UNSAFE_PROJECT'});
+  });
   async function execution(){
     const f=await fixture(),tools=new WorkspaceTools();tools.configureSandbox({home:f.home,protectedPaths:[],projects:()=>[]});cleanup.push(()=>tools.dispose());
     const context={projectRoot:f.root,chatId:'test',agentId:'coder'};

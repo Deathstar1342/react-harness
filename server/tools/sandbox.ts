@@ -74,6 +74,10 @@ export class LinuxSandbox {
   async launch(root:string,command:string[],network=false,git=false):Promise<SandboxLaunch> {
     if(process.platform!=='linux' || process.getuid?.()===0)throw new ToolError('Sandbox execution requires a non-root Linux/WSL backend with Bubblewrap, user namespaces, socat, bash and Python venv. Host execution is disabled.','SANDBOX_UNAVAILABLE');
     const layout=this.layout(root,git);
+    const distro=['/usr/bin','/usr/lib','/usr/lib64','/usr/share/nodejs','/usr/share/git-core','/usr/share/zoneinfo','/usr/share/python-wheels','/usr/share/python3','/etc/ssl/certs'].filter(existsSync);
+    const node=realpathSync(process.execPath),npm=path.resolve(path.dirname(node),'../lib/node_modules/npm');
+    const sensitive=[this.policy.home,...this.policy.protectedPaths,...this.policy.projects()].map(p=>canonical(path.resolve(p)));
+    if([...distro,node,...(existsSync(npm)?[npm]:[])].some(source=>sensitive.some(target=>overlap(canonical(source),target))) || distro.some(source=>overlap(canonical(source),canonical(installationRoot))))throw new ToolError('A read-only toolchain mount overlaps application, configuration or project data. Move that data outside the distro toolchain before execution.','SANDBOX_UNSAFE_PROJECT');
     for(const file of ['/usr/bin/bwrap','/usr/bin/bash','/usr/bin/socat'])if(!existsSync(file))throw new ToolError('Sandbox prerequisites missing: install Bubblewrap, socat, bash and Python venv through trusted setup. Host execution is disabled.','SANDBOX_UNAVAILABLE');
     const base=this.storage(layout.root);
     const policyFiles=path.join(base,'policy');mkdirSync(policyFiles,{mode:0o700,recursive:true});
@@ -88,11 +92,10 @@ export class LinuxSandbox {
     const args=['--unshare-all','--unshare-user','--die-with-parent','--new-session','--disable-userns','--cap-drop','ALL','--clearenv'];
     // Distro-managed tools only. No /usr/local, personal prefixes, host /etc,
     // /proc, /sys, /run, network, interop or parent-home bind.
-    for(const dir of ['/usr/bin','/usr/lib','/usr/lib64','/usr/share/nodejs','/usr/share/git-core','/usr/share/zoneinfo','/usr/share/python-wheels','/usr/share/python3'])if(existsSync(dir))args.push('--ro-bind',dir,dir);
+    for(const dir of distro.filter(dir=>dir!=='/etc/ssl/certs'))args.push('--ro-bind',dir,dir);
     for(const [dest,source] of [['/bin','usr/bin'],['/lib','usr/lib'],['/lib64','usr/lib64']])if(existsSync(dest))args.push('--symlink',source,dest);
     // The backend's exact Node binary and adjacent npm distribution; no whole
     // toolcache/personal directory is exposed. Setup owns these trusted files.
-    const node=realpathSync(process.execPath),npm=path.resolve(path.dirname(node),'../lib/node_modules/npm');
     args.push('--ro-bind',node,'/opt/node/bin/node');
     if(existsSync(npm))args.push('--ro-bind',npm,'/opt/node/lib/node_modules/npm','--symlink','../lib/node_modules/npm/bin/npm-cli.js','/opt/node/bin/npm','--symlink','../lib/node_modules/npm/bin/npx-cli.js','/opt/node/bin/npx');
     args.push('--proc','/proc','--dev','/dev','--dir','/etc','--dir','/run','--bind',path.join(base,'home'),'/sandbox/home','--bind',path.join(base,'cache'),'/sandbox/cache','--bind',path.join(base,'tmp'),'/tmp','--bind',layout.root,layout.root);
