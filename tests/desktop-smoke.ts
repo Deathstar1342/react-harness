@@ -7,6 +7,7 @@ const root=path.resolve(import.meta.dirname,'..'),home=mkdtempSync(path.join(tmp
 mkdirSync(path.join(root,'test-results'),{recursive:true});
 const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home},timeout:30000});
 let app=await launch();
+let completed=false;
 try {
   const page=await app.firstWindow();
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
@@ -77,8 +78,9 @@ try {
   await app.evaluate(({app})=>app.exit(0));
   app=await launch();await expect((await app.firstWindow()).getByRole('heading',{name:'Open your workspace'})).toBeVisible();
   console.log('PASS real application restart with isolated desktop profile');
+  completed=true;
 } finally {
   await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close().catch(()=>{});
-  rmSync(home,{recursive:true,force:true});
+  if(completed)rmSync(home,{recursive:true,force:true});
+  else console.log('Failed disposable desktop profile retained at '+home);
 }
-

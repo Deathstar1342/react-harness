@@ -10,7 +10,7 @@ const appRoot=fileURLToPath(new URL('../',import.meta.url));
 app.setName('abysSUS');
 app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}}]);
-let window:BrowserWindow|undefined,quitting=false,closing=false,dirty=false;
+let window:BrowserWindow|undefined,quitting=false,closing=false,dirty=false,boundSession:string|undefined;
 const controller=new DesktopController(appRoot);
 const selectionSchema=z.object({environment:environmentSchema,home:linuxPath}).strict();
 if(!app.requestSingleInstanceLock())app.quit();
@@ -29,7 +29,8 @@ else {
     callback({cancel:!allowed});
   });
   partition.protocol.handle('abyssus',async request=>{
-    try{return await desktopResponse(request,path.join(appRoot,'dist/client'),controller.target());}
+    const target=controller.target();
+    try{return await desktopResponse(request,path.join(appRoot,'dist/client'),target?.sessionId===boundSession?target:undefined);}
     catch{return Response.json({error:'Desktop connection failed. Reopen setup to inspect recovery.'},{status:503});}
   });
   const selectionFile=path.join(app.getPath('userData'),'desktop-selection.json');
@@ -37,6 +38,7 @@ else {
   catch{controller.state.message='Saved desktop selection needs recovery. Choose the existing profile explicitly; do not initialize a replacement.';}
   await controller.inventory();
   const createWindow=()=>{
+    boundSession=controller.state.sessionId;
     window=new BrowserWindow({width:1350,height:880,minWidth:740,minHeight:520,title:'abysSUS',backgroundColor:'#171717',show:false,
       webPreferences:{partition:'abyssus-desktop',preload:path.join(appRoot,'desktop/preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false,nodeIntegrationInWorker:false,webviewTag:false,webSecurity:true,allowRunningInsecureContent:false,devTools:false}});
     window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -69,9 +71,14 @@ else {
     const {startSchema}=await import('./policy.js');const selected=startSchema.parse(input);
     const confirmed=await dialog.showMessageBox(window!,{type:'question',message:`${selected.mode==='initialize'?'Initialize':'Open'} the selected Linux profile?`,detail:`Environment: ${JSON.stringify(selected.environment)}\nProfile: ${selected.home}${selected.legacyRoot?'\nLegacy source: '+selected.legacyRoot+'\nStop every old backend before migration.':''}`,buttons:['Cancel','Continue'],defaultId:0,cancelId:0});
     if(confirmed.response!==1)return {...controller.state,message:'Profile selection cancelled.'};
+    const previousSession=boundSession;
     const result=await controller.start(input);
     mkdirSync(path.dirname(selectionFile),{recursive:true});
     const temporary=selectionFile+'.tmp';writeFileSync(temporary,JSON.stringify(result.selection),{mode:0o600});renameSync(temporary,selectionFile);
+    // A previous document's requests cannot reach a new backend session. Replace
+    // the entire renderer (after the dirty guard), including all stale callbacks.
+    if(previousSession&&previousSession!==result.sessionId){window!.destroy();createWindow();}
+    else boundSession=result.sessionId;
     return result;
   });
   handler('desktop:pick',async()=>{

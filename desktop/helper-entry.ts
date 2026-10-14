@@ -15,14 +15,15 @@ export async function helperState() {
 export async function helperOperation(action:'setup'|'repair'|'uninstall') {
   if(!['setup','repair','uninstall'].includes(action)||process.platform!=='linux'||!process.getuid?.())throw new Error('Unsupported helper operation');
   await trustedHelper();
-  const before=action==='setup'?undefined:(await PackageHelperClient.connect()).installationId();
+  let before:string|undefined;
+  if(action!=='setup')try{before=(await PackageHelperClient.connect()).installationId();}catch{/* OS-authenticated repair/removal must recover a missing or damaged client descriptor. */}
   // OS agent owns authentication. No stdin, passwords, arbitrary env or shell.
   await new Promise<void>((resolve,reject)=>{
     const child=spawn('/usr/bin/pkexec',[launcher,action,...(action==='setup'?[String(process.getuid!())]:[])],
       {cwd:'/',env:{PATH:'/usr/bin:/bin',LANG:'C.UTF-8',...(process.env.DISPLAY?{DISPLAY:process.env.DISPLAY}:{}),...(process.env.XAUTHORITY?{XAUTHORITY:process.env.XAUTHORITY}:{})},stdio:'ignore'});
     child.once('error',()=>reject(new Error('OS authentication unavailable')));
     // Never timeout-kill elevated work. Cancellation/denial is an actual OS result.
-    child.once('exit',code=>code===0?resolve():reject(new Error('OS authentication cancelled, denied or operation failed')));
+    child.once('exit',code=>code===0?resolve():reject(new Error(`OS authentication cancelled, denied or operation failed (exit ${code})`)));
   });
   if(action==='uninstall') {
     for(const file of [launcher,'/etc/abyssus-helper/client.json','/etc/systemd/system/abyssus-helper.service','/run/abyssus-helper/control.sock'])if(!await absent(file))throw new Error('Helper removal incomplete');

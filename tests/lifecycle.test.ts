@@ -25,6 +25,22 @@ async function fixture() {
 async function start(options:Parameters<typeof startBackend>[0]) {const backend=await startBackend(options);cleanups.push(()=>backend.close());return backend;}
 const headers={host:'127.0.0.1','content-type':'application/json'};
 
+it('rejects encoded route aliases before auth, Host/Origin or JSON policies can be bypassed',async()=>{
+  const t=await fixture(),backend=await start(t.options);
+  const store=new Store(path.join(backend.config.dataDir,'state.sqlite'));
+  const project=store.createProject('Auth fixture',t.other),chat=store.createChat(project.id,'Events','review');store.close();
+  for(const prefix of ['/%61pi','/a%70i','/ap%69','/%61%70%69']) {
+    expect((await backend.app.inject({url:prefix+'/projects',headers})).statusCode).toBe(400);
+    expect((await backend.app.inject({method:'POST',url:prefix+'/projects',headers:{host:'evil.example',origin:'https://evil.example','content-type':'text/plain'},payload:'bad'})).statusCode).toBe(400);
+    expect((await backend.app.inject({method:'POST',url:prefix+'/auth/pair',headers,payload:{code:backend.auth.pairingCode}})).statusCode).toBe(400);
+    expect((await fetch(backend.address+prefix+`/chats/${chat.id}/events`)).status).toBe(400);
+  }
+  expect((await fetch(backend.address+`/api/chats/${chat.id}/events`)).status).toBe(401);
+  expect((await backend.app.inject({method:'POST',url:'/api/projects',headers:{host:'evil.example','content-type':'application/json'},payload:{}})).statusCode).toBe(403);
+  expect((await backend.app.inject({method:'POST',url:'/api/projects',headers:{...headers,origin:'https://evil.example'},payload:{}})).statusCode).toBe(403);
+  expect((await backend.app.inject({method:'POST',url:'/api/projects',headers:{host:'127.0.0.1','content-type':'text/plain'},payload:'bad'})).statusCode).toBe(415);
+});
+
 it('authenticates readiness without sending the key, rejects replay, expiry, wrong instance/action and origin',async()=>{
   const t=await fixture(),backend=await start(t.options),id=backend.lifecycle.instanceId,key=backend.lifecycle.key;
   const request=signBackendRequest(key,'readiness',id);

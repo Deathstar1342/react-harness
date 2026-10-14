@@ -28,7 +28,7 @@ export function DesktopRoot() {
   }
   const needsSetup=!opened||showSetup||status?.phase!=='ready';
   return <>
-    {opened&&<App/>}
+    {opened&&status?.sessionId&&<App key={status.sessionId}/>}
     {opened&&<button className="desktop-environment" onClick={()=>setShowSetup(true)}>Desktop · {status?.selection?.environment.kind==='wsl'?status.selection.environment.distribution:'Linux'}</button>}
     {needsSetup&&<div className={opened?'desktop-overlay':''}><main className="desktop-setup" aria-label="Desktop setup">
       <img src={logo} alt="abysSUS"/><h1>{status?.phase==='ready'?'Desktop environment':'Open your workspace'}</h1>

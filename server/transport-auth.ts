@@ -17,8 +17,9 @@ export class TransportAuth {
   }
   register(app:FastifyInstance) {
     app.addHook('onRequest',async(request,reply)=>{
-      if(!request.url.startsWith('/api'))return;
-      const pathname=request.url.split('?')[0];
+      const pathname=request.routeOptions.url??request.url.split('?')[0];
+      if(!pathname.startsWith('/api')&&!request.url.startsWith('/api'))return;
+      if(request.url.split('?')[0].includes('%'))return reply.code(400).send({error:'Encoded route paths are not accepted'});
       // These lifecycle endpoints independently require M16 HMAC proofs.
       if(['/api/backend/readiness','/api/backend/shutdown','/api/auth/pair'].includes(pathname))return;
       const authorization=request.headers.authorization;

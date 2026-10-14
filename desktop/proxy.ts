@@ -1,7 +1,7 @@
 import { realpath, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { assetPath, contentSecurityPolicy, isDesktopURL } from './policy.js';
-export interface BackendTarget {address:string;token:string}
+export interface BackendTarget {address:string;token:string;sessionId?:string}
 const csp={'Content-Security-Policy':contentSecurityPolicy,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'};
 const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.woff2':'font/woff2','.ttf':'font/ttf','.json':'application/json'};
 export async function desktopResponse(request:Request,root:string,target?:BackendTarget):Promise<Response> {

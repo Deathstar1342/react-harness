@@ -49,6 +49,30 @@ it('roundtrips dotenv values, preserves unrelated bytes and backfills before def
   expect(reopened.chatModels(t.legacy.id).architect).toBe('old-a');expect(reopened.chatModels(next.id)).toEqual(result.models);
   t.settings.update({apiKey:''});expect(t.config.apiKey).toBe('');expect(parse(readFileSync(t.filename)).STARK_API_KEY).toBe('');
 });
+it('initializes a blank endpoint/key atomically and preserves endpoint paths across restart',()=>{
+  const t=fixture('');
+  t.settings.update({baseUrl:'http://localhost:45123/custom/v1/',apiKey:'new-key'});
+  expect(t.settings.get().baseUrl).toBe('http://localhost:45123/custom/v1');
+  expect(loadBackendConfig({},t.filename).config).toMatchObject({baseUrl:'http://localhost:45123/custom/v1',apiKey:'new-key'});
+});
+it('never forwards an existing key to a changed endpoint, including an initially empty endpoint',()=>{
+  for(const text of [baseline,"STARK_API_KEY=old-test-key\n"]) {
+    const t=fixture(text);expect(()=>t.settings.update({baseUrl:'https://new.example/v1'})).toThrow('explicit replacement');
+    expect(t.config.apiKey).toBe('old-test-key');expect(readFileSync(t.filename,'utf8')).toBe(text);
+    t.settings.update({baseUrl:'https://new.example/v1',apiKey:''});expect(t.config.apiKey).toBe('');
+    t.settings.update({baseUrl:'https://another.example:444/api/v1',apiKey:'replacement'});expect(t.config.baseUrl).toBe('https://another.example:444/api/v1');
+  }
+});
+it('accepts equivalent endpoint spelling without key rotation but refuses process-locked changes',()=>{
+  const t=fixture();t.settings.update({baseUrl:'http://127.0.0.1:80/v1/'});expect(t.config.apiKey).toBe('old-test-key');
+  const locked=fixture(baseline,{STARK_API_KEY:'external'});
+  expect(()=>locked.settings.update({baseUrl:'https://new.example/v1',apiKey:'replacement'})).toThrow('process environment');expect(locked.config.baseUrl).toBe('http://127.0.0.1/v1');
+  const endpoint=fixture(baseline,{STARK_BASE_URL:''});expect(endpoint.settings.get().lockedFields).toContain('baseUrl');
+  expect(()=>endpoint.settings.update({baseUrl:'https://new.example',apiKey:''})).toThrow('process environment');
+});
+it.each(['https://user:pass@example.com','https://example.com?secret=x','https://example.com#fragment','file:///etc/passwd','https://example.com\nSTARK_API_KEY=bad',' https://example.com','https://example.com/\tpath','https://example.com/'+ 'a'.repeat(2050)])('rejects unsafe endpoint %s without writes',baseUrl=>{
+  const t=fixture();expect(()=>t.settings.update({baseUrl,apiKey:''})).toThrow();expect(readFileSync(t.filename,'utf8')).toBe(baseline);
+});
 it('replaces duplicate managed declarations, export/colon syntax and multiline values without affecting other parsed settings',()=>{
   const t=fixture(baseline+"export ARCHITECT_MODEL: 'old\nmultiline'\r\nARCHITECT_MODEL=last # comment\r\nTAIL=keep\r\n");
   t.settings.update({models:{architect:'new'},apiKey:'back\\nslash'});

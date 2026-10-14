@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { boundedProcess, firstLine } from './process.js';
-import { descriptorSchema, loopbackAddress } from './backend-wire.js';
+import { descriptorSchema, failureSchema, loopbackAddress } from './backend-wire.js';
 import { parseDistributions, startSchema } from './policy.js';
 import { signBackendRequest, verifyBackendProof } from '../server/lifecycle.js';
 import type { BackendIdentity } from '../shared/types.js';
@@ -57,12 +57,14 @@ export class DesktopController {
         this.state.message=deliberate?'Backend stopped after local cleanup.':'Backend exited. Keep this profile selected and explicitly reopen it to inspect recovery; no actions will be replayed.';this.changed();
       });
       const response=firstLine(child);child.stdin.write(JSON.stringify({home:input.home,mode:input.mode,legacyRoot:input.legacyRoot,key,token})+'\n');
-      const descriptor=descriptorSchema.parse(await response),address=loopbackAddress(descriptor.address);
+      const frame=await response,failure=failureSchema.safeParse(frame);
+      if(failure.success){this.state.checks=failure.data.checks;throw new Error(failure.data.error);}
+      const descriptor=descriptorSchema.parse(frame),address=loopbackAddress(descriptor.address);
       const request=signBackendRequest(key,'readiness',descriptor.identity.instanceId);
       const proof=await fetch(address+'/api/backend/readiness',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request),redirect:'error',signal:AbortSignal.timeout(5000)}).then(r=>r.json());
       if(!verifyBackendProof(key,'readiness',request,proof)||proof.identity.profileId!==descriptor.identity.profileId||proof.identity.state!=='ready'||this.child!==child)throw new Error('Backend readiness identity mismatch');
-      this.identity=descriptor.identity;this.key=key;this.active={address,token};
-      this.state={...this.state,phase:'ready',checks:descriptor.checks,message:'Connected to the selected Linux profile.'};this.changed();
+      this.identity=descriptor.identity;this.key=key;this.active={address,token,sessionId:`${descriptor.identity.profileId}/${descriptor.identity.instanceId}`};
+      this.state={...this.state,phase:'ready',sessionId:`${descriptor.identity.profileId}/${descriptor.identity.instanceId}`,checks:descriptor.checks,message:'Connected to the selected Linux profile.'};this.changed();
       return this.state;
     }catch(error){this.state.phase='failed';this.state.message=error instanceof Error?error.message:'Desktop launch failed';this.changed();throw error;}
     finally{this.busy=false;}

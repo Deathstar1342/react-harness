@@ -13,7 +13,7 @@
     "desktop:build": "npm run build && node scripts/desktop-build.mjs",
     "desktop:stage-runtime": "node scripts/stage-runtime.mjs",
     "desktop:start": "electron build/app/desktop/main.js",
-    "desktop:smoke": "node --import tsx tests/desktop-smoke.ts",
+    "desktop:smoke": "node tests/desktop-smoke.ts",
     "start": "tsx server/index.ts",
     "profile:init": "tsx server/profile-cli.ts init",
     "profile:migrate": "tsx server/profile-cli.ts migrate",

@@ -7,6 +7,7 @@ export interface DesktopStatus {
   distributions:string[];
   selection?:DesktopSelection;
   message:string;
+  sessionId?:string;
   checks?:{ name:string; ok:boolean; message:string }[];
   helper?:{available:boolean; target?:string};
 }

@@ -100,6 +100,9 @@ export async function createApp(options: AppOptions) {
     } catch { /* File hash checks remain authoritative when watching is unavailable. */ }
   };
   app.addHook('onRequest',async (request,reply)=> {
+    // Fastify decodes static segments before routing. Reject encoded path spelling
+    // before any raw-prefix policy; query values (including file paths) stay valid.
+    if(request.url.split('?')[0].includes('%'))return reply.code(400).send({error:'Encoded route paths are not accepted'});
     if (!request.url.startsWith('/api')) return;
     let hostname: string;
     try { hostname = new URL(`http://${request.headers.host ?? ''}`).hostname; } catch { return reply.code(403).send({error:'Invalid host'}); }
