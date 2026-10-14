@@ -8,14 +8,18 @@ import assert from 'node:assert/strict';
 if(process.env.GITHUB_ACTIONS!=='true')throw new Error('Authorized disposable CI only');
 const executable=path.resolve(process.argv[2]),home=process.env.ABYSSUS_PACKAGE_TEST_HOME!;assert(home);
 const env=Object.fromEntries(Object.entries(process.env).filter((v):v is [string,string]=>typeof v[1]==='string'));delete env.ELECTRON_RUN_AS_NODE;
-const app=await electron.launch({executablePath:executable,args:['--user-data-dir='+home],env,chromiumSandbox:true});
 let backend:number|undefined;
 const deadline=setTimeout(()=>{console.error('FAIL owned crash recovery timed out');if(backend)try{process.kill(backend,'SIGCONT');}catch{}process.exit(1);},60000);
+console.log(new Date().toISOString(),'START crash launch', {executable,home});
+const app=await electron.launch({executablePath:executable,args:['--user-data-dir='+home],env,chromiumSandbox:true,timeout:30000});
 try {
-  const page=await app.firstWindow();
-  assert.equal(await app.evaluate(()=>process.pid),app.process().pid,'Crash must target the actual Electron main process');
-  assert.equal(realpathSync.native(await app.evaluate(()=>process.execPath)).toLowerCase(),realpathSync.native(executable).toLowerCase());
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
+  const identity=await app.evaluate(()=>({pid:process.pid,path:process.execPath}));
+  console.log(new Date().toISOString(),'END crash launch; actual identity',identity,'child PID',app.process().pid);
+  assert.equal(identity.pid,app.process().pid,'Crash must target the actual Electron main process');
+  assert.equal(realpathSync.native(identity.path).toLowerCase(),realpathSync.native(executable).toLowerCase());
+  const page=await app.firstWindow({timeout:15000});
+  await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible({timeout:15000});
   if(process.platform==='linux'){
     await page.getByLabel('Persistent profile home (Linux path)').fill(path.join(home,'linux-profile'));
     await page.getByLabel('Profile action').selectOption('existing');
@@ -33,12 +37,14 @@ try {
   if(process.platform==='win32'){
     observer=spawn(path.join(process.env.SystemRoot!,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-File',path.resolve('tests/windows-crash-observer.ps1')],{env:{...env,ABYSSUS_CRASH_PID:String(app.process().pid),ABYSSUS_CRASH_EXE:realpathSync.native(executable)},windowsHide:true,stdio:['ignore','pipe','pipe']});
     observerDone=once(observer,'close');
-    observer.stdout!.on('data',data=>{observations+=data.toString();});observer.stderr!.on('data',data=>process.stderr.write(data));
+    console.log(new Date().toISOString(),'START process-handle observer',observer.pid);
+    observer.stdout!.on('data',data=>{observations+=data.toString();process.stdout.write('OBSERVER '+data.toString());});observer.stderr!.on('data',data=>process.stderr.write(data));
     await expect.poll(()=>observations.includes('"event":"ready"'),{timeout:10000}).toBe(true);
   }
   const killedAt=Date.now();let exitAt:number|undefined,closeAt:number|undefined;
   app.process().once('exit',()=>{exitAt=Date.now()-killedAt;});app.process().once('close',()=>{closeAt=Date.now()-killedAt;});
   app.process().kill('SIGKILL');
+  console.log(new Date().toISOString(),'Requested termination of exact owned main',app.process().pid);
   await expect.poll(()=>app.process().exitCode!==null||app.process().signalCode!==null).toBe(true);
   if(backend){
     let blocked=false;try{execFileSync('/usr/bin/sudo',['/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','backend'],{stdio:'pipe'});}catch{blocked=true;}assert(blocked);
@@ -66,7 +72,14 @@ try {
     },{timeout:15000,intervals:[100,250,500],message:'Native lease must become acquirable after actual main exit'}).toBe(0).catch(error=>{console.error(lastError);throw error;});
     console.log('PASS abnormal Windows main exit releases its native OS lease after',Date.now()-started,'ms across',attempts,'probe(s); no WSL backend was launched');
   }
-}finally{
+}catch(error){console.error(new Date().toISOString(),'FAIL crash phase before cleanup',error);throw error;}
+finally{
   if(backend)try{process.kill(backend,'SIGCONT');}catch{}
-  clearTimeout(deadline);await app.close().catch(()=>{});
+  if(app.process().exitCode===null&&app.process().signalCode===null){
+    console.log(new Date().toISOString(),'START normal cleanup of live fixture main',app.process().pid);
+    try{await Promise.race([app.close(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fixture cleanup timed out; transaction quarantined')),5000))]);}
+    catch(error){console.error(error);process.exit(1);}
+  }
+  console.log(new Date().toISOString(),'END crash fixture',{exitCode:app.process().exitCode,signal:app.process().signalCode});
+  clearTimeout(deadline);
 }

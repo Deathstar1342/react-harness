@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'Installer transactions require an authorized disposable CI machine.' }
 $testRoot = Join-Path $env:RUNNER_TEMP 'abyssus-installer'
+$fixtureRoot = $testRoot
+. "$PSScriptRoot/windows-fixture-process.ps1"
 $install = Join-Path $testRoot 'app'
 $data = Join-Path $testRoot 'data'
 New-Item -ItemType Directory -Force $data | Out-Null
@@ -8,35 +10,28 @@ New-Item 'HKCU:\Software\abysSUS\Storage' -Force | Out-Null
 Set-ItemProperty 'HKCU:\Software\abysSUS\Storage' -Name DataFolder -Value $data
 $setup = (Get-Item 'build/release/*setup.exe').FullName
 function Install-Candidate {
-  $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru -Wait
-  if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
+  param([string]$phase)
+  Invoke-FixturePhase -Phase $phase -FilePath $setup -Arguments @('/S', "/D=$install") -TimeoutSeconds 240
 }
-Install-Candidate
-node tests/installed-package-preflight.cjs (Join-Path $install 'abysSUS.exe') $data
-if ($LASTEXITCODE -ne 0) { throw 'Installed on-disk bootstrap verification failed' }
+Write-Output "FIXTURE install=$install data=$data setup=$setup"
+Install-Candidate 'install'
+Invoke-FixturePhase -Phase 'installed-preflight' -FilePath 'node' -Arguments @('tests/installed-package-preflight.cjs',(Join-Path $install 'abysSUS.exe'),$data)
 $env:ABYSSUS_PACKAGE_TEST_HOME = $data
 $env:ABYSSUS_TEST_INSTALLER = $setup
-node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') create
-if ($LASTEXITCODE -ne 0) { throw 'Installed executable check failed' }
-$p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru -Wait
-if ($p.ExitCode -eq 0) { throw 'In-place replacement was not refused' }
+Invoke-FixturePhase -Phase 'installed-smoke' -FilePath 'node' -Arguments @('tests/packaged-smoke.ts',(Join-Path $install 'abysSUS.exe'),'create')
+Invoke-FixturePhase -Phase 'replacement-refusal' -FilePath $setup -Arguments @('/S',"/D=$install") -ExpectedExit @(74)
 $uninstaller = (Get-Item (Join-Path $install 'Uninstall*.exe')).FullName
 # NSIS normally copies its uninstaller to TEMP. Run that same payload outside
 # INSTDIR so the explicit synchronous _?= fixture does not lock its own file.
 $uninstallFixture = Join-Path $testRoot 'uninstall-fixture.exe'
 Copy-Item -LiteralPath $uninstaller -Destination $uninstallFixture
-$p = Start-Process -FilePath $uninstallFixture -ArgumentList @('/S', "_?=$install") -WindowStyle Hidden -PassThru -Wait
-if ($p.ExitCode -ne 0) { throw 'Uninstall failed' }
+Invoke-FixturePhase -Phase 'uninstall' -FilePath $uninstallFixture -Arguments @('/S',"_?=$install") -TimeoutSeconds 120
 if (Test-Path -LiteralPath (Join-Path $install 'abysSUS.exe')) { throw 'Application payload survived uninstall' }
 if ((Get-Content -LiteralPath (Join-Path $data 'preserve.txt') -Raw) -ne 'package-preservation-fixture') { throw 'Desktop data lost' }
 if ((Get-ItemProperty 'HKCU:\Software\abysSUS\Storage').DataFolder -ne $data) { throw 'Saved location lost' }
-Install-Candidate
-node tests/installed-package-preflight.cjs (Join-Path $install 'abysSUS.exe') $data
-if ($LASTEXITCODE -ne 0) { throw 'Reinstalled on-disk bootstrap verification failed' }
-node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') verify
-if ($LASTEXITCODE -ne 0) { throw 'Reinstalled executable check failed' }
-node tests/packaged-crash.ts (Join-Path $install 'abysSUS.exe')
-if ($LASTEXITCODE -ne 0) { throw 'Owned crash recovery check failed' }
-node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') verify
-if ($LASTEXITCODE -ne 0) { throw 'Actual restart after crash failed' }
+Install-Candidate 'reinstall'
+Invoke-FixturePhase -Phase 'reinstalled-preflight' -FilePath 'node' -Arguments @('tests/installed-package-preflight.cjs',(Join-Path $install 'abysSUS.exe'),$data)
+Invoke-FixturePhase -Phase 'reinstalled-smoke' -FilePath 'node' -Arguments @('tests/packaged-smoke.ts',(Join-Path $install 'abysSUS.exe'),'verify')
+Invoke-FixturePhase -Phase 'crash' -FilePath 'node' -Arguments @('tests/packaged-crash.ts',(Join-Path $install 'abysSUS.exe'))
+Invoke-FixturePhase -Phase 'restart-after-crash' -FilePath 'node' -Arguments @('tests/packaged-smoke.ts',(Join-Path $install 'abysSUS.exe'),'verify')
 Write-Output 'PASS actual NSIS install, repeat-install refusal, uninstall/reinstall and data-location preservation'

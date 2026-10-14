@@ -7,6 +7,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   linux:
+    if: ${{ !contains(github.event.head_commit.message, '[windows-diagnostic]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -99,7 +100,13 @@ jobs:
       - name: Actual packaged executable (no WSL provisioning)
         run: node tests/packaged-smoke.ts build/release/win-unpacked/abysSUS.exe
       - name: Actual disposable NSIS install and manual upgrade
+        timeout-minutes: 10
         run: ./tests/windows-installer.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-phase-diagnostics
+          path: test-results/m21-windows/
       - run: node scripts/package-manifest.mjs build/release
       - uses: actions/upload-artifact@v4
         with:
@@ -107,3 +114,28 @@ jobs:
           path: |
             build/release/*setup.exe
             build/release/SHA256SUMS
+  windows-diagnostic:
+    if: ${{ contains(github.event.head_commit.message, '[windows-diagnostic]') }}
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npm run package:prepare
+      - name: Build diagnostic executable only (no release candidate)
+        run: npx electron-builder --config packaging/electron-builder.cjs --win dir --x64 --publish never
+      - name: Focused owned-process crash observations
+        timeout-minutes: 4
+        run: ./tests/windows-crash-diagnostic.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-crash-diagnostics-only
+          path: test-results/m21-windows/
