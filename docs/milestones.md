@@ -53,7 +53,7 @@ Resume the existing 15-minute heartbeat for this redesign only. Check compact ch
 
 Each delivery reports SHA, changed interfaces, meaningful tests, exact CI/artifacts where applicable and explicit limits. The user authorizes commits/pushes and coordinator/child messages throughout this sequence. Do not commit private provider documentation, credentials, runtime databases, project contents or generated artifacts.
 
-## Planned M16–M21 desktop sequence (2026-10-13)
+## Historical M16–M21 desktop sequence (2026-10-13)
 
 User approved implementation of this plan with "boom get started!" on 2026-10-13: Electron packaging, Docker-free Linux process sandboxing, and a privileged system-install helper provisioned during setup. System-install policy is separate from workspace approvals: Ask every time (default), Auto-approve, or AI review. This authorization supersedes the older executable-packaging and discussion-only holds. Start M16 and resume the existing 15-minute heartbeat; current dispatch is recorded in STATUS. Detailed architecture, platform assumptions and boundaries are in root [EXE.md](../EXE.md).
 
