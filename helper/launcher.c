@@ -1,5 +1,6 @@
 /* Build with cc -static. This bootstrap must not load dynamic libraries before
  * validating the privileged Python/runtime/code hierarchy. Linux x86_64 only. */
+#define _DEFAULT_SOURCE
 #define _XOPEN_SOURCE 700
 #include <dirent.h>
 #include <errno.h>

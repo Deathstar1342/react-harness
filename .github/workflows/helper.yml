@@ -13,6 +13,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-apt acl build-essential
+          # First adapter supports fixed HTTP(S) repositories, not mirror-list indirection.
+          sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
           test "$(id -u)" != 0
       - run: npm ci
       - name: Portable helper state tests
@@ -26,6 +28,8 @@ jobs:
           sudo install -d -m 0755 /usr/lib/abyssus-helper
           sudo install -m 0755 build/helper/launcher /usr/lib/abyssus-helper/launcher
           sudo install -m 0644 helper/core.py helper/service.py helper/admin.py helper/apt_adapter.py helper/apt.conf helper/abyssus-helper.service /usr/lib/abyssus-helper/
+          sudo install -m 0600 tests/helper-root-fixture.py /root/abyssus-helper-ci.py
+          sudo touch /root/abyssus-ci-authorized
       - name: Required real helper service/install/repair/removal tests
         run: node --import tsx tests/helper-linux.ts
       - name: Safe service failure diagnostics
