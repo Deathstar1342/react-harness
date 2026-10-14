@@ -1,0 +1,32 @@
+# M24 independent coordinator review
+
+Checkpoint: 2026-10-14. Tested source `635c2337e9b23fd6e9844bc80b58782d1e7942e3`, isolated `1356` / `codex/milestone-24`, from kickoff `17e7143ca1404ad6e7fde65729ac9119cf042460`. Source acceptance is complete; report-only handoff, main integration and exact-main acceptance are pending. M21 remains paused.
+
+## Reviewed behavior and corrections
+
+Reviewed durable human objective/criteria provenance, explicit observational intent, goal/plan revisions, protected cumulative scope, native completion schema, serialized continuation, quotas, waits, steering, restart and close. Normal conversation remains distinct from explicit goals. Frame endings and critic PASS cannot complete a goal; original criteria, plan steps, current accepted reviews and recorded evidence bind completion. Freshness awaits and COMMIT recheck current generation/frame/call/mode/goal/plan identities. Planning and package/workspace authority remain separate application controls.
+
+Early review requested actual testcase/uncertainty obligations across popped frames and human revisions, bounded minimal acceptance records instead of full Frame duplication, private superseded histories/coverage hashes, explicit overflow, lifecycle-aware observation results and retained failed obligations when only part of an A+B criterion binding is superseded. The child implemented these with meaningful runtime regressions. Observation eligibility belongs to explicit human criteria; attempted mutation/testing/installation or failed/missing read evidence disqualifies it.
+
+The coordinator found the scope editor used a live SSE revision token with older draft fields. It now snapshots the edit-open revision; concurrent revision returns 409 and preserves the draft. Independent headless HTTP/runtime/UI validation exercised this exact collision.
+
+The initial goal uncertainty gate would permanently block an already supported explicit install recovery. Reviewed minimal `InstallService.recover` integration now atomically revalidates the actual request/target/preview/current record, then stores its outcome and private reconciliation receipt/event. Only exact succeeded/healthy/matching/no-recoveryRequired evidence may resolve the linked install references. Generic effects remain blocked. Goal controls do not invoke the helper or replay installation. Original events and bounded resolution provenance remain recorded. Receipt/goal write and COMMIT faults, stale bindings and one-total-execute recovery are covered by the meaningful tests.
+
+Child self-review found superseded `a91c977` could apply a new recovery receipt through an existing goal revision before Resume. Replacement `635c233` requires already-applied still-valid references for existing revisions; only explicit Resume applies newly available receipts, with new-goal recognition of historical recovery kept separate. Reviewed this diff and its end-to-end regression. No source correction remains outstanding.
+
+Shutdown preserves durable state in Fastify preClose before an embedding owner's onClose Store disposal; Runtime.close remains idempotent. Earlier true repeated-close and subsequent teardown-ownership failures remain separately documented. Durable errors are not hidden by treating a later successful build exit as a passing test result.
+
+## Independent validation
+
+- Frozen `635c233`: typecheck, production web/Electron build and **778 Windows tests / 0 failures / 33 platform skips** passed. The existing Vite chunk advisory remains.
+- Actual Windows Electron sandbox/render/IPC/navigation/window/network denial, window restart, renderer-crash recovery and application restart passed in disposable D: profiles. No installed preview or WSL distribution changed.
+- Actual headless Chrome with HTTP/runtime/SQLite/confined files passed `/goal`, compact status, planning authorization, two-phase completion, concurrent revision conflict with retained draft, panel collapse and reload. Screenshot inspected; model replies are synthetic.
+- Every applicable exact-source step independently verified green: [Validate 38648574900](https://github.com/Deathstar1342/react-harness/actions/runs/38648574900), job `116141449766`; [Desktop 38648574887](https://github.com/Deathstar1342/react-harness/actions/runs/38648574887), Windows job `116141450518` and Ubuntu job `116141450896`; [helper 38648574685](https://github.com/Deathstar1342/react-harness/actions/runs/38648574685), job `116141448624`. Required namespace fail-closed, real Linux dedicated backend/Electron and real disposable helper/install/repair/removal/OS-auth staging steps passed. Only expected platform and failure-diagnostic skips remain.
+
+Coordinator receipts are outside Git at physical `D:/CodexData/.codex/visualizations/2026/09/26/01a0dc0a-8866-7182-acd2-da997779962d/m24-coordinator`. Retain `tests-a91c977.json`: the earlier run began on superseded source and overlapped the newly added revision-before-Resume regression, returning 777 pass / 1 fail / 33 skips. That regression observed old loaded goal code allowing running instead of blocked. It is superseded/intermediate evidence, not a frozen replacement result. `tests-635c233.json`, `build-635c233.log` and goal browser screenshots establish the replacement evidence. Retain the child's separately documented failures too.
+
+## Limits and next gate
+
+Observed scope/review provenance is not semantic proof of arbitrary natural-language goals, outside-scope dependencies, filtered files, shell environment, report authenticity or filesystem race freedom. Explicit observation criteria mean historical read evidence. Final scoped freshness has a five-second aggregate bound. Long useful assignments can pause after 16 model turns without newly accepted required scope; explicit Resume renews quotas. Failed obligations after remapping can conservatively require original bindings. Overflow remains unverified rather than silently dropping evidence.
+
+Live STARK and installed-device/native-human acceptance remain deferred. Portable Windows, actual Chromium/Electron and disposable Linux/helper CI are distinct. No privileged workstation install, preview update or release publication occurred. The automatic installer workflow does not resume M21. M25 waits for report-only handoff review, integration publication and every required exact-main CI step; preserve all milestone worktrees/branches.
