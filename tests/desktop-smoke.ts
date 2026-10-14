@@ -35,6 +35,11 @@ try {
   // Window reload preserves the same trusted shell and does not launch a backend.
   await page.reload();await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible();
   console.log('PASS real window restart');
+  await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
+  const shellRecovery=app.waitForEvent('window');
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+  page=await shellRecovery;await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible();
+  console.log(`PASS real ${process.platform} renderer crash and fresh window recovery`);
   if(process.platform==='linux') {
     // Native confirmation/picker results are synthetic; Electron, backend, auth,
     // SQLite, actual PTY/runtime and sandbox below are real.
@@ -93,7 +98,9 @@ try {
         console.log('PASS blank-profile endpoint/key through real Settings and explicit synthetic HTTP connection test');
       }finally{provider.closeAllConnections();await new Promise<void>(resolve=>provider.close(()=>resolve()));}
       const beforeCrash=(await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId;
+      const recoveredWindow=app.waitForEvent('window');
       await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+      page=await recoveredWindow;
       await expect(page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:20000});
       assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,beforeCrash);
       console.log('PASS actual renderer crash/reopen retains exact backend session');

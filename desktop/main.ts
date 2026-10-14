@@ -48,7 +48,8 @@ else {
     window.webContents.on('will-prevent-unload',()=>{}); // dirty editor veto remains effective
     window.webContents.on('render-process-gone',()=>{
       dirty=true; // Cannot prove unsaved renderer buffers survived a crash.
-      void dialog.showMessageBox(window!,{type:'warning',title:'Window stopped',message:'The window stopped. Backend work remains tracked.',detail:'Unsaved editor text may have been lost. Reopen the window to inspect recorded state; actions are not replayed.',buttons:['Keep open','Reopen window'],defaultId:0,cancelId:0}).then(result=>{if(result.response===1){dirty=false;void window?.loadURL(desktopOrigin+'/');}});
+      const crashedWindow=window!;
+      void dialog.showMessageBox(crashedWindow,{type:'warning',title:'Window stopped',message:'The window stopped. Backend work remains tracked.',detail:'Unsaved editor text may have been lost. Reopen the window to inspect recorded state; actions are not replayed.',buttons:['Keep open','Reopen window'],defaultId:0,cancelId:0}).then(result=>{if(result.response===1&&window===crashedWindow&&!quitting){dirty=false;crashedWindow.destroy();createWindow();}});
     });
     window.on('close',event=>{if(!quitting){event.preventDefault();void closeApp();}});
     window.once('ready-to-show',()=>window?.show());
