@@ -1,6 +1,6 @@
 # Milestone 22 — Native transport and tool registry
 
-Candidate on `codex/milestone-22`, based on `7bee8bc66fb87a5e088ac9eda3bb565fa9c4d7b9`. Coordinator review and integration remain separate. This delivery does not start M23 or resume M21 packaging/publication preparation.
+Candidate on `codex/milestone-22`, based on `7bee8bc66fb87a5e088ac9eda3bb565fa9c4d7b9`. Tested implementation source: **`6ee864eb182ee44a1e4059aca99b978efa6f24bb`**. The handoff adds only this report update. Coordinator integration remains separate. This delivery does not start M23 or resume M21 packaging/publication preparation.
 
 ## Implementation
 
@@ -24,7 +24,7 @@ Profiles/databases require `native-tools-v1`. Existing incompatible state reject
 
 ## Validation and limits
 
-Final exact-source CI links will be recorded in the report-only handoff commit after the implementation commit is pushed. Portable Windows `npm run typecheck` and production `npm run build -- --outDir D:/CodexData/m22-validation/client-build` pass (the build retains its existing large-chunk advisory). `npm test -- --reporter=json --outputFile=D:/CodexData/m22-validation/delivery-tests.json` passes **664 tests, 0 failures, 33 platform skips**. The suite includes focused native transport, complete-group compaction, schema/role, approval/stale-write, cancellation/restart, atomicity and secret regressions. Build output and isolated test data stay outside Git under `D:/CodexData/m22-validation`.
+Initial candidate portable Windows `npm run typecheck` and production `npm run build -- --outDir D:/CodexData/m22-validation/client-build` passed (the build retains its existing large-chunk advisory). `npm test -- --reporter=json --outputFile=D:/CodexData/m22-validation/delivery-tests.json` passed **664 tests, 0 failures, 33 platform skips**. The suite includes focused native transport, complete-group compaction, schema/role, approval/stale-write, cancellation/restart, atomicity and secret regressions. Build output and isolated test data stay outside Git under `D:/CodexData/m22-validation`.
 
 Earlier local failures are retained there: initial conversion 572 passed / 46 failed / 33 skipped; second 606 / 12 / 33; later 649 / 0 / 33 and 658 / 0 / 33. The final boundary audit caught one planning-recovery-message regression (662 / 1 / 33), corrected without removing that safety assertion. These failures included both obsolete fixtures and actual implementation gaps; they are not represented as successful evidence.
 
@@ -35,5 +35,16 @@ Coordinator review refined the native contract to accept omitted/null/empty call
 Post-COMMIT event subscriber failures are isolated from execution transitions, so a disconnected observer cannot prevent cache publication after a durable commit or suppress other listeners; durable events remain replayable. A full native flow exercises this boundary. The first full review-correction run was 693 passed / 1 failed / 33 skipped: its sole failure was the old UI test banning the word "streaming". The replacement verifies no transport control and distinct observed/failed/skipped evidence lanes; the subsequent run passed 695 tests / 33 skips before the added subscriber regression.
 
 Final corrected local source passes typecheck, production client build and **696 tests / 0 failures / 33 platform skips** (`final-source-tests.json`). The 52 native runtime tests also pass with added assertions that ordinary event listeners keep receiving events and once listeners fire exactly once despite a failing peer. Exact-source CI below remains the Linux/Electron/helper acceptance record.
+
+All applicable steps below passed on exact source `6ee864e`; only expected OS-conditional and failure-diagnostic steps were skipped. Step metadata, including each job's source SHA, is retained in `D:/CodexData/m22-validation/6ee864e-ci-steps.json`. Job logs were inspected for actual test receipts.
+
+| Required lane | Exact-source run / job | Observed evidence |
+| --- | --- | --- |
+| Linux Validate | [38637910623](https://github.com/Deathstar1342/react-harness/actions/runs/38637910623), job `116105703997` | Typecheck, **722 passed / 7 skipped**, production build, actual sandbox/PTY tests and disabled-user-namespace fail-closed check. |
+| Windows Electron | [38637910708](https://github.com/Deathstar1342/react-harness/actions/runs/38637910708), job `116105705015` | Desktop build, real sandboxed Electron, navigation/network denial, window restart, renderer crash recovery and isolated application restart. No WSL distribution launch. |
+| Ubuntu 24.04 Electron | Same desktop run, job `116105705314` | Staged Node24/SQLite/PTY and sandbox bridge, authenticated actual backend, Monaco worker/versioned save, blank-profile provider settings plus all nine synthetic ordinary/native/streaming lane assertions, backend/renderer crash and profile/session recovery, shutdown and persistence. Native picker/confirmation responses remain synthetic adapters. The legacy-named relocation log exercises a newly created native-format database; it is not old-protocol migration. |
+| Privileged helper | [38637910652](https://github.com/Deathstar1342/react-harness/actions/runs/38637910652), job `116105704242` | 20 portable Python tests; disposable real helper setup, authenticated previews and actual Ask/Auto/AI installs with synthetic native reviewer; freshness/auth/nonce denial; actual dpkg interruption/restart with no replay; repair/removal; OS-policy denial and fixed pkexec adapter. No workstation provisioning. |
+
+Coordinator independently reported source/delta review, typecheck, desktop build and **696/0/33** portable tests passing on `6ee864e`; integration and milestone acceptance remain coordinator-owned. The unchanged automatic installer workflow `38637910688` was still running when this report was finalized and was not used as an M22 acceptance gate or M21 release claim. Preserve M21's paused worktree and unfinished source/notices preparation. No user-assistance blocker remains; child idles after the report-only handoff push.
 
 No live STARK credentials or work-network access were used. Synthetic provider and disposable CI evidence cannot establish live model support, task quality, installed-device acceptance, native human dialog acceptance or untouched WSL support. No local privileged helper/WSL provisioning, installed-preview change, dependency version change, generated build artifact, M21/workflow/package-source edit, main merge or release publication is part of this candidate.
