@@ -58,8 +58,8 @@ try {
       assert(streamed.includes(': connected'));
       console.log('CHECK SSE first chunk and cancellation completed');
       await page.reload();
-      await expect(page.getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:15000});
-      await page.getByRole('button',{name:'Preserve desktop state',exact:true}).click();
+      await expect(page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:15000});
+      await page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:'Preserve desktop state',exact:true}).click();
       await page.getByRole('button',{name:'Toggle files',exact:true}).click();
       const worker=page.waitForEvent('worker',{timeout:15000});
       await page.getByRole('button',{name:'sample.txt',exact:true}).click();
@@ -88,7 +88,7 @@ try {
       }finally{provider.closeAllConnections();await new Promise<void>(resolve=>provider.close(()=>resolve()));}
       const beforeCrash=(await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId;
       await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
-      await expect(page.getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:20000});
+      await expect(page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:20000});
       assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,beforeCrash);
       console.log('PASS actual renderer crash/reopen retains exact backend session');
       await app.evaluate(({dialog})=>{dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});});
