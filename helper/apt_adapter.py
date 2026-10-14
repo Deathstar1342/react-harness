@@ -12,7 +12,7 @@ import re
 import sys
 from urllib.parse import urlsplit
 
-sys.path.append("/usr/lib/python3/dist-packages")
+sys.path.append("/usr/lib/abyssus-helper/python")
 import apt
 import apt_pkg
 import apt.progress.base

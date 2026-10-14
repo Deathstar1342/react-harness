@@ -1,5 +1,15 @@
 # Integration contract
 
+## M18 trusted package helper
+
+Additive `PackageHelperTarget/Request/Preview/Decision/Record` DTOs in shared/types.ts and backend-only `PackageHelperClient` in server/package-helper.ts. No HTTP route, model action or UI authority is added. `connect()` reads only the root-owned fixed descriptor for the current non-root Linux UID. `hello()` authenticates the target and installed helper identity. `prepare(request)`, `authorize(decision)`, `execute(decision)`, `status(requestId)` and `reconcile(requestId)` are explicit trusted calls with no automatic retry or elevation. See [helper setup/security/recovery](helper.md).
+
+Wire v1 is one bounded UTF-8 JSON line on `/run/abyssus-helper/control.sock`. Request object is strictly `{protocol:'abyssus-helper-v1',nonce,expiresAt,action,body,mac}`. Nonce is 32 random bytes in lowercase hex; expiry is integer epoch milliseconds within 30 seconds. MAC is HMAC-SHA256 using the descriptor key as UTF-8 over recursively key-sorted compact ASCII-escaped JSON of the object excluding `mac`. Duplicate keys, extra fields, oversized/multiple lines, wrong peer UID, bad version/MAC, expired envelope and reused nonce reject. Helper persists authenticated envelope nonces across restart until expiry. Responses use the same canonical MAC over `{protocol,nonce,ok,result}` or `{protocol,nonce,ok,error}`; errors are fixed codes. Client reply limit is 256 KiB and timeout five minutes; timeout/disconnect has no cancellation or retry semantics.
+
+`prepare` body: `{requestId:UUID,targetId:hex64,manager:'apt',packages:[{name,version?}]}`. `authorize` and `execute`: `{requestId,previewDigest:hex64,decisionNonce:hex64,expiresAt}`. Hello uses `{}`; status/reconcile use `{requestId}`. Decision expiry cannot exceed the prepared record's two-minute lifetime. Names/versions are restricted identities, never options, paths or shell. Omitted version resolves then pins the candidate. DTO states are prepared/noop/authorized/running/succeeded/failed/uncertain. Audit timestamps use epoch milliseconds, distinct from existing HTTP ISO timestamps. Reconciliation remains separate from original outcome. No credential field belongs to any shared DTO.
+
+M19 must persist the exact request/digest/target and its policy/approval snapshot, fail closed on invalid or stale decisions, and present unknown replies/uncertainty honestly. M20 must arrange OS-authenticated trusted-artifact setup and await signed hello; launching the backend alone does neither. No change to M16 lifecycle or existing workspace approval semantics.
+
 ## M17 sandbox contracts
 
 - ToolService remains compatible through optional trusted `configureSandbox({home,protectedPaths,projects})` and `resetSandbox(root):Promise<void>`. These are backend lifecycle interfaces, never model actions or browser-supplied policy. `createApp` supplies effective M16 configuration and live registered-project paths.

@@ -44,6 +44,11 @@ const hello=await client.hello();
 assert.equal(hello.target.distribution,'ubuntu');
 const prepare=()=>client.prepare({requestId:randomUUID(),targetId:hello.target.id,manager:'apt',packages:[{name:'hello'}]});
 console.log('PASS real setup, static launcher, non-root authenticated socket/hello');
+sudo('/usr/bin/touch','/usr/lib/python3/dist-packages/abyssus_unvalidated_sentinel.py');
+sudo('/usr/bin/chmod','0666','/usr/lib/python3/dist-packages/abyssus_unvalidated_sentinel.py');
+execFileSync('/usr/bin/python3',['-I','-S','-c',"import sys,importlib.util;sys.path.insert(0,'/usr/lib/abyssus-helper');import apt_adapter;assert importlib.util.find_spec('abyssus_unvalidated_sentinel') is None;assert '/usr/lib/python3/dist-packages' not in sys.path"]);
+sudo('/usr/bin/rm','/usr/lib/python3/dist-packages/abyssus_unvalidated_sentinel.py');
+console.log('PASS private apt import directory excludes unrelated writable distro module');
 // Credential read and socket connection both fail for a different local UID.
 assert.throws(()=>sudo('-u','nobody','/usr/bin/cat','/etc/abyssus-helper/client.json'));
 assert.throws(()=>sudo('-u','nobody','/usr/bin/python3','-I','-S','-c',"import socket;s=socket.socket(socket.AF_UNIX);s.connect('/run/abyssus-helper/control.sock')"));

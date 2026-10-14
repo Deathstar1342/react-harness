@@ -35,6 +35,11 @@ jobs:
           sudo install -d -m 0755 /usr/lib/abyssus-helper
           sudo install -m 0755 build/helper/launcher /usr/lib/abyssus-helper/launcher
           sudo install -m 0644 helper/core.py helper/service.py helper/admin.py helper/apt_adapter.py helper/apt.conf helper/abyssus-helper.service /usr/lib/abyssus-helper/
+          sudo install -d -m 0755 /usr/lib/abyssus-helper/python
+          sudo ln -s /usr/lib/python3/dist-packages/apt /usr/lib/abyssus-helper/python/apt
+          for module in /usr/lib/python3/dist-packages/apt_pkg.*.so /usr/lib/python3/dist-packages/apt_inst.*.so; do
+            sudo ln -s "$module" /usr/lib/abyssus-helper/python/
+          done
           sudo install -m 0600 tests/helper-root-fixture.py /root/abyssus-helper-ci.py
           sudo touch /root/abyssus-ci-authorized
       - name: Required real helper service/install/repair/removal tests

@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -72,12 +73,19 @@ static void loader_cache(void) {
     size_t size=fread(data,1,4*1024*1024+1,f);
     if(size>4*1024*1024 || ferror(f)) fail("loader cache bound");
     fclose(f);
-    /* Every cached absolute library pathname is checked, including targets
-       outside the ordinary /usr/lib tree used by descendant dynamic loaders. */
-    for(size_t i=0;i<size;i++) if(data[i]=='/' && (i==0 || data[i-1]==0)) {
-        size_t end=i; while(end<size && data[end]) end++;
-        if(end==size || end-i>=PATH_MAX) fail("loader cache path");
-        hierarchy(data+i); i=end;
+    /* glibc's modern little-endian x86_64 cache format. Parse indexed values,
+       never mistake binary header bytes for pathname strings. */
+    if(size<48 || memcmp(data,"glibc-ld.so.cache1.1",20)) fail("unsupported loader cache format");
+    uint32_t count,strings; memcpy(&count,data+20,4); memcpy(&strings,data+24,4);
+    size_t start=48+(size_t)count*24;
+    if(count>65536 || start>size || strings>size-start) fail("loader cache bounds");
+    for(uint32_t i=0;i<count;i++) {
+        uint32_t offset; memcpy(&offset,data+48+(size_t)i*24+8,4);
+        if(offset<start || offset>=start+strings || data[offset]!='/') fail("loader cache path offset");
+        size_t end=offset;
+        while(end<start+strings && data[end]) { if((unsigned char)data[end]<32 || (unsigned char)data[end]>126) fail("loader cache path encoding"); end++; }
+        if(end==start+strings || end-offset>=PATH_MAX) fail("loader cache path");
+        hierarchy(data+offset);
     }
     free(data);
 }
