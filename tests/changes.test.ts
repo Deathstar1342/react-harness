@@ -171,7 +171,7 @@ it('guards real active promises even after status says paused, and rejects launc
   await t.undo(c);
 });
 
-it('reviews literal renamed, deleted and nested untracked paths without attributing them to agents',async()=>{
+it.skipIf(process.platform !== 'linux')('reviews literal renamed, deleted and nested untracked paths without attributing them to agents',async()=>{
   const t=await setup();t.git('init');
   await writeFile(path.join(t.projectRoot,'delete.txt'),'delete');await writeFile(path.join(t.projectRoot,'rename.txt'),'rename');
   t.git('add','.');t.git('-c','user.name=Test','-c','user.email=test@example.com','commit','-m','base');

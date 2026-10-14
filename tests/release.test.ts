@@ -53,7 +53,7 @@ async function fixture(responses: Array<AgentResponse | (() => Promise<AgentResp
 }
 
 describe('M6 independent release integration', () => {
-  it('keeps literal Git filenames from expanding into protected credential diffs', async () => {
+  it.skipIf(process.platform !== 'linux')('keeps literal Git filenames from expanding into protected credential diffs', async () => {
     const root = await directory();
     const git = (...args: string[]) => execFileSync('git', args, { cwd: root, windowsHide: true, stdio: 'pipe' });
     git('init', '--initial-branch=main');

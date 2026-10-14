@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { z } from 'zod';
@@ -7,6 +8,7 @@ import { WorkspaceFiles, type FileOptions } from './files.js';
 import { allowed, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
 import { ShellPool, gitCommand, type ShellOptions, type CommandResult } from './shell.js';
 import { parseJUnit, unavailableReport } from './junit.js';
+import { LinuxSandbox, type SandboxPolicy } from './sandbox.js';
 export { ToolError } from './paths.js';
 
 const busyReports = new Set<string>();
@@ -30,24 +32,31 @@ function validate(action: Action): Record<string, any> {
   if (!parsed.success) throw new ToolError(`Invalid ${action.name} arguments: ${parsed.error.issues.map(i => i.path.join('.') + ' ' + i.message).join('; ')}`);
   return parsed.data as Record<string, any>;
 }
-export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<ShellOptions> { maxReportBytes?: number }
+export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<Omit<ShellOptions, 'sandbox'>> { maxReportBytes?: number }
 export class WorkspaceTools implements ToolService {
   private files: WorkspaceFiles;
   private shells: ShellPool;
+  readonly sandbox = new LinuxSandbox();
   private disposed = false;
+  private removing=new Set<string>();
+  private quarantined=new Set<string>();
   private operations = new Map<string,number>();
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
+    this.sandbox.validateRoot(root);
     const id = key(path.resolve(root));
+    if(this.removing.has(id) || this.quarantined.has(id))throw new ToolError('Workspace cleanup is pending or uncertain.','CONFLICT');
     this.operations.set(id,(this.operations.get(id) ?? 0)+1);
     try { return await operation(); }
     finally { const count = this.operations.get(id)!-1; if (count) this.operations.set(id,count); else this.operations.delete(id); }
   }
-  removeScope<T>(root: string, chatId: string | undefined, mutation: () => T): T {
+  removeScope<T>(root: string, chatId: string | undefined, mutation: () => T): Promise<T> {
     this.check();
-    if (this.operations.has(key(path.resolve(root)))) throw new ToolError('A workspace operation is still pending.','CONFLICT');
+    const id=key(path.resolve(root));
+    if (this.operations.has(id) || this.removing.has(id) || this.quarantined.has(id)) throw new ToolError('A workspace operation is still pending or cleanup is uncertain.','CONFLICT');
     this.files.assertRemovable(root);
-    this.shells.removeScope(root,chatId);
-    return mutation();
+    const cleanup=this.shells.removeScope(root,chatId);
+    this.removing.add(id);
+    return cleanup.catch(error=>{this.quarantined.add(id);throw error;}).then(()=>{this.files.assertRemovable(root);return mutation();}).finally(()=>this.removing.delete(id));
   }
   private maxOutputBytes: number;
   private maxReportBytes: number;
@@ -56,13 +65,15 @@ export class WorkspaceTools implements ToolService {
     this.maxOutputBytes = options.maxOutputBytes ?? 1_000_000;
     this.maxReportBytes = options.maxReportBytes ?? 2_000_000;
     this.files = new WorkspaceFiles({ maxFileBytes: options.maxFileBytes ?? 2_000_000, maxEntries: options.maxEntries ?? 10_000, maxSearchFiles: options.maxSearchFiles ?? 20_000, leaseMs: options.leaseMs ?? 45_000 });
-    this.shells = new ShellPool({ maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash' });
+    this.shells = new ShellPool({ maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash', sandbox:this.sandbox });
   }
+  configureSandbox(policy:SandboxPolicy){this.sandbox.configure(policy);}
+  resetSandbox(root:string){return this.removeScope(root,undefined,()=>this.sandbox.reset(root));}
   private check(): void { if (this.disposed) throw new ToolError('Tool service has been disposed.'); }
   read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.tracked(root,()=>this.files.read(root, path)); }
   list(root: string, path = '') { this.check(); return this.tracked(root,()=>this.files.list(root, path)); }
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.tracked(root,()=>this.files.save(root, path, content, baseHash, owner)); }
-  setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); this.files.setDirty(root, path, owner, dirty); }
+  setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); if(this.removing.has(key(rootPathSync(root))))throw new ToolError('Workspace cleanup is pending.','CONFLICT');this.sandbox.validateRoot(root);this.files.setDirty(root, path, owner, dirty); }
   restore(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void) {
     this.check();
     return this.tracked(root,()=>this.files.save(root, path, before.content, expectedHash, undefined, beforeMutation, before.hash === null));
@@ -83,7 +94,7 @@ export class WorkspaceTools implements ToolService {
     }
     if (['run_shell', 'execute_python', 'run_tests'].includes(action.name)) {
       if (args.reportPath) await scoped(context.projectRoot, args.reportPath);
-      return { effect: 'execute', risk: 'elevated', description: `${action.name}: arbitrary execution can modify files and access resources outside the working directory. Requires runtime authorization; cwd is not a sandbox.` };
+      return { effect: 'execute', risk: 'elevated', description: `${action.name}: sandboxed execution can modify the selected project and private dependencies. Registry-only network capability. Requires runtime authorization.` };
     }
     return { effect: 'read', risk: 'routine', description: action.name, ...(args.path !== undefined ? { path: args.path } : {}) };
   }
@@ -119,13 +130,14 @@ export class WorkspaceTools implements ToolService {
     return { ok: result.exitCode === 0 && !result.error && !result.cancelled && !result.timedOut, output: [result.output, result.error, result.truncated ? '[Output truncated]' : ''].filter(Boolean).join('\n'), data: result };
   }
   private async assertGitRoot(root: string, signal?: AbortSignal): Promise<void> {
-    const result = await gitCommand(root, ['rev-parse', '--show-toplevel'], this.maxOutputBytes, signal);
+    if(!existsSync(path.join(root,'.git')))throw new ToolError('Git working tree must match the workspace root.');
+    const result = await gitCommand(root, ['rev-parse', '--show-toplevel'], this.maxOutputBytes, signal, this.sandbox);
     if (result.exitCode !== 0 || result.error) throw new ToolError('Workspace root is not an available Git working tree.');
     if (key(await rootPath(result.output.trim())) !== key(root)) throw new ToolError('Git working tree must match the workspace root.');
   }
   private async gitStatus(root: string, signal?: AbortSignal): Promise<ToolResult> {
     await this.assertGitRoot(root, signal);
-    const result = await gitCommand(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all'], this.maxOutputBytes, signal);
+    const result = await gitCommand(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all'], this.maxOutputBytes, signal, this.sandbox);
     if (result.exitCode !== 0 || result.error) return this.commandResult(result);
     if (result.truncated) throw new ToolError('Git status exceeds output limit.');
     const raw = result.output.split('\0'), entries: { status: string; path: string; originalPath?: string }[] = [];
@@ -145,7 +157,7 @@ export class WorkspaceTools implements ToolService {
     const sections: string[] = [];
     for (const cached of [false, true]) {
       const flags = cached ? ['--cached'] : [];
-      const names = await gitCommand(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', '--', ...(requested ? [requested] : [])], this.maxOutputBytes, signal);
+      const names = await gitCommand(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', '--', ...(requested ? [requested] : [])], this.maxOutputBytes, signal, this.sandbox);
       if (names.exitCode !== 0 || names.error) return this.commandResult(names);
       if (names.truncated) throw new ToolError('Git paths exceed output limit. Select a narrower path.');
       const paths: string[] = [];
@@ -153,7 +165,7 @@ export class WorkspaceTools implements ToolService {
       if (!paths.length) continue;
       // Disabling rename detection avoids showing the old contents of a protected file.
       for (let index = 0; index < paths.length; index += 100) {
-        const result = await gitCommand(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-submodules=all', '--', ...paths.slice(index, index + 100)], this.maxOutputBytes, signal);
+        const result = await gitCommand(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-submodules=all', '--', ...paths.slice(index, index + 100)], this.maxOutputBytes, signal, this.sandbox);
         if (result.exitCode !== 0 || result.error) return this.commandResult(result);
         if (result.truncated) throw new ToolError('Git diff exceeds output limit. Select a narrower path.');
         sections.push(`${cached ? 'Staged' : 'Unstaged'} changes:\n${result.output}`);
@@ -195,5 +207,5 @@ export class WorkspaceTools implements ToolService {
     report ??= unavailableReport(args.command, result, result.error ?? 'Test command was not executed.');
     return { ok: report.status === 'passed', output: report.output, data: { ...result, reportPath, testReport: report } };
   }
-  async dispose(): Promise<void> { this.disposed = true; await this.shells.dispose(); }
+  async dispose(): Promise<void> { this.disposed = true; await this.shells.dispose();if(this.quarantined.size)throw new ToolError('Sandbox cleanup is uncertain; retain backend ownership.','SANDBOX_CLEANUP_FAILED'); }
 }

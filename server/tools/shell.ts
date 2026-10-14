@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import type { IPty } from 'node-pty';
 import type { ToolContext } from '../../shared/types.js';
 import { rootPathSync, key, ToolError } from './paths.js';
+import { LinuxSandbox, type SandboxLaunch } from './sandbox.js';
 
 export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const result: Record<string, string> = {};
@@ -12,7 +13,7 @@ export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Recor
   return { ...result, TERM: 'dumb', PS1: '', PS2: '', PROMPT_COMMAND: '', NO_COLOR: '1' };
 }
 export interface CommandResult { output: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean; truncated?: boolean; error?: string; backgroundPids?: number[]; shellReset?: boolean }
-export interface ShellOptions { maxOutputBytes: number; maxQueue: number; maxSessions: number; defaultTimeoutMs: number; maxTimeoutMs: number; shell: string }
+export interface ShellOptions { maxOutputBytes: number; maxQueue: number; maxSessions: number; defaultTimeoutMs: number; maxTimeoutMs: number; shell: string; sandbox?: LinuxSandbox }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 class PersistentShell {
   private active?: { nonce: string; output: string; buffer: string; bytes: number; truncated: boolean; finish: (result: CommandResult) => void; onOutput?: (output: string) => void };
@@ -20,33 +21,42 @@ class PersistentShell {
   private terminated = false;
   private backgroundPids: number[] = [];
   get hasBackgroundWork(): boolean {
-    return this.backgroundPids.some(pid=>{try {process.kill(pid,0);return true;} catch(error) {return (error as NodeJS.ErrnoException).code!=='ESRCH';}});
+    // These are namespace PIDs, never signal/probe them as host PIDs.
+    return this.backgroundPids.length>0;
   }
   private readyResolve?: () => void;
   private readyReject?: (error: Error) => void;
   private startup = '';
   private readyNonce = randomBytes(24).toString('hex');
   private disposables: { dispose(): void }[] = [];
-  private constructor(readonly pty: IPty, private limit: number) {}
+  private exitedResolve!:()=>void;
+  private exited=new Promise<void>(resolve=>{this.exitedResolve=resolve;});
+  private cleanup?:Promise<void>;
+  private revoke?:Promise<void>;
+  private revokeProxy(){this.revoke ??= this.launch.close();void this.revoke.catch(()=>{});}
+  private constructor(readonly pty: IPty, private limit: number, private launch:SandboxLaunch) {}
   static async create(root: string, options: ShellOptions): Promise<PersistentShell> {
     if (process.platform !== 'linux') throw new ToolError('Persistent shells require Linux/WSL and optional node-pty. Start this backend inside a Linux/WSL environment.', 'PTY_UNAVAILABLE');
     let native;
     try { native = await import('node-pty'); } catch { throw new ToolError('node-pty is unavailable. Install optional dependencies and build prerequisites in Linux/WSL, then restart the backend.', 'PTY_UNAVAILABLE'); }
+    if(options.shell!=='/bin/bash' && options.shell!=='/usr/bin/bash')throw new ToolError('Only the trusted distro bash is supported.','SANDBOX_UNAVAILABLE');
+    const launch=await (options.sandbox ?? new LinuxSandbox()).launch(root,['/usr/bin/bash','--noprofile','--norc','--noediting','-i'],true);
     let terminal: IPty;
-    try { terminal = native.spawn(options.shell, ['--noprofile', '--norc', '--noediting', '-i'], { cwd: root, env: childEnvironment(), name: 'dumb', cols: 120, rows: 30 }); }
-    catch { throw new ToolError('Cannot start bash PTY. Verify bash, node-pty, and Linux build prerequisites.', 'PTY_UNAVAILABLE'); }
-    const session = new PersistentShell(terminal, options.maxOutputBytes);
+    try { terminal = native.spawn(launch.file, launch.args, { cwd: '/', env: launch.env, name: 'dumb', cols: 120, rows: 30 }); }
+    catch { await launch.close();throw new ToolError('Cannot start sandbox PTY. Verify Bubblewrap, user namespaces, socat and node-pty. Host execution is disabled.', 'SANDBOX_UNAVAILABLE'); }
+    const session = new PersistentShell(terminal, options.maxOutputBytes,launch);
     session.disposables.push(terminal.onData(data => session.receive(data)), terminal.onExit(({ exitCode }) => {
       session.dead = true;
-      session.readyReject?.(new ToolError('Shell exited during startup.', 'PTY_UNAVAILABLE'));
+      session.exitedResolve();session.revokeProxy();
+      session.readyReject?.(new ToolError('Sandbox startup failed. Verify unprivileged user namespaces, Bubblewrap and socat; host execution is disabled.', 'SANDBOX_UNAVAILABLE'));
       session.active?.finish({ output: session.active.output, truncated:session.active.truncated, exitCode, error: 'Persistent shell exited before a command boundary; outcome may be uncertain. Shell state was lost.', shellReset: true });
     }));
-    await new Promise<void>((resolve, reject) => {
+    try { await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => { session.kill(); reject(new ToolError('PTY startup timed out.', 'PTY_UNAVAILABLE')); }, 5000);
       session.readyResolve = () => { clearTimeout(timer); resolve(); };
       session.readyReject = error => { clearTimeout(timer); reject(error); };
       terminal.write(`stty -echo -icanon; set +m; unset PROMPT_COMMAND; PS1=; PS2=; printf '\\036RH_READY_${session.readyNonce}\\037'\n`);
-    });
+    }); } catch(error){await session.dispose();throw error;}
     return session;
   }
   get alive(): boolean { return !this.dead; }
@@ -123,22 +133,33 @@ class PersistentShell {
       this.dead = true;
       try { process.kill(-this.pty.pid, 'SIGKILL'); } catch { /* May already have exited. */ }
       try { this.pty.kill('SIGKILL'); } catch { /* May already have exited. */ }
+      this.revokeProxy();
     }
   }
-  dispose(): void {
+  dispose(): Promise<void> {
     this.kill();
     this.active?.finish({ output: this.active.output, truncated:this.active.truncated, cancelled: true, error: 'Tool service disposed; shell state was lost.', shellReset: true });
-    for (const listener of this.disposables) listener.dispose();
+    return this.cleanup ??= (async()=>{
+      let timer:ReturnType<typeof setTimeout>|undefined;
+      try{await Promise.race([this.exited,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new ToolError('Sandbox termination was not confirmed; retain backend ownership.','SANDBOX_CLEANUP_FAILED')),5000);timer.unref();})]);}
+      finally{clearTimeout(timer);}
+      // Broker completion is part of backend/profile ownership release.
+      await this.revoke;
+      for (const listener of this.disposables) listener.dispose();
+    })().catch(()=>{throw new ToolError('Sandbox resource cleanup failed or termination was not confirmed; retain backend ownership.','SANDBOX_CLEANUP_FAILED');});
   }
 }
 export class ShellPool {
   private sessions = new Map<string, PersistentShell>();
+  private layouts = new Map<string,string>();
   private queues = new Map<string, { tail: Promise<void>; count: number; generation: number }>();
   private disposed = false;
+  private quarantined=new Set<string>();
   constructor(readonly options: ShellOptions) {}
   async run(context: ToolContext, command: string, timeoutMs = this.options.defaultTimeoutMs, beforeRun?: () => Promise<void>, afterRun?: (result: CommandResult) => Promise<void>): Promise<CommandResult> {
     if (this.disposed) throw new ToolError('Tool service has been disposed.');
     const root = rootPathSync(context.projectRoot), id = JSON.stringify([root, context.chatId, context.agentId]);
+    if(this.quarantined.has(key(root)))throw new ToolError('Sandbox cleanup is uncertain; scope is quarantined until backend recovery.','SANDBOX_CLEANUP_FAILED');
     if (!this.queues.has(id) && this.queues.size >= this.options.maxSessions) throw new ToolError('Persistent shell session limit reached.');
     const queue = this.queues.get(id) ?? { tail: Promise.resolve(), count: 0, generation: 0 };
     this.queues.set(id, queue);
@@ -146,48 +167,58 @@ export class ShellPool {
     queue.count++;
     const generation = queue.generation;
     const result = queue.tail.then(async () => {
+      if(this.quarantined.has(key(root)))throw new ToolError('Sandbox cleanup is uncertain; queued work is prohibited.','SANDBOX_CLEANUP_FAILED');
       if (this.disposed || context.signal?.aborted) return { output: '', cancelled: true, error: 'Cancelled before execution.' };
       if (generation !== queue.generation) return { output: '', error: 'A prior command lost shell state; queued command was not executed. Submit again explicitly.', shellReset: true };
       let session = this.sessions.get(id);
-      if (session && !session.alive) { session.dispose(); this.sessions.delete(id); queue.generation++; return { output: '', error: 'Shell exited between commands. Submit again explicitly to start a fresh shell.', shellReset: true }; }
-      if (!session) { session = await PersistentShell.create(root, this.options); this.sessions.set(id, session); }
-      if (this.disposed) { session.dispose(); this.sessions.delete(id); return { output: '', cancelled: true, error: 'Tool service disposed before execution.' }; }
+      let layout:string;
+      try{layout=(this.options.sandbox ?? new LinuxSandbox()).layout(root).stamp;}
+      catch(error){if(session){await session.dispose();this.sessions.delete(id);queue.generation++;}throw error;}
+      if(session && this.layouts.get(id)!==layout){await session.dispose();this.sessions.delete(id);queue.generation++;return {output:'',error:'Protected project layout changed; shell discarded. Submit explicitly to start a fresh sandbox.',shellReset:true};}
+      if (session && !session.alive) { await session.dispose(); this.sessions.delete(id); queue.generation++; return { output: '', error: 'Shell exited between commands. Submit again explicitly to start a fresh shell.', shellReset: true }; }
+      if (!session) { session = await PersistentShell.create(root, this.options); this.sessions.set(id, session);this.layouts.set(id,layout); }
+      if (this.disposed) { await session.dispose(); this.sessions.delete(id); return { output: '', cancelled: true, error: 'Tool service disposed before execution.' }; }
       await beforeRun?.();
       const outcome = await session.run(command, Math.min(timeoutMs, this.options.maxTimeoutMs), context.signal, context.onOutput);
-      if (outcome.shellReset) { session.dispose(); this.sessions.delete(id); queue.generation++; }
+      if (outcome.shellReset) { await session.dispose(); this.sessions.delete(id); queue.generation++; }
       await afterRun?.(outcome);
       return { ...outcome, shellReset: outcome.shellReset || generation > 0 };
-    }).finally(() => { queue.count--; });
+    }).catch(error=>{if(error instanceof ToolError && error.code==='SANDBOX_CLEANUP_FAILED')this.quarantined.add(key(root));throw error;}).finally(() => { queue.count--; });
     queue.tail = result.then(() => {}, () => {});
     return result;
   }
   removeScope(root: string, chatId?: string) {
+    if(this.quarantined.has(key(root)))throw new ToolError('Sandbox cleanup is uncertain; scope is quarantined until backend recovery.','SANDBOX_CLEANUP_FAILED');
     const matches = (id: string) => { const [storedRoot,storedChat] = JSON.parse(id); return key(storedRoot)===key(root) && (!chatId || storedChat===chatId); };
     for (const [id,queue] of this.queues) if (matches(id) && queue.count) throw new ToolError('A shell command is still pending.','CONFLICT');
     for (const [id,session] of this.sessions) if (matches(id) && session.hasBackgroundWork) throw new ToolError('A shell still has background work; finish it before removal.','CONFLICT');
-    for (const [id,session] of this.sessions) if (matches(id)) { session.dispose(); this.sessions.delete(id); }
-    for (const id of this.queues.keys()) if (matches(id)) this.queues.delete(id);
+    const closing:Promise<void>[]=[];
+    for (const [id,session] of this.sessions) if (matches(id)) closing.push(session.dispose());
+    return Promise.all(closing).then(()=>{
+      for(const id of this.sessions.keys())if(matches(id))this.sessions.delete(id);
+      for(const id of this.queues.keys())if(matches(id))this.queues.delete(id);
+    },error=>{this.quarantined.add(key(root));throw error;});
   }
-  async dispose(): Promise<void> { this.disposed = true; for (const session of this.sessions.values()) session.dispose(); await Promise.all([...this.queues.values()].map(q => q.tail)); this.sessions.clear(); this.queues.clear(); }
+  async dispose(): Promise<void> { this.disposed = true; await Promise.all([...this.sessions.values()].map(session=>session.dispose())); await Promise.all([...this.queues.values()].map(q => q.tail)); if(this.quarantined.size)throw new ToolError('Sandbox cleanup is uncertain; retain backend ownership.','SANDBOX_CLEANUP_FAILED');this.sessions.clear(); this.queues.clear(); }
 }
 // Direct execution is reserved for fixed, read-only Git argv; model commands use the PTY.
-export async function gitCommand(root: string, args: string[], maxBytes: number, signal?: AbortSignal): Promise<CommandResult> {
+export async function gitCommand(root: string, args: string[], maxBytes: number, signal?: AbortSignal, sandbox=new LinuxSandbox()): Promise<CommandResult> {
   if (signal?.aborted) return { output: '', cancelled: true };
   // Git diff/status may execute configured clean filters even with --no-textconv.
   // Discover only config key names, never values (which may contain credentials).
   const overrides: string[] = [];
   if (args[0] !== 'config') {
-    const config = await gitCommand(root, ['config', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(clean|smudge|process|required)$'], maxBytes, signal);
+    const config = await gitCommand(root, ['config', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(clean|smudge|process|required)$'], maxBytes, signal,sandbox);
     if (config.error || config.cancelled || config.timedOut || (config.exitCode !== 0 && config.exitCode !== 1)) return { output: '', error: 'Cannot safely inspect Git filter configuration.' };
     for (const name of new Set(config.output.split('\0').filter(Boolean).map(key => key.replace(/\.(clean|smudge|process|required)$/, '')))) {
       for (const operation of ['clean', 'smudge', 'process']) overrides.push('-c', `${name}.${operation}=`);
       overrides.push('-c', `${name}.required=false`);
     }
   }
+  const launch=await sandbox.launch(root,['/usr/bin/git','--no-optional-locks','--literal-pathspecs','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.hooksPath=/dev/null',...overrides,...args],false,true);
   return new Promise(resolve => {
     let output = '', bytes = 0, truncated = false, done = false;
-    const env = { ...childEnvironment(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0' };
-    const child = spawn('git', ['--no-optional-locks', '--literal-pathspecs', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...overrides, ...args], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(launch.file,launch.args,{cwd:'/',env:launch.env,stdio:['ignore','pipe','pipe']});
     const finish = (result: CommandResult) => { if (done) return; done = true; clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(result); };
     const abort = () => { child.kill(); finish({ output, cancelled: true, error: 'Git command cancelled.' }); };
     const timer = setTimeout(() => { child.kill(); finish({ output, timedOut: true, error: 'Git command timed out.' }); }, 15000);

@@ -12,7 +12,7 @@ const validPath = (value: string) => {
 
 /** Human-facing directory selection. Model file tools remain project-confined. */
 export class WorkspaceLocations {
-  constructor(private store: Store, private defaultRoot: string) {}
+  constructor(private store: Store, private defaultRoot: string, private validateProject?:(root:string)=>unknown) {}
   settings(): WorkspaceSettings {
     return {workspaceRoot:this.store.getState<string>(stateKey,this.defaultRoot),defaultWorkspaceRoot:this.defaultRoot};
   }
@@ -29,12 +29,14 @@ export class WorkspaceLocations {
   }
   async allocate(name: string): Promise<string> {
     const root = this.settings().workspaceRoot;
-    await mkdir(root,{recursive:true});
-    const canonicalRoot = await realpath(root);
     let slug = name.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80) || 'project';
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug)) slug += '-project';
+    this.validateProject?.(path.join(root,slug));
+    await mkdir(root,{recursive:true});
+    const canonicalRoot = await realpath(root);
     for (let suffix=1;suffix<=10000;suffix++) {
       const candidate = path.join(canonicalRoot,slug+(suffix===1?'':`-${suffix}`));
+      this.validateProject?.(candidate);
       try {await mkdir(candidate);return candidate;}
       catch (error) {if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;}
     }

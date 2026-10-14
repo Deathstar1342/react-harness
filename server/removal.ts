@@ -107,6 +107,11 @@ export class Removal {
       return this.tools.removeScope(project.path,undefined,()=>{
         if (request.mode==='disk') {
           const {token,entries}=confirmed!;
+          // Async sandbox draining cannot carry a stale disk authorization into
+          // the final synchronous mutation boundary.
+          if(this.tokens.get(request.confirmationToken)!==token || token.expires<=Date.now())throw conflict('Deletion confirmation expired during resource cleanup; request a new confirmation');
+          const checked=this.validate(projectId);
+          if(checked.root!==token.root || checked.stamp!==token.stamp)throw conflict('Project path changed during resource cleanup');
           const current={root:token.root};
           this.tokens.delete(request.confirmationToken);
           this.store.removalError(projectId,'File deletion was started. Its outcome may be partial; review the folder, then explicitly retry or remove from app only.');

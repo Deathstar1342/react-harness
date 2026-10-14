@@ -2,9 +2,7 @@ import Fastify from 'fastify';
 import staticFiles from '@fastify/static';
 import { z } from 'zod';
 import { existsSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, realpath, readdir, stat } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { mkdir, realpath, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ServerResponse } from 'node:http';
 import type { Config } from './config.js';
@@ -19,20 +17,23 @@ import { Changes } from './changes.js';
 import { Removal } from './removal.js';
 import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
-import { installationRoot } from './locations.js';
+import { installationRoot, applicationHome } from './locations.js';
+import { LinuxSandbox } from './tools/sandbox.js';
 import type { BackendLifecycle } from './lifecycle.js';
 
-const executeFile = promisify(execFile);
 const approvalMode = z.enum(['autonomous','balanced','review']);
 export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>} }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
+  const sandbox=new LinuxSandbox();
+  const sandboxPolicy={home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
+  sandbox.configure(sandboxPolicy);tools.configureSandbox?.(sandboxPolicy);
   store.initializeModels(config.models);
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
   const changes = new Changes(store,tools,runtime);
-  const locations = new WorkspaceLocations(store,config.workspaceRoot);
+  const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root));
   const settings = new Settings(store,config.approvalMode);
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
@@ -44,6 +45,7 @@ export async function createApp(options: AppOptions) {
   const chatStreams = new Map<string,Map<ServerResponse,()=>void>>();
   const removedProjects = new Set<string>();
   const requests = new Map<string,string>();
+  const resetting=new Set<string>();
   const removal = new Removal(store,runtime,tools,config,locations,(projectId,chatIds,wholeProject)=>{
     for (const chatId of chatIds) for (const [stream,cleanup] of chatStreams.get(chatId) ?? []) {
       cleanup();
@@ -120,7 +122,7 @@ export async function createApp(options: AppOptions) {
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';
     if (request.method==='DELETE' || route.endsWith('/deletion-preview') || route.endsWith('/events')) return;
-    if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { requests.set(request.id,'*');return; }
+    if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { if(resetting.size)throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});requests.set(request.id,'*');return; }
     const params=request.params as {id?:string};
     if (!params?.id) return;
     let projectId:string|undefined;
@@ -128,14 +130,15 @@ export async function createApp(options: AppOptions) {
     else if (route.startsWith('/api/chats/:id')) projectId=store.chat(params.id).projectId;
     else if (route.startsWith('/api/approvals/:id')) projectId=store.chat(store.getApproval(params.id).chatId).projectId;
     if (projectId) {
+      if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
       requests.set(request.id,projectId);
     }
   });
   app.addHook('onResponse',async request=>{requests.delete(request.id);});
   app.addHook('onError',async request=>{requests.delete(request.id);});
-  const assertNoRequests=(projectId:string)=>{
-    if ([...requests.values()].some(id=>id==='*' || id===projectId)) throw Object.assign(new Error('A project request is still pending; wait before removal'),{statusCode:409});
+  const assertNoRequests=(projectId:string,exceptRequest?:string)=>{
+    if ([...requests].some(([requestId,id])=>requestId!==exceptRequest && (id==='*' || id===projectId))) throw Object.assign(new Error('A project request is still pending; wait before removal or reset'),{statusCode:409});
   };
   app.post('/api/projects/:id/deletion-preview',async request=>{
     z.object({}).strict().parse(request.body);return removal.preview(paramId(request.params));
@@ -175,11 +178,16 @@ export async function createApp(options: AppOptions) {
     if (body.mode==='import' && !body.path) throw new Error('Select the existing project folder to import');
     if (body.path && (!path.isAbsolute(body.path) || body.path.includes('\0'))) throw new Error('Use an absolute project folder path');
     let root = body.path ? path.resolve(body.path) : await locations.allocate(body.name);
+    sandbox.validateRoot(root);
     if (root === path.parse(root).root) throw new Error('Choose a project folder, not the filesystem root');
     if (body.mode === 'create') {
       if (existsSync(root) && (await readdir(root)).length) throw new Error('New project folder must be empty; import an existing project instead');
       await mkdir(root,{recursive:true});
-      await executeFile('git',['init','--initial-branch=main',root],{timeout:15000,windowsHide:true});
+      // Empty repositories have a fixed portable layout. Do not run host Git:
+      // ambient templates/config can execute or copy untrusted user content.
+      for(const directory of ['objects','refs/heads','refs/tags'])await mkdir(path.join(root,'.git',directory),{recursive:true});
+      await writeFile(path.join(root,'.git','HEAD'),'ref: refs/heads/main\n',{flag:'wx'});
+      await writeFile(path.join(root,'.git','config'),'[core]\n\trepositoryformatversion = 0\n\tbare = false\n',{flag:'wx'});
     } else if (!(await stat(root)).isDirectory()) throw new Error('Project path must be a directory');
     root = await realpath(root);
     if (root === path.parse(root).root) throw new Error('Choose a project folder, not the filesystem root');
@@ -187,6 +195,17 @@ export async function createApp(options: AppOptions) {
     return reply.code(201).send(project);
   });
   app.get('/api/projects/:id/chats',async request=> {const id = paramId(request.params);store.project(id);return store.chats(id);});
+  app.post('/api/projects/:id/sandbox/reset',async request=>{
+    z.object({}).strict().parse(request.body);
+    const id=paramId(request.params),project=store.project(id);
+    assertNoRequests(id,request.id);
+    if(!tools.resetSandbox)throw Object.assign(new Error('Sandbox reset is unavailable for this tool service'),{statusCode:503});
+    return runtime.exclusiveRemoval(id,async()=>{
+      resetting.add(id);
+      try{await tools.resetSandbox!(project.path);return {ok:true};}
+      finally{resetting.delete(id);}
+    });
+  });
   app.post('/api/projects/:id/chats',async(request,reply)=> {
     const body = z.object({title:z.string().trim().min(1).max(200).optional(),approvalMode:approvalMode.optional()}).strict().parse(request.body);
     const id = paramId(request.params); watchProject(id);

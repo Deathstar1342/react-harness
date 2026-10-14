@@ -17,7 +17,7 @@ export function safeRelative(input: string, allowRoot = false): string {
   if (clean.some(isProtected)) throw new ToolError('Protected Git or credential path.');
   return clean.join('/');
 }
-function isProtected(part: string): boolean {
+export function isProtected(part: string): boolean {
   return /^(?:\.git(?:$|\.)|\.env|\.ssh$|\.aws$|\.azure$|\.docker$|\.kube$|application_default_credentials\.json$|\.config$|\.gnupg$|\.npmrc$|\.netrc$|\.pypirc$|\.gitconfig$|credentials(?:$|\.)|secrets?(?:$|\.)|id_(?:rsa|dsa|ecdsa|ed25519)(?:$|\.))/i.test(part) || /\.(?:pem|key|p12|pfx|keystore)$/i.test(part);
 }
 export function allowed(input: string): boolean { try { safeRelative(input); return true; } catch { return false; } }

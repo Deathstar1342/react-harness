@@ -9,7 +9,23 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Disposable Linux sandbox prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat python3-venv
+          # This runner is disposable. Do not apply these settings to a user's host.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          test "$(id -u)" != 0
+          bwrap --version
+          socat -V
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Required unsupported-namespace fail-closed check
+        run: |
+          previous_limit=$(sysctl -n user.max_user_namespaces)
+          trap 'sudo sysctl -w "user.max_user_namespaces=$previous_limit"' EXIT
+          sudo sysctl -w user.max_user_namespaces=0
+          test "$(id -u)" != 0
+          node --import tsx tests/sandbox-unsupported.ts

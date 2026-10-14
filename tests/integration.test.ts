@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,8 +13,8 @@ import { Store } from '../server/store.js';
 import { BUDGET_STATE_KEY, type Reservation } from '../server/scheduler.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 
-const roots: string[] = []; const servers: Server[] = [];
-afterEach(async()=>{for(const server of servers.splice(0)){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}for(const root of roots.splice(0)) await rm(root,{recursive:true,force:true});});
+const roots: string[] = []; const servers: Server[] = [];const apps:(()=>Promise<void>)[]=[];
+afterEach(async()=>{for(const close of apps.splice(0).reverse())await close();for(const server of servers.splice(0)){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}for(const root of roots.splice(0)) await rm(root,{recursive:true,force:true});});
 const action = (name: string,args: Record<string,unknown>): AgentResponse => ({version:1,type:'action',message:'',action:{name,args}});
 const final = (message: string): AgentResponse => ({version:1,type:'final',message});
 
@@ -54,16 +54,21 @@ describe('real HTTP provider + runtime + workspace integration',()=> {
       const provider = new StarkProvider({baseUrl:fake.baseUrl,apiKey:config.apiKey,maxRetries:0});
       const built = await createApp({config,provider,store,tools:new WorkspaceTools(),hooks:createManagedHooks(provider,store,config)});
       built.app.addHook('onClose',async()=>store.close());
+      apps.push(()=>built.app.close());
       return built;
     };
     const first=await build();
-    const projectReply=await first.app.inject({method:'POST',url:'/api/projects',payload:{name:'Integration project',path:path.join(root,'project'),mode:'create'}});
+    // Seed before registering the filesystem watcher. A delayed external-write
+    // notification during this scripted conversation correctly stales its write
+    // recommendation; that race is not what this approval/restart fixture tests.
+    await mkdir(path.join(root,'project'));await writeFile(path.join(root,'project','label.txt'),oldContent);
+    const projectReply=await first.app.inject({method:'POST',url:'/api/projects',payload:{name:'Integration project',path:path.join(root,'project'),mode:'import'}});
     expect(projectReply.statusCode).toBe(201);const project=projectReply.json();
-    await writeFile(path.join(project.path,'label.txt'),oldContent);
     const chat=(await first.app.inject({method:'POST',url:`/api/projects/${project.id}/chats`,payload:{approvalMode:'review'}})).json();
-    await first.app.inject({method:'POST',url:`/api/chats/${chat.id}/messages`,payload:{content:'Update the label'}});await first.runtime.wait(chat.id);
+    const submitted=await first.app.inject({method:'POST',url:`/api/chats/${chat.id}/messages`,payload:{content:'Update the label'}});
+    expect(submitted.statusCode,submitted.body).toBe(202);await first.runtime.wait(chat.id);
     const approval=first.store.approvals(chat.id)[0];
-    expect(first.store.chat(chat.id).status).toBe('awaiting_approval');
+    expect(first.store.chat(chat.id).status,JSON.stringify({messages:first.store.messages(chat.id),events:first.store.events(chat.id).slice(-12)})).toBe('awaiting_approval');
     expect(approval.inspection.before).toBe(oldContent);expect(approval.inspection.after).toBe(newContent);
     expect(await readFile(path.join(project.path,'label.txt'),'utf8')).toBe(oldContent);
     await first.app.close();

@@ -39,6 +39,9 @@ export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }
 export interface TestReport { id: string; runner: string; command: string; createdAt: string; status: 'passed' | 'failed' | 'error' | 'cancelled'; tests: TestCase[]; output: string; exitCode?: number }
 export interface ToolService {
+  /** Trusted backend-only policy, never accepted from model/browser input. */
+  configureSandbox?(policy:{home:string;protectedPaths:string[];projects:()=>string[]}):void;
+  resetSandbox?(root:string):Promise<void>;
   inspect(context: ToolContext, action: Action): Promise<ToolInspection>;
   execute(context: ToolContext, action: Action): Promise<ToolResult>;
   read(root: string, path: string): Promise<FileSnapshot>;
@@ -46,8 +49,9 @@ export interface ToolService {
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot>;
   setDirty(root: string, path: string, owner: string, dirty: boolean): void;
   restore?(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void): Promise<FileSnapshot>;
-  // Trusted synchronous lifecycle boundary; reject active operations and dirty leases.
-  removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T;
+  // Trusted lifecycle boundary; reject active operations/leases, await resource
+  // teardown, then revalidate and invoke the mutation synchronously under a gate.
+  removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T | Promise<T>;
   dispose(): Promise<void>;
 }
 export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string }
