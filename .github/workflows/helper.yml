@@ -12,7 +12,7 @@ jobs:
       - name: Disposable runner prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-apt acl build-essential bubblewrap socat
+          sudo apt-get install -y python3-apt acl build-essential bubblewrap socat pkexec
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           # First adapter supports fixed HTTP(S) repositories, not mirror-list indirection.
           sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
@@ -53,6 +53,17 @@ jobs:
           /usr/bin/python3 -I -S tests/helper-resolver-probe.py
           node --import tsx tests/helper-linux.ts
       - name: Safe service failure diagnostics
+        if: failure()
+        run: |
+          sudo systemctl status abyssus-helper.service --no-pager || true
+        timeout-minutes: 1
+      - name: M20 data-only OS package staging and real OS-auth adapter
+        run: |
+          node scripts/helper-stage.mjs
+          sudo dpkg --install build/abyssus-helper-staging.deb
+          node --import tsx tests/desktop-helper-linux.ts
+        timeout-minutes: 5
+      - name: Safe final service failure diagnostics
         if: failure()
         run: |
           sudo systemctl status abyssus-helper.service --no-pager || true

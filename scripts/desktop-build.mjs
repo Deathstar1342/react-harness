@@ -1,0 +1,10 @@
+import { cp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+const root=fileURLToPath(new URL('../',import.meta.url));
+execFileSync(process.execPath,[root+'node_modules/typescript/bin/tsc','-p',root+'desktop/tsconfig.json'],{cwd:root,stdio:'inherit'});
+await mkdir(root+'build/app/dist',{recursive:true});
+await cp(root+'dist/client',root+'build/app/dist/client',{recursive:true});
+const pkg=JSON.parse(await readFile(root+'package.json','utf8'));
+await writeFile(root+'build/app/package.json',JSON.stringify({name:pkg.name,version:pkg.version,type:'module',dependencies:pkg.dependencies,optionalDependencies:pkg.optionalDependencies}));
+console.log('Desktop application staged in build/app. Dedicated Linux runtime staging is separate.');

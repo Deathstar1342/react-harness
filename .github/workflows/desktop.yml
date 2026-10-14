@@ -1,0 +1,35 @@
+name: Desktop validation
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  electron:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:build
+      - name: Disposable Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat python3-venv xvfb libgbm1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          npm run desktop:stage-runtime
+          build/runtime/bin/node tests/desktop-runtime-probe.mjs
+      - name: Real Linux Electron and dedicated backend
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run desktop:smoke
+      - name: Real Windows Electron (no WSL distribution launch)
+        if: runner.os == 'Windows'
+        run: npm run desktop:smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-evidence-${{ matrix.os }}
+          path: test-results/electron-*.png

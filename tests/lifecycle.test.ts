@@ -52,7 +52,7 @@ it('keeps selected data/config across cwd changes and refuses a missing database
   const id=first.profile.id;await first.close();
   writeFileSync(path.join(t.other,'.env'),'STARK_API_KEY=wrong-profile');
   const next=await start({...t.options,cwd:t.other,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT}});expect(next.profile.id).toBe(id);
-  expect((await next.app.inject({url:`/api/chats/${chat.id}`,headers})).statusCode).toBe(200);
+  expect((await next.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${next.auth.token}`}})).statusCode).toBe(200);
   await next.close();
   renameSync(path.join(next.config.dataDir,'state.sqlite'),path.join(next.config.dataDir,'retained.sqlite'));
   await expect(startBackend(t.options)).rejects.toThrow('missing');
@@ -68,14 +68,14 @@ it('migrates through startBackend, saves provider settings in stable config, and
   const project=old.createProject('Imported',t.other),chat=old.createChat(project.id,'Original','review');old.close();
   writeFileSync(path.join(t.cwd,'.env'),'ARCHITECT_MODEL=legacy\nSTARK_API_KEY=legacy-synthetic\n');
   const first=await start({...t.options,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT,HARNESS_LEGACY_ROOT:t.cwd}});
-  const response=await first.app.inject({method:'PATCH',url:'/api/provider-settings',headers,payload:{apiKey:'new-synthetic',models:{architect:'new-default'}}});
+  const response=await first.app.inject({method:'PATCH',url:'/api/provider-settings',headers:{...headers,authorization:'Bearer '+first.auth.token},payload:{apiKey:'new-synthetic',models:{architect:'new-default'}}});
   expect(response.statusCode).toBe(200);expect(response.body).not.toContain('new-synthetic');
   expect(readFileSync(first.profile.paths.configFile,'utf8')).toContain('new-synthetic');
   expect(readFileSync(path.join(t.cwd,'.env'),'utf8')).toContain('legacy-synthetic');
   await first.close();
   const next=await start({...t.options,cwd:t.other,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT}});
   expect(next.config.apiKey).toBe('new-synthetic');
-  const detail=(await next.app.inject({url:`/api/chats/${chat.id}`,headers})).json();
+  const detail=(await next.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${next.auth.token}`}})).json();
   expect(detail.chat.models.architect).toBe('legacy');
 });
 it('failed startup never replaces a working data binding; retry after port collision remains possible',async()=>{

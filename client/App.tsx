@@ -579,6 +579,7 @@ export function App() {
   const [changes, setChanges] = useState(false);
   const editorLayout = useEditorLayout();
   const [dirty, setDirty] = useState(false);
+  useEffect(()=>{void window.abyssusDesktop?.dirty(dirty).catch(()=>{});},[dirty]);
   const [fileRevision, setFileRevision] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);

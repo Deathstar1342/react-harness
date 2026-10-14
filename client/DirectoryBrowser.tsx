@@ -38,6 +38,16 @@ export function DirectoryContents({ listing, onNavigate, disabled = false }: {
 export function DirectoryBrowser({ title, initialPath, onSelect, onClose }: {
   title: string; initialPath?: string; onSelect: (path: string) => void; onClose: () => void;
 }) {
+  return window.abyssusDesktop ? <NativeDirectory title={title} onSelect={onSelect} onClose={onClose}/> : <BrowserDirectory title={title} initialPath={initialPath} onSelect={onSelect} onClose={onClose}/>;
+}
+function NativeDirectory({title,onSelect,onClose}:{title:string;onSelect:(path:string)=>void;onClose:()=>void}) {
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const choose=async()=>{if(busy)return;setBusy(true);try{const value=await window.abyssusDesktop!.pickDirectory();if(value===null)onClose();else onSelect(value);}catch(e){setError(errorText(e));}finally{setBusy(false);}};
+  return <Modal title={title} titleId="directory-title" onClose={onClose} busy={busy}><p>Select a folder in the chosen Linux environment. Windows drive mounts are unsupported.</p><button className="button primary" onClick={()=>void choose()} disabled={busy}>Choose native folder…</button>{error&&<p role="alert">{error}</p>}</Modal>;
+}
+function BrowserDirectory({ title, initialPath, onSelect, onClose }: {
+  title: string; initialPath?: string; onSelect: (path: string) => void; onClose: () => void;
+}) {
   const [location, setLocation] = useState({ path: initialPath, revision: 0 });
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [error, setError] = useState("");

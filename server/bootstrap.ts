@@ -9,8 +9,9 @@ import { WorkspaceTools } from './tools/index.js';
 import { loadPromptExtensions } from './prompts.js';
 import { prepareProfile, lockResources, durableWrite, privateDirectory, regularFile, type ProfileOptions } from './profile.js';
 import { BackendLifecycle } from './lifecycle.js';
+import { TransportAuth } from './transport-auth.js';
 
-export async function startBackend(options:ProfileOptions={}) {
+export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean}={}) {
   const env={...(options.env ?? process.env)};
   for(const name of ['HARNESS_DATA_DIR','HARNESS_WORKSPACE_ROOT','ARCHITECT_PROMPT_FILE','CODER_PROMPT_FILE','CRITIC_PROMPT_FILE']) {
     if(env[name] || name==='HARNESS_DATA_DIR' && env[name]!==undefined)env[name]=path.resolve(options.cwd ?? process.cwd(),env[name]!);
@@ -32,10 +33,12 @@ export async function startBackend(options:ProfileOptions={}) {
   })();
   try {
     lifecycle=new BackendLifecycle(profile.id,env.HARNESS_LAUNCH_KEY);
+    const auth=new TransportAuth(lifecycle.instanceId,options.transportToken,!options.desktop);
     privateDirectory(path.dirname(profile.paths.configFile));
     if(!existsSync(profile.paths.configFile))throw new Error('Selected configuration is missing; restore profile/config/.env before startup');
     const {config,file}=loadBackendConfig({...env,HARNESS_HOME:profile.paths.home},profile.paths.configFile);
     config.appHome=profile.paths.home;
+    if(options.desktop){config.host='127.0.0.1';config.port=0;}
     if(config.port>65535)throw new Error('PORT must be at most 65535');
     // Home is already held. Preserve explicit overrides pointing exactly at it.
     resources=lockResources([path.dirname(file.filename),config.dataDir].filter(dir=>{
@@ -60,14 +63,15 @@ export async function startBackend(options:ProfileOptions={}) {
     store=new Store(database);
     durableWrite(dataMarker,JSON.stringify({version:1}));
     ({app}=await createApp({config,provider,store,providerSettingsFile:file,tools,
-      hooks:createManagedHooks(provider,store,config,{promptExtensions}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close}}));
+      hooks:createManagedHooks(provider,store,config,{promptExtensions}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close},transportAuth:auth}));
     const address=await app.listen({host:config.host,port:config.port});
+    config.port=Number(new URL(address).port);
     lifecycle.ready();
     durableWrite(descriptor,JSON.stringify({version:1,address,key:lifecycle.key,identity:lifecycle.identity()}));
     // Publish the selected target only after successful application setup and listen.
     durableWrite(bindingFile,JSON.stringify({version:1,directory:config.dataDir}));
     const running=lifecycle;
-    return {app,config,profile,lifecycle:running,address,close:()=>running.stop(close)};
+    return {app,config,profile,lifecycle:running,auth,address,close:()=>running.stop(close)};
   } catch(error) {
     await (lifecycle ? lifecycle.stop(close) : close());
     throw error;
