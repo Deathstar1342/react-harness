@@ -8,7 +8,7 @@ import { Store } from '../server/store.js';
 import { Runtime, type RunState } from '../server/runtime.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import type { CompletionResult, Plan, PlanStepRef, ToolService } from '../shared/types.js';
 
 const action = (name:string,args:Record<string,unknown>={}):CompletionResult=>(nativeReply(name,args));
@@ -27,7 +27,7 @@ function fixture(filename=':memory:') {
   const tools:ToolService={inspect:async(_ctx,a)=>({effect:a.name==='read_file'?'read':'write',risk:'routine',description:a.name}),execute:async(_ctx,a)=>{executed.push(a.name);return {ok:true,output:'Observed fixture result'};},read:async(_root,p)=>({path:p,content:'',hash:null}),list:async()=>[],save:async()=>{throw new Error('unused');},setDirty:()=>{},dispose:async()=>{}};
   const provider={models:async()=>['fixture'],complete:async()=>{const value=queue.shift();if(!value)throw new Error('Unexpected fixture request');return (typeof value==='function'?await value():value);}};
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'synthetic-test-only'});
-  const hooks={instructions:protocolInstructions};
+  const hooks={instructions:roleInstructions};
   let runtime=new Runtime(store,provider,tools,config,hooks);
   cleanups.push(async()=>{await runtime.close();store.close();});
   const plan=store.revisePlan(chat.id,shape());

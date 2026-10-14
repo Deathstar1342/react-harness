@@ -3,7 +3,7 @@ import type { AgentRole, ModelMessage, ModelProvider } from '../shared/types.js'
 import type { Config } from './config.js';
 import type { Frame, RuntimeHooks, RunState } from './runtime.js';
 import { Store } from './store.js';
-import { protocolInstructions } from './protocol.js';
+import { roleInstructions } from './prompts.js';
 import { publishedTools } from './tool-registry.js';
 import { validateNativeHistory } from './provider.js';
 import { BudgetScheduler, estimateTokens } from './scheduler.js';
@@ -158,7 +158,7 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     return prepared;
   }
   return {
-    instructions: role => [protocolInstructions(role), options.promptExtensions?.[role]].filter(Boolean).join('\n\n'),
+    instructions: role => roleInstructions(role, options.promptExtensions?.[role]),
     complete,
     prepareMessages: async (chatId, frame, messages, signal) => {
       const key = `${chatId}:${frame.id}`, previous = locks.get(key), signature = digest(messages);

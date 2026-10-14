@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../server/store.js';
 import { Runtime } from '../server/runtime.js';
 import { readConfig } from '../server/config.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import { conversationErrors, toolMessageLabel } from '../client/conversation.js';
 import type { CompletionResult, ModelMessage, ModelProvider, ToolResult, ToolService } from '../shared/types.js';
 
@@ -39,7 +39,7 @@ function fixture(replies: CompletionResult[], result: ToolResult = { ok: true, o
     read: async (_root, path) => ({ path, content: '', hash: null }),
     list: async () => [], save: async () => { throw new Error('Unexpected save'); }, setDirty() {}, dispose: async () => {},
   };
-  const runtime = new Runtime(store, provider, tools, readConfig({}), { instructions: protocolInstructions });
+  const runtime = new Runtime(store, provider, tools, readConfig({}), { instructions: roleInstructions });
   resources.push({ runtime, store });
   return { runtime, store, chat, provider, requests, tools };
 }

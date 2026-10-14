@@ -9,7 +9,7 @@ import { Runtime, type RunState } from '../server/runtime.js';
 import { Store } from '../server/store.js';
 import { readConfig } from '../server/config.js';
 import { createManagedHooks } from '../server/context.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import type { CompletionResult, ModelMessage, ModelProvider } from '../shared/types.js';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -33,7 +33,7 @@ async function fixture(replies: Reply[] = [], mode: 'review' | 'autonomous' = 'r
     return (typeof reply === 'function' ? await reply(input) : reply);
   }) };
   const config = readConfig({ MODEL_MAX_OUTPUT_TOKENS: '256' });
-  const hooks = { instructions: protocolInstructions };
+  const hooks = { instructions: roleInstructions };
   let runtime = new Runtime(store, provider, tools, config, hooks);
   cleanups.push(async () => { await runtime.close(); store.close(); await tools.dispose(); await rm(root, { recursive: true, force: true }); });
   const guidance = (content: string | null) => content === null ? rm(path.join(root, 'AGENTS.md'), { force: true }) : writeFile(path.join(root, 'AGENTS.md'), content);
@@ -264,7 +264,9 @@ describe('instruction freshness at runtime boundaries', () => {
       }
       requests.push(input.messages); return final();
     } };
-    t.config.contextLimits.architect = 18_000;
+    // Budget the versioned role policy as well as the unchanged tool schemas;
+    // the long history still forces compaction and a mid-summary refresh.
+    t.config.contextLimits.architect = 26_000;
     const runtime = new Runtime(t.store, provider, t.tools, t.config, createManagedHooks(provider, t.store, t.config, { compactionThreshold: 0.5 }));
     try { await runtime.control(t.chat.id, 'resume'); await runtime.wait(t.chat.id); } finally { await runtime.close(); }
     expect(t.store.chat(t.chat.id).status).toBe('idle'); expect(requests).toHaveLength(1);
