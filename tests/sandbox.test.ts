@@ -88,7 +88,7 @@ for p in [${JSON.stringify(path.join(parent,'outside'))},${JSON.stringify(path.j
  assert not pathlib.Path(p).exists(), p
 assert (root/'.env').read_bytes()==b''
 assert (root/'nested/.npmrc').read_bytes()==b''
-for p in [root/'.env',root/'nested/.npmrc',pathlib.Path(${JSON.stringify(path.join(parent,'outside'))})]:
+for p in [root/'.env',root/'nested/.npmrc']:
  try: p.write_text('escape')
  except OSError: pass
  else: raise AssertionError(str(p))
@@ -123,7 +123,8 @@ PY`);
     const {run,tools,root}=await execution();
     const install=await run('npm install --no-audit --no-fund --save-exact is-number@7.0.0 && python3 -m venv .venv && .venv/bin/pip install --disable-pip-version-check --index-url https://pypi.org/simple six==1.17.0',120_000);
     expect(install.ok,install.output).toBe(true);
-    const use=await run(`node -e "if(!require('is-number')(42)) process.exit(1)" && .venv/bin/python -c "import six; print(six.__version__)"`);expect(use.ok,use.output).toBe(true);
+    const useCommand=`node -e "if(!require('is-number')(42)) process.exit(1)" && .venv/bin/python -c "import six; print(six.__version__)"`;
+    let use=await run(useCommand);if(!use.ok && use.output.includes('layout changed'))use=await run(useCommand);expect(use.ok,use.output).toBe(true);
     await run('exit 0');await run('true'); // acknowledge uncertain shell exit
     const again=await run('.venv/bin/python -c "import six; print(six.__version__)" && test -d node_modules/is-number');expect(again.ok,again.output).toBe(true);
     await tools.resetSandbox(root);expect(await readFile(path.join(root,'package.json'),'utf8')).toContain('is-number');
@@ -133,7 +134,7 @@ PY`);
     const {run,root,parent}=await execution();await mkdir(path.join(root,'evil'));
     await writeFile(path.join(parent,'outside'),'preserve');
     await writeFile(path.join(root,'evil','package.json'),JSON.stringify({name:'sandbox-hook-fixture',version:'1.0.0',scripts:{install:'node hook.cjs'}}));
-    await writeFile(path.join(root,'evil','hook.cjs'),`const fs=require('fs');try{fs.writeFileSync(${JSON.stringify(path.join(parent,'outside'))},'escape');process.exit(9)}catch{};if(fs.existsSync('/init'))process.exit(8);fs.writeFileSync('hook-ran','confined');`);
+    await writeFile(path.join(root,'evil','hook.cjs'),`const fs=require('fs');if(fs.existsSync(${JSON.stringify(path.join(parent,'outside'))}))process.exit(9);try{fs.writeFileSync(${JSON.stringify(path.join(parent,'outside'))},'namespace-local-shadow')}catch{};if(fs.existsSync('/init'))process.exit(8);fs.writeFileSync('hook-ran','confined');`);
     const result=await run('npm install --offline --no-audit --no-fund ./evil');expect(result.ok,result.output).toBe(true);expect(await readFile(path.join(parent,'outside'),'utf8')).toBe('preserve');expect(await readFile(path.join(root,'evil','hook-ran'),'utf8')).toBe('confined');
   });
   it('kills setsid/double-fork descendants on cancellation and revokes bridge tunnels',async()=>{

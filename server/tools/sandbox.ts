@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { existsSync, lstatSync, realpathSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { applicationHome, installationRoot, profilePaths } from '../locations.js';
 import { hash, key, ToolError, isProtected } from './paths.js';
 import { startRegistryProxy } from './registry-proxy.js';
@@ -17,6 +17,7 @@ export class LinuxSandbox {
   configure(policy:SandboxPolicy){this.policy=policy;}
   validateRoot(input:string):string {
     const root=canonical(path.resolve(input));
+    if(root.split(path.sep).some(isProtected))throw new ToolError('Credential and Git metadata directories cannot be selected as project roots.','SANDBOX_UNSAFE_PROJECT');
     const protectedPaths=[this.policy.home,installationRoot,path.dirname(path.dirname(realpathSync(process.execPath))),...this.policy.protectedPaths].map(p=>canonical(path.resolve(p)));
     if([path.parse(root).root,canonical(homedir())].some(p=>inside(root,p)) || protectedPaths.some(p=>overlap(root,p)))throw new ToolError('Project overlaps application, configuration, home or state paths. Select a separate project folder.','SANDBOX_UNSAFE_PROJECT');
     if(process.platform==='linux' && ['/usr','/bin','/sbin','/lib','/lib64','/etc','/proc','/sys','/dev','/run','/mnt','/media','/opt'].some(p=>overlap(root,p)))throw new ToolError('System, mounted Windows and toolchain roots cannot be projects. Select a Linux project folder.','SANDBOX_UNSAFE_PROJECT');
@@ -58,6 +59,8 @@ export class LinuxSandbox {
     for(const dir of [this.policy.home,path.dirname(path.dirname(base)),path.dirname(base),base,path.join(base,'home'),path.join(base,'cache'),path.join(base,'tmp')]) {
       mkdirSync(dir,{recursive:true,mode:0o700});
       if(lstatSync(dir).isSymbolicLink() || canonical(dir)!==path.resolve(dir))throw new ToolError('Sandbox storage contains a link. Repair the private cache directory.','SANDBOX_UNSAFE_STORAGE');
+      const info=lstatSync(dir);
+      if(process.platform==='linux' && (info.uid!==process.getuid!() || (info.mode&0o077)!==0))throw new ToolError('Sandbox storage must be private and owned by the backend user. Repair its permissions through trusted setup.','SANDBOX_UNSAFE_STORAGE');
     }
     return base;
   }
@@ -73,6 +76,15 @@ export class LinuxSandbox {
     const layout=this.layout(root,git);
     for(const file of ['/usr/bin/bwrap','/usr/bin/bash','/usr/bin/socat'])if(!existsSync(file))throw new ToolError('Sandbox prerequisites missing: install Bubblewrap, socat, bash and Python venv through trusted setup. Host execution is disabled.','SANDBOX_UNAVAILABLE');
     const base=this.storage(layout.root);
+    const policyFiles=path.join(base,'policy');mkdirSync(policyFiles,{mode:0o700,recursive:true});
+    if(canonical(policyFiles)!==policyFiles || lstatSync(policyFiles).isSymbolicLink())throw new ToolError('Unsafe private sandbox policy files.');
+    const uid=process.getuid!(),gid=process.getgid!();
+    for(const [name,content] of [['empty',''],['passwd',`sandbox:x:${uid}:${gid}:Sandbox:/sandbox/home:/bin/bash\n`],['group',`sandbox:x:${gid}:\n`]]) {
+      const file=path.join(policyFiles,name);
+      if(!existsSync(file))writeFileSync(file,content,{flag:'wx',mode:0o600});
+      const info=lstatSync(file);
+      if(!info.isFile() || info.nlink!==1 || info.uid!==uid || info.size!==Buffer.byteLength(content) || readFileSync(file,'utf8')!==content)throw new ToolError('Private sandbox policy file identity changed. Reset sandbox storage.');
+    }
     const args=['--unshare-all','--unshare-user','--die-with-parent','--new-session','--disable-userns','--cap-drop','ALL','--clearenv'];
     // Distro-managed tools only. No /usr/local, personal prefixes, host /etc,
     // /proc, /sys, /run, network, interop or parent-home bind.
@@ -84,7 +96,8 @@ export class LinuxSandbox {
     args.push('--ro-bind',node,'/opt/node/bin/node');
     if(existsSync(npm))args.push('--ro-bind',npm,'/opt/node/lib/node_modules/npm','--symlink','../lib/node_modules/npm/bin/npm-cli.js','/opt/node/bin/npm','--symlink','../lib/node_modules/npm/bin/npx-cli.js','/opt/node/bin/npx');
     args.push('--proc','/proc','--dev','/dev','--dir','/etc','--dir','/run','--bind',path.join(base,'home'),'/sandbox/home','--bind',path.join(base,'cache'),'/sandbox/cache','--bind',path.join(base,'tmp'),'/tmp','--bind',layout.root,layout.root);
-    for(const mask of layout.masks)args.push(...(mask.directory?['--tmpfs',mask.path,'--remount-ro',mask.path]:['--ro-bind','/dev/null',mask.path]));
+    args.push('--ro-bind',path.join(policyFiles,'passwd'),'/etc/passwd','--ro-bind',path.join(policyFiles,'group'),'/etc/group');
+    for(const mask of layout.masks)args.push(...(mask.directory?['--tmpfs',mask.path,'--remount-ro',mask.path]:['--ro-bind',path.join(policyFiles,'empty'),mask.path]));
     // System trust store is public, immutable policy; never mount all of /etc.
     if(existsSync('/etc/ssl/certs'))args.push('--ro-bind','/etc/ssl/certs','/etc/ssl/certs');
     const env:Record<string,string>={PATH:'/opt/node/bin:/usr/bin:/bin',HOME:'/sandbox/home',XDG_CACHE_HOME:'/sandbox/cache',TMPDIR:'/tmp',LANG:'C.UTF-8',TERM:'dumb',PS1:'',PS2:'',PROMPT_COMMAND:'',NO_COLOR:'1',npm_config_cache:'/sandbox/cache/npm',PIP_CACHE_DIR:'/sandbox/cache/pip',PIP_DISABLE_PIP_VERSION_CHECK:'1',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0'};

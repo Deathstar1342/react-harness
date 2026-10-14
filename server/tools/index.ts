@@ -39,11 +39,12 @@ export class WorkspaceTools implements ToolService {
   readonly sandbox = new LinuxSandbox();
   private disposed = false;
   private removing=new Set<string>();
+  private quarantined=new Set<string>();
   private operations = new Map<string,number>();
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
     this.sandbox.validateRoot(root);
     const id = key(path.resolve(root));
-    if(this.removing.has(id))throw new ToolError('Workspace cleanup is pending.','CONFLICT');
+    if(this.removing.has(id) || this.quarantined.has(id))throw new ToolError('Workspace cleanup is pending or uncertain.','CONFLICT');
     this.operations.set(id,(this.operations.get(id) ?? 0)+1);
     try { return await operation(); }
     finally { const count = this.operations.get(id)!-1; if (count) this.operations.set(id,count); else this.operations.delete(id); }
@@ -51,11 +52,11 @@ export class WorkspaceTools implements ToolService {
   removeScope<T>(root: string, chatId: string | undefined, mutation: () => T): Promise<T> {
     this.check();
     const id=key(path.resolve(root));
-    if (this.operations.has(id) || this.removing.has(id)) throw new ToolError('A workspace operation is still pending.','CONFLICT');
+    if (this.operations.has(id) || this.removing.has(id) || this.quarantined.has(id)) throw new ToolError('A workspace operation is still pending or cleanup is uncertain.','CONFLICT');
     this.files.assertRemovable(root);
     const cleanup=this.shells.removeScope(root,chatId);
     this.removing.add(id);
-    return cleanup.then(()=>{this.files.assertRemovable(root);return mutation();}).finally(()=>this.removing.delete(id));
+    return cleanup.catch(error=>{this.quarantined.add(id);throw error;}).then(()=>{this.files.assertRemovable(root);return mutation();}).finally(()=>this.removing.delete(id));
   }
   private maxOutputBytes: number;
   private maxReportBytes: number;
@@ -206,5 +207,5 @@ export class WorkspaceTools implements ToolService {
     report ??= unavailableReport(args.command, result, result.error ?? 'Test command was not executed.');
     return { ok: report.status === 'passed', output: report.output, data: { ...result, reportPath, testReport: report } };
   }
-  async dispose(): Promise<void> { this.disposed = true; await this.shells.dispose(); }
+  async dispose(): Promise<void> { this.disposed = true; await this.shells.dispose();if(this.quarantined.size)throw new ToolError('Sandbox cleanup is uncertain; retain backend ownership.','SANDBOX_CLEANUP_FAILED'); }
 }

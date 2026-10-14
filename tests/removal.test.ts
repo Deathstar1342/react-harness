@@ -33,6 +33,18 @@ async function fixture() {
 }
 const paused:RunState={frames:[{id:'frame',role:'architect',messages:[],repairs:0}],steering:[],generation:0,steps:0,planOnly:false};
 
+it.each(['expiry','path swap'])('revalidates disk authorization after deferred sandbox drain: %s',async(kind)=>{
+  const t=await fixture();let release!:()=>void,entered!:()=>void;
+  const draining=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});
+  vi.spyOn((t.tools as any).shells,'removeScope').mockImplementation(()=>{entered();return draining;});
+  const pending=t.disk();await ready;
+  if(kind==='expiry')vi.spyOn(Date,'now').mockReturnValue(Date.now()+300_001);
+  else{await rename(t.root,t.root+'-original');await mkdir(t.root);await writeFile(path.join(t.root,'replacement'),'preserve');}
+  release();await expect(pending).rejects.toThrow(/expired|changed/);
+  expect(t.store.projects()).toHaveLength(1);expect(t.store.project(t.project.id).removalError).toBeUndefined();
+  expect(await readFile(path.join(kind==='expiry'?t.root:t.root+'-original','keep.txt'),'utf8')).toBe('user files');
+});
+
 it('app-only removal preserves all bytes including Git/hidden files and deletes dependent records durably',async()=>{
   const t=await fixture();await mkdir(path.join(t.root,'.git'));await writeFile(path.join(t.root,'.git','config'),'private config');await writeFile(path.join(t.root,'.env'),'local-only');
   t.store.message(t.chat.id,'user','history');t.store.setPlan(t.chat.id,{phases:[]});t.store.setState(`run:${t.chat.id}`,paused);t.store.setState(`context:archive:${t.chat.id}:frame:hash`,{messages:['archive']});

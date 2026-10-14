@@ -41,6 +41,7 @@ export interface TestReport { id: string; runner: string; command: string; creat
 export interface ToolService {
   /** Trusted backend-only policy, never accepted from model/browser input. */
   configureSandbox?(policy:{home:string;protectedPaths:string[];projects:()=>string[]}):void;
+  resetSandbox?(root:string):Promise<void>;
   inspect(context: ToolContext, action: Action): Promise<ToolInspection>;
   execute(context: ToolContext, action: Action): Promise<ToolResult>;
   read(root: string, path: string): Promise<FileSnapshot>;

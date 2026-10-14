@@ -154,10 +154,12 @@ export class ShellPool {
   private layouts = new Map<string,string>();
   private queues = new Map<string, { tail: Promise<void>; count: number; generation: number }>();
   private disposed = false;
+  private quarantined=new Set<string>();
   constructor(readonly options: ShellOptions) {}
   async run(context: ToolContext, command: string, timeoutMs = this.options.defaultTimeoutMs, beforeRun?: () => Promise<void>, afterRun?: (result: CommandResult) => Promise<void>): Promise<CommandResult> {
     if (this.disposed) throw new ToolError('Tool service has been disposed.');
     const root = rootPathSync(context.projectRoot), id = JSON.stringify([root, context.chatId, context.agentId]);
+    if(this.quarantined.has(key(root)))throw new ToolError('Sandbox cleanup is uncertain; scope is quarantined until backend recovery.','SANDBOX_CLEANUP_FAILED');
     if (!this.queues.has(id) && this.queues.size >= this.options.maxSessions) throw new ToolError('Persistent shell session limit reached.');
     const queue = this.queues.get(id) ?? { tail: Promise.resolve(), count: 0, generation: 0 };
     this.queues.set(id, queue);
@@ -180,20 +182,23 @@ export class ShellPool {
       if (outcome.shellReset) { await session.dispose(); this.sessions.delete(id); queue.generation++; }
       await afterRun?.(outcome);
       return { ...outcome, shellReset: outcome.shellReset || generation > 0 };
-    }).finally(() => { queue.count--; });
+    }).catch(error=>{if(error instanceof ToolError && error.code==='SANDBOX_CLEANUP_FAILED')this.quarantined.add(key(root));throw error;}).finally(() => { queue.count--; });
     queue.tail = result.then(() => {}, () => {});
     return result;
   }
   removeScope(root: string, chatId?: string) {
+    if(this.quarantined.has(key(root)))throw new ToolError('Sandbox cleanup is uncertain; scope is quarantined until backend recovery.','SANDBOX_CLEANUP_FAILED');
     const matches = (id: string) => { const [storedRoot,storedChat] = JSON.parse(id); return key(storedRoot)===key(root) && (!chatId || storedChat===chatId); };
     for (const [id,queue] of this.queues) if (matches(id) && queue.count) throw new ToolError('A shell command is still pending.','CONFLICT');
     for (const [id,session] of this.sessions) if (matches(id) && session.hasBackgroundWork) throw new ToolError('A shell still has background work; finish it before removal.','CONFLICT');
     const closing:Promise<void>[]=[];
-    for (const [id,session] of this.sessions) if (matches(id)) { closing.push(session.dispose()); this.sessions.delete(id); }
-    for (const id of this.queues.keys()) if (matches(id)) this.queues.delete(id);
-    return Promise.all(closing).then(()=>{});
+    for (const [id,session] of this.sessions) if (matches(id)) closing.push(session.dispose());
+    return Promise.all(closing).then(()=>{
+      for(const id of this.sessions.keys())if(matches(id))this.sessions.delete(id);
+      for(const id of this.queues.keys())if(matches(id))this.queues.delete(id);
+    },error=>{this.quarantined.add(key(root));throw error;});
   }
-  async dispose(): Promise<void> { this.disposed = true; await Promise.all([...this.sessions.values()].map(session=>session.dispose())); await Promise.all([...this.queues.values()].map(q => q.tail)); this.sessions.clear(); this.queues.clear(); }
+  async dispose(): Promise<void> { this.disposed = true; await Promise.all([...this.sessions.values()].map(session=>session.dispose())); await Promise.all([...this.queues.values()].map(q => q.tail)); if(this.quarantined.size)throw new ToolError('Sandbox cleanup is uncertain; retain backend ownership.','SANDBOX_CLEANUP_FAILED');this.sessions.clear(); this.queues.clear(); }
 }
 // Direct execution is reserved for fixed, read-only Git argv; model commands use the PTY.
 export async function gitCommand(root: string, args: string[], maxBytes: number, signal?: AbortSignal, sandbox=new LinuxSandbox()): Promise<CommandResult> {

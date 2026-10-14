@@ -193,6 +193,12 @@ export async function createApp(options: AppOptions) {
     return reply.code(201).send(project);
   });
   app.get('/api/projects/:id/chats',async request=> {const id = paramId(request.params);store.project(id);return store.chats(id);});
+  app.post('/api/projects/:id/sandbox/reset',async request=>{
+    z.object({}).strict().parse(request.body);
+    const id=paramId(request.params),project=store.project(id);
+    if(!tools.resetSandbox)throw Object.assign(new Error('Sandbox reset is unavailable for this tool service'),{statusCode:503});
+    return runtime.exclusiveRemoval(id,async()=>{await tools.resetSandbox!(project.path);return {ok:true};});
+  });
   app.post('/api/projects/:id/chats',async(request,reply)=> {
     const body = z.object({title:z.string().trim().min(1).max(200).optional(),approvalMode:approvalMode.optional()}).strict().parse(request.body);
     const id = paramId(request.params); watchProject(id);
