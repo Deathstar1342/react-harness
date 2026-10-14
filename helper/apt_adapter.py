@@ -1,0 +1,202 @@
+"""First adapter: bounded, authenticated repository NEW package installs only.
+
+The service imports this only after the native launcher verifies runtime trees.
+No command string, supplied path, or subprocess environment crosses this API.
+"""
+import hashlib
+import contextlib
+import os
+from pathlib import Path
+import platform
+import re
+import sys
+from urllib.parse import urlsplit
+
+sys.path.append("/usr/lib/abyssus-helper/python")
+import apt
+import apt_pkg
+import apt.progress.base
+from core import require, digest, Rejected
+
+
+def hash_files(roots):
+    result = hashlib.sha256()
+    count = total = 0
+    excluded = {Path("/var/lib/apt/lists/partial"), Path("/var/lib/apt/lists/auxfiles"), Path("/var/lib/apt/lists/lock")}
+
+    def trusted(path):
+        # Ownership of a file is insufficient if an ancestor permits replacement.
+        for item in [path, *path.parents]:
+            require(item.exists() and not item.is_symlink(), "UNSAFE_APT_STATE")
+            info = item.stat()
+            require(info.st_uid == 0 and info.st_mode & 0o022 == 0, "UNSAFE_APT_STATE")
+        return path.stat()
+
+    def entries(path):
+        trusted(path)
+        yield path
+        if path.is_dir():
+            with os.scandir(path) as scan:
+                children = sorted(scan, key=lambda item: item.name)
+            require(len(children) <= 5000, "APT_STATE_LIMIT")
+            for item in children:
+                child = Path(item.path)
+                if child not in excluded:
+                    yield from entries(child)
+
+    for root in roots:
+        path = Path(root)
+        for file in entries(path):
+            count += 1
+            before = trusted(file)
+            result.update(str(file).encode() + b"\0")
+            require(file.is_dir() or file.is_file(), "UNSAFE_APT_STATE")
+            if file.is_dir():
+                require(count <= 5000, "APT_STATE_LIMIT")
+                result.update(b"directory\0")
+                continue
+            total += before.st_size
+            require(count <= 5000 and total <= 1024 * 1024 * 1024, "APT_STATE_LIMIT")
+            with file.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    result.update(block)
+            after = trusted(file)
+            require((before.st_ino, before.st_size, before.st_mtime_ns) == (after.st_ino, after.st_size, after.st_mtime_ns), "STALE_APT_STATE")
+    return result.hexdigest()
+
+
+class AptAdapter:
+    def __init__(self, installation_id):
+        self.installation_id = installation_id
+        self.cache = None
+        apt_pkg.init_config()
+        # APT_CONFIG is fixed by launcher. Never load ambient apt.conf.d hooks.
+        require(apt_pkg.config.find("Dir::Etc::parts") == "/usr/lib/abyssus-helper/empty-apt-config", "UNSAFE_APT_CONFIG")
+        require(apt_pkg.config.find("Dir::Etc::main") == "/dev/null", "UNSAFE_APT_CONFIG")
+        apt_pkg.config.set("APT::Install-Recommends", "false")
+        apt_pkg.config.set("APT::Install-Suggests", "false")
+        apt_pkg.config.set("Dir::Cache::pkgcache", "")
+        apt_pkg.config.set("Dir::Cache::srcpkgcache", "")
+        apt_pkg.config.set("Acquire::AllowInsecureRepositories", "false")
+        apt_pkg.config.set("Acquire::AllowDowngradeToInsecureRepositories", "false")
+        apt_pkg.config.set("APT::Get::AllowUnauthenticated", "false")
+        apt_pkg.config.set("DPkg::Options::", "--force-confold")
+        apt_pkg.init_system()
+
+    def target(self):
+        os_release = {}
+        for line in Path("/etc/os-release").read_text().splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                os_release[k] = v.strip('"')
+        require(os_release.get("ID") in ("ubuntu", "debian") and platform.machine() == "x86_64", "UNSUPPORTED_TARGET")
+        value = {"installationId": self.installation_id, "machineId": Path("/etc/machine-id").read_text().strip(),
+                 "distribution": os_release["ID"], "release": os_release["VERSION_ID"], "architecture": "amd64"}
+        require(re.fullmatch(r"[a-f0-9]{32}", value["machineId"]), "UNSUPPORTED_TARGET")
+        return {**value, "id": digest(value), "manager": "apt", "adapterVersion": 1}
+
+    @contextlib.contextmanager
+    def lock(self):
+        stack = contextlib.ExitStack()
+        try:
+            stack.enter_context(apt_pkg.SystemLock())
+            stack.enter_context(apt_pkg.FileLock("/var/lib/apt/lists/lock"))
+        except Exception:
+            stack.close()
+            raise Rejected("PACKAGE_MANAGER_BUSY") from None
+        with stack:
+            yield
+
+    def healthy(self, cache):
+        return not cache.broken_count and not cache.dpkg_journal_dirty and all(
+            p._pkg.current_state in (apt_pkg.CURSTATE_NOT_INSTALLED, apt_pkg.CURSTATE_INSTALLED, apt_pkg.CURSTATE_CONFIG_FILES)
+            for p in cache)
+
+    def preview(self, request):
+        state_roots = ["/var/lib/dpkg/status", "/var/lib/apt/extended_states"]
+        repository_roots = ["/etc/apt", "/var/lib/apt/lists"]
+        state_digest = hash_files(state_roots)
+        repository_digest = hash_files(repository_roots)
+        cache = apt.Cache()
+        require(self.healthy(cache), "DPKG_RECOVERY_REQUIRED")
+        # Freeze existing dependency candidates so the resolver cannot upgrade
+        # them opportunistically when their current version already suffices.
+        for existing in cache:
+            if existing.is_installed:
+                existing.candidate = existing.installed
+        # Explicit trust overrides and alternative transports defeat signed repository provenance.
+        for path in [Path("/etc/apt/sources.list"), *Path("/etc/apt/sources.list.d").glob("*")]:
+            if not path.is_file():
+                continue
+            text = path.read_text().lower()
+            require(not re.search(r"(?:trusted|allow-insecure|allow-weak|allow-downgrade-to-insecure)\s*[:=]\s*(?:yes|true|1)", text), "UNSAFE_REPOSITORY")
+        for item in request["packages"]:
+            require(item["name"] in cache, "PACKAGE_UNAVAILABLE")
+            package = cache[item["name"]]
+            if package.is_installed:
+                require("version" not in item or item["version"] == package.installed.version, "EXISTING_PACKAGE_CHANGE")
+                continue
+            if "version" in item:
+                require(item["version"] in package.versions, "VERSION_UNAVAILABLE")
+                package.candidate = package.versions[item["version"]]
+            require(package.candidate is not None, "VERSION_UNAVAILABLE")
+            package.mark_install(auto_fix=True, auto_inst=True, from_user=True)
+        require(not cache.broken_count and not cache.delete_count, "UNBOUNDED_PLAN")
+        changes = sorted(cache.get_changes(), key=lambda p: p.name)
+        require(len(changes) <= 32, "UNBOUNDED_PLAN")
+        resolved = []
+        requested = {p["name"]: p.get("version") for p in request["packages"]}
+        for package in changes:
+            require(not package.is_installed and package.marked_install and not package.marked_delete
+                    and not package.essential and not package.marked_downgrade and not package.marked_reinstall,
+                    "EXISTING_PACKAGE_CHANGE")
+            # python-apt can report marked_upgrade=True for a NEW install;
+            # absence of installed state above is the authoritative boundary.
+            version = package.candidate
+            require(version is not None and version.architecture in ("amd64", "all"), "UNBOUNDED_PLAN")
+            if requested.get(package.name) is not None:
+                require(version.version == requested[package.name], "RESOLVER_SUBSTITUTION")
+            origins = [{"origin": o.origin, "label": o.label, "archive": o.archive,
+                        "component": o.component, "site": o.site, "trusted": o.trusted}
+                       for o in version.origins]
+            require(origins and all(o["trusted"] and o["origin"] in ("Ubuntu", "Debian") and o["site"]
+                                    for o in origins), "UNTRUSTED_PACKAGE")
+            uris = sorted(version.uris)
+            require(uris and all(urlsplit(uri).scheme in ("http", "https") and urlsplit(uri).hostname
+                                 and not urlsplit(uri).username and not urlsplit(uri).password
+                                 and not urlsplit(uri).query and not urlsplit(uri).fragment for uri in uris), "UNTRUSTED_PACKAGE")
+            sha = version.record.get("SHA256", "")
+            require(re.fullmatch(r"[a-f0-9]{64}", sha) and version.size > 0 and version.installed_size > 0, "UNKNOWN_IMPACT")
+            resolved.append({"name": package.name, "version": version.version, "architecture": version.architecture,
+                             "sha256": sha, "downloadBytes": version.size, "installedBytes": version.installed_size,
+                             "repositories": origins, "uris": uris, "requested": package.name in requested})
+        require(all(name in {p["name"] for p in resolved} or cache[name].is_installed for name in requested), "RESOLVER_SUBSTITUTION")
+        download = sum(p["downloadBytes"] for p in resolved)
+        installed = sum(p["installedBytes"] for p in resolved)
+        require(download <= 128 * 1024 * 1024 and installed <= 512 * 1024 * 1024, "UNBOUNDED_PLAN")
+        require(state_digest == hash_files(state_roots) and repository_digest == hash_files(repository_roots), "STALE_APT_STATE")
+        self.cache = cache
+        return {"target": self.target(), "packages": resolved,
+                "stateDigest": state_digest,
+                "repositoryDigest": repository_digest,
+                "impact": {"newPackages": len(resolved), "downloadBytes": download, "installedBytes": installed,
+                           "removals": 0, "upgrades": 0, "downgrades": 0,
+                           "maintainerScripts": "trusted-package-root-execution",
+                           "triggers": "may-modify-existing-packages-and-services", "serviceChanges": "package-defined"}}
+
+    def install(self):
+        require(self.cache is not None and apt_pkg.pkgsystem_is_locked(), "LOCK_REQUIRED")
+        # Same resolved cache under frontend lock, with authenticated archive checks.
+        # python-apt releases only dpkg's inner lock while spawning dpkg.
+        require(self.cache.commit(apt.progress.base.AcquireProgress(), apt.progress.base.InstallProgress()), "APT_FAILED")
+
+    def reconcile(self, preview):
+        require(preview["target"]["id"] == self.target()["id"], "WRONG_TARGET")
+        cache = apt.Cache()
+        observed = []
+        for item in preview["packages"]:
+            package = cache[item["name"]] if item["name"] in cache else None
+            version = package.installed.version if package and package.installed else None
+            observed.append({"name": item["name"], "expectedVersion": item["version"], "installedVersion": version})
+        return {"packages": observed, "matches": all(p["expectedVersion"] == p["installedVersion"] for p in observed),
+                "healthy": self.healthy(cache)}

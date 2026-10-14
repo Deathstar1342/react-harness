@@ -4,6 +4,7 @@ import { existsSync, lstatSync, realpathSync, mkdirSync, readdirSync, readFileSy
 import { applicationHome, installationRoot, profilePaths } from '../locations.js';
 import { hash, key, ToolError, isProtected } from './paths.js';
 import { startRegistryProxy } from './registry-proxy.js';
+import { helperProtectedPaths } from '../helper-paths.js';
 
 const inside=(parent:string,child:string)=>key(parent)===key(child) || key(child).startsWith(key(parent).replace(/[\\/]$/,'')+path.sep);
 const overlap=(a:string,b:string)=>inside(a,b)||inside(b,a);
@@ -18,7 +19,7 @@ export class LinuxSandbox {
   validateRoot(input:string):string {
     const root=canonical(path.resolve(input));
     if(root.split(path.sep).some(isProtected))throw new ToolError('Credential and Git metadata directories cannot be selected as project roots.','SANDBOX_UNSAFE_PROJECT');
-    const protectedPaths=[this.policy.home,installationRoot,path.dirname(path.dirname(realpathSync(process.execPath))),...this.policy.protectedPaths].map(p=>canonical(path.resolve(p)));
+    const protectedPaths=[this.policy.home,installationRoot,path.dirname(path.dirname(realpathSync(process.execPath))),...this.policy.protectedPaths,...(process.platform==='linux'?helperProtectedPaths:[])].map(p=>canonical(path.resolve(p)));
     if([path.parse(root).root,canonical(homedir())].some(p=>inside(root,p)) || protectedPaths.some(p=>overlap(root,p)))throw new ToolError('Project overlaps application, configuration, home or state paths. Select a separate project folder.','SANDBOX_UNSAFE_PROJECT');
     if(process.platform==='linux' && ['/usr','/bin','/sbin','/lib','/lib64','/etc','/proc','/sys','/dev','/run','/mnt','/media','/opt'].some(p=>overlap(root,p)))throw new ToolError('System, mounted Windows and toolchain roots cannot be projects. Select a Linux project folder.','SANDBOX_UNSAFE_PROJECT');
     if(this.policy.projects().map(p=>canonical(path.resolve(p))).some(p=>p!==root && overlap(root,p)))throw new ToolError('Project overlaps another registered project. Select separate project folders.','SANDBOX_UNSAFE_PROJECT');
@@ -93,6 +94,9 @@ export class LinuxSandbox {
     // Distro-managed tools only. No /usr/local, personal prefixes, host /etc,
     // /proc, /sys, /run, network, interop or parent-home bind.
     for(const dir of distro.filter(dir=>dir!=='/etc/ssl/certs'))args.push('--ro-bind',dir,dir);
+    // Helper code lives beneath the distro runtime mount but conveys no agent
+    // capability. Hide it as well; config/audit/socket are never mounted.
+    if(existsSync('/usr/lib/abyssus-helper'))args.push('--tmpfs','/usr/lib/abyssus-helper','--remount-ro','/usr/lib/abyssus-helper');
     for(const [dest,source] of [['/bin','usr/bin'],['/lib','usr/lib'],['/lib64','usr/lib64']])if(existsSync(dest))args.push('--symlink',source,dest);
     // The backend's exact Node binary and adjacent npm distribution; no whole
     // toolcache/personal directory is exposed. Setup owns these trusted files.

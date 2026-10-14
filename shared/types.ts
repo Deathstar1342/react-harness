@@ -69,3 +69,19 @@ export interface PublicSettings { configured: boolean; models: Record<AgentRole,
 export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; profileId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }
 export interface BackendProofRequest { instanceId:string; nonce:string; expiresAt:number; mac:string }
 export interface BackendProof { action:'readiness'|'shutdown'; identity:BackendIdentity; nonce:string; mac:string }
+// M18 trusted backend/helper DTOs. These are not model actions or HTTP routes.
+export interface PackageHelperTarget { id:string; installationId:string; machineId:string; distribution:'ubuntu'|'debian'; release:string; architecture:'amd64'; manager:'apt'; adapterVersion:1 }
+export interface PackageHelperRequest { requestId:string; targetId:string; manager:'apt'; packages:{name:string;version?:string}[] }
+export interface PackageHelperDecision { requestId:string; previewDigest:string; decisionNonce:string; expiresAt:number }
+export interface PackageHelperPreview {
+  target:PackageHelperTarget;
+  packages:{name:string;version:string;architecture:string;sha256:string;downloadBytes:number;installedBytes:number;requested:boolean;uris:string[];repositories:{origin:string;label:string;archive:string;component:string;site:string;trusted:boolean}[]}[];
+  stateDigest:string; repositoryDigest:string;
+  impact:{newPackages:number;downloadBytes:number;installedBytes:number;removals:0;upgrades:0;downgrades:0;maintainerScripts:'trusted-package-root-execution';triggers:'may-modify-existing-packages-and-services';serviceChanges:'package-defined'};
+}
+export interface PackageHelperRecord {
+  requestId:string;request:PackageHelperRequest;preview:PackageHelperPreview;previewDigest:string;
+  state:'prepared'|'noop'|'authorized'|'running'|'succeeded'|'failed'|'uncertain';
+  createdAt:number;updatedAt:number;expiresAt:number;code:string;decision?:PackageHelperDecision;
+  reconciliation?:{matches:boolean;healthy:boolean;packages:{name:string;expectedVersion:string;installedVersion:string|null}[]};
+}
