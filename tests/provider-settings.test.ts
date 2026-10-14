@@ -123,11 +123,12 @@ it('external changes after rename are never adopted as the baseline and block su
   expect(()=>t.settings.update({models:{coder:'later-c'}})).toThrow('restart');expect(readFileSync(t.filename,'utf8')).toBe(edited);
 });
 it('captures in-flight credentials through retries and clears only subsequent requests; delayed errors contain neither key',async()=>{
-  let apiKey='old-secret';const auth:string[]=[];
+  let apiKey='old-secret',baseUrl='http://127.0.0.1/old';const auth:string[]=[],urls:string[]=[];
   let release!:()=>void;const pending=new Promise<void>(resolve=>{release=resolve;});
-  const fetch=vi.fn(async(_url:unknown,init?:RequestInit)=>{auth.push((init!.headers as Record<string,string>).Authorization);if(auth.length===1){await pending;return new Response('',{status:503,headers:{'retry-after':'0'}});}return new Response(JSON.stringify({data:[{id:'a'}]}));});vi.stubGlobal('fetch',fetch);
-  const provider=new ReloadingProvider(()=>({baseUrl:'http://127.0.0.1',apiKey,maxRetries:1}));const old=provider.models();apiKey='new-secret';release();expect(await old).toEqual(['a']);await provider.models();
+  const fetch=vi.fn(async(url:unknown,init?:RequestInit)=>{urls.push(String(url));auth.push((init!.headers as Record<string,string>).Authorization);if(auth.length===1){await pending;return new Response('',{status:503,headers:{'retry-after':'0'}});}return new Response(JSON.stringify({data:[{id:'a'}]}));});vi.stubGlobal('fetch',fetch);
+  const provider=new ReloadingProvider(()=>({baseUrl,apiKey,maxRetries:1}));const old=provider.models();apiKey='new-secret';baseUrl='http://127.0.0.1/new';release();expect(await old).toEqual(['a']);await provider.models();
   expect(auth).toEqual(['Bearer old-secret','Bearer old-secret','Bearer new-secret']);
+  expect(urls).toEqual(['http://127.0.0.1/old/models','http://127.0.0.1/old/models','http://127.0.0.1/new/models']);
   let reject!:(error:Error)=>void;fetch.mockImplementationOnce(()=>new Promise((_,r)=>{reject=r;}));const late=provider.models();apiKey='';reject(new Error('new-secret old-secret'));await expect(late).rejects.toThrow('Provider transport failed');await expect(provider.models()).rejects.toThrow('Configure');expect(fetch).toHaveBeenCalledTimes(4);
   expect(childEnvironment({STARK_API_KEY:'new-secret',ARCHITECT_MODEL:'model',PATH:'safe'})).not.toHaveProperty('STARK_API_KEY');
 });

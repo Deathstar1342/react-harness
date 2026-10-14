@@ -286,4 +286,3 @@ System installs stay disabled until explicit administrator provisioning in the s
 ## Electron desktop and browser pairing (M20)
 
 The runnable desktop shell, dedicated runtime staging, guided profiles, native folder selection and optional trusted helper setup are documented in [desktop setup](desktop.md). M21 owns final installers/release acceptance. Ordinary `npm start` now displays a single-use five-minute pairing code; enter it in the browser before using API/SSE. Backend restart revokes paired sessions. Configure endpoint/key in Settings; changing endpoints requires explicit replacement or clear of an existing key. No live-provider probe runs merely from saving.
-

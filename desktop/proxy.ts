@@ -22,11 +22,15 @@ export async function desktopResponse(request:Request,root:string,target?:Backen
     if(body)headers['content-type']='application/json';
     const last=request.headers.get('last-event-id');if(last&&/^\d{1,16}$/.test(last))headers['last-event-id']=last;
     const abort=new AbortController();const cancel=()=>abort.abort();request.signal.addEventListener('abort',cancel,{once:true});
-    const response=await fetch(target.address+url.pathname+url.search,{method:request.method,headers,body,redirect:'error',signal:abort.signal});
-    const type=response.headers.get('content-type')??'application/json';
-    if(!type.startsWith('application/json')&&!type.startsWith('text/event-stream')){await response.body?.cancel();return new Response(null,{status:502});}
-    const reader=response.body?.getReader();
     const cleanup=()=>request.signal.removeEventListener('abort',cancel);
+    if(request.signal.aborted)abort.abort();
+    let response:Response;
+    try{response=await fetch(target.address+url.pathname+url.search,{method:request.method,headers,body,redirect:'error',signal:abort.signal});}
+    catch(error){cleanup();throw error;}
+    const type=response.headers.get('content-type')??'application/json';
+    if(!type.startsWith('application/json')&&!type.startsWith('text/event-stream')){abort.abort();cleanup();void response.body?.cancel().catch(()=>{});return new Response(null,{status:502});}
+    const reader=response.body?.getReader();
+    if(!reader)cleanup();
     const stream=reader?new ReadableStream<Uint8Array>({
       async pull(controller){try{const item=await reader.read();if(item.done){cleanup();controller.close();}else controller.enqueue(item.value);}catch(error){cleanup();controller.error(error);}},
       cancel(){abort.abort();cleanup();void reader.cancel().catch(()=>{});},

@@ -8,6 +8,7 @@ export function DesktopRoot() {
   const bridge=window.abyssusDesktop;
   const [status,setStatus]=useState<DesktopStatus>();
   const [opened,setOpened]=useState(false),[showSetup,setShowSetup]=useState(false);
+  const [offlineEditor,setOfflineEditor]=useState(false);
   const [paired,setPaired]=useState(false),[pairRequired,setPairRequired]=useState(false),[code,setCode]=useState('');
   const [environment,setEnvironment]=useState(''),[home,setHome]=useState(''),[legacyRoot,setLegacyRoot]=useState('');
   const [mode,setMode]=useState<'existing'|'initialize'|'migrate'>('existing');
@@ -26,13 +27,14 @@ export function DesktopRoot() {
       {pairRequired&&<form onSubmit={e=>{e.preventDefault();void run(async()=>{await post('/auth/pair',{code});setCode('');setPaired(true);});}}><label>Pairing code<input type="password" autoComplete="off" value={code} onChange={e=>setCode(e.target.value)}/></label><button className="button primary" disabled={busy}>Connect</button></form>}
       {error&&<p role="alert">{error}</p>}</main>;
   }
-  const needsSetup=!opened||showSetup||status?.phase!=='ready';
+  const needsSetup=!opened||showSetup||(status?.phase!=='ready'&&!offlineEditor);
   return <>
     {opened&&status?.sessionId&&<App key={status.sessionId}/>}
-    {opened&&<button className="desktop-environment" onClick={()=>setShowSetup(true)}>Desktop · {status?.selection?.environment.kind==='wsl'?status.selection.environment.distribution:'Linux'}</button>}
+    {opened&&<button className="desktop-environment" onClick={()=>{setOfflineEditor(false);setShowSetup(true);}}>Desktop · {status?.selection?.environment.kind==='wsl'?status.selection.environment.distribution:'Linux'}{status?.phase!=='ready'?' · Offline':''}</button>}
     {needsSetup&&<div className={opened?'desktop-overlay':''}><main className="desktop-setup" aria-label="Desktop setup">
       <img src={logo} alt="abysSUS"/><h1>{status?.phase==='ready'?'Desktop environment':'Open your workspace'}</h1>
       <p>{status?.message??'Reading desktop setup…'}</p>
+      {opened&&status?.phase!=='ready'&&<button className="button" onClick={()=>{setShowSetup(false);setOfflineEditor(true);}}>Return to editor buffers</button>}
       {status?.phase!=='ready'&&<form onSubmit={e=>{e.preventDefault();void run(async()=>{
         const result=await bridge.start({environment:environment==='linux'?{kind:'linux'}:{kind:'wsl',distribution:environment},home,mode,...(mode==='migrate'?{legacyRoot}:{})});setStatus(result);if(result.phase==='ready'){setOpened(true);setShowSetup(true);}
       });}}>

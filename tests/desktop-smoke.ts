@@ -3,14 +3,18 @@ import { mkdtempSync, mkdirSync, rmSync,writeFileSync,readFileSync } from 'node:
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { spawn } from 'node:child_process';
 const root=path.resolve(import.meta.dirname,'..'),home=mkdtempSync(path.join(tmpdir(),'abyssus-electron-'));
 mkdirSync(path.join(root,'test-results'),{recursive:true});
-const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home},timeout:30000});
+const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],chromiumSandbox:true,cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home,MODEL_STREAMING:'false'},timeout:30000});
 let app=await launch();
+const close=async()=>{await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});await app.close();};
 let completed=false;
 const deadline=setTimeout(()=>{console.error('FAIL desktop smoke exceeded its two-minute bound');void app.evaluate(({app})=>app.exit(1)).finally(()=>process.exit(1));},120000);
 try {
-  const page=await app.firstWindow();
+  let page=await app.firstWindow();
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible();
   assert.equal(await page.evaluate(()=>typeof (globalThis as Record<string,unknown>).require),'undefined');
@@ -53,20 +57,62 @@ try {
       const streamed=await page.evaluate(async chat=>{const abort=new AbortController();const response=await fetch(`/api/chats/${chat}/events`,{signal:abort.signal});const reader=response.body!.getReader();const first=await reader.read();await reader.cancel();abort.abort();return new TextDecoder().decode(first.value);},ids.chat);
       assert(streamed.includes(': connected'));
       console.log('CHECK SSE first chunk and cancellation completed');
+      await page.reload();
+      await expect(page.getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:15000});
+      await page.getByRole('button',{name:'Preserve desktop state',exact:true}).click();
+      await page.getByRole('button',{name:'Toggle files',exact:true}).click();
+      const worker=page.waitForEvent('worker',{timeout:15000});
+      await page.getByRole('button',{name:'sample.txt',exact:true}).click();
+      const editor=page.locator('.monaco-editor textarea').first();await expect(editor).toBeVisible({timeout:15000});
+      assert((await worker).url().startsWith('abyssus://app/'));
+      await editor.press('ControlOrMeta+A');await editor.press('Backspace');await editor.pressSequentially('saved in real Electron');
+      await expect(page.getByLabel('Unsaved changes')).toBeVisible();
+      await page.getByRole('button',{name:'Save',exact:true}).click();
+      await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.txt'),'utf8'),'saved in real Electron');
+      console.log('PASS real Monaco open, worker-backed editor input, dirty guard and version-checked save');
+      const provider=createServer((req,res)=>{
+        res.setHeader('content-type','application/json');
+        if(req.url==='/v1/models')res.end(JSON.stringify({data:['gemini-3.1-pro-preview','gemini-3.8-flash','gemini-3.6-flash'].map(id=>({id}))}));
+        else {req.resume();req.once('end',()=>res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({version:1,type:'final',message:'Connection OK'})},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:10,total_tokens:20}})));}
+      });provider.listen(0,'127.0.0.1');await once(provider,'listening');
+      try {
+        await page.getByRole('button',{name:'Settings',exact:true}).click();
+        await page.getByLabel('STARK API endpoint').fill(`http://127.0.0.1:${(provider.address() as {port:number}).port}/v1`);
+        await page.getByLabel('Replacement API key').fill('synthetic-desktop-only');
+        await page.getByRole('button',{name:'Save provider settings',exact:true}).click();
+        await expect(page.getByText('Provider settings saved. Model defaults apply to new chats only.')).toBeVisible();
+        await page.getByRole('button',{name:'Test connection',exact:true}).click();
+        await expect(page.getByText('Connection checks passed',{exact:true})).toBeVisible({timeout:30000});
+        await page.getByRole('button',{name:'Close',exact:true}).click();
+        console.log('PASS blank-profile endpoint/key through real Settings and explicit synthetic HTTP connection test');
+      }finally{provider.closeAllConnections();await new Promise<void>(resolve=>provider.close(()=>resolve()));}
+      const beforeCrash=(await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId;
+      await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+      await expect(page.getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:20000});
+      assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,beforeCrash);
+      console.log('PASS actual renderer crash/reopen retains exact backend session');
       await app.evaluate(({dialog})=>{dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});});
       assert.equal(await page.evaluate(()=>window.abyssusDesktop!.pickDirectory()),null);
       await page.evaluate(()=>window.abyssusDesktop!.dirty(true));
       await assert.rejects(page.evaluate(()=>window.abyssusDesktop!.helper('setup')));
       await page.evaluate(()=>window.abyssusDesktop!.dirty(false));
+      await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:0,checkboxChecked:false});});
+      const cancelled=await page.evaluate(()=>window.abyssusDesktop!.helper('setup'));
+      assert.equal(cancelled.phase,'ready');assert.equal(cancelled.sessionId,beforeCrash);
+      console.log('PASS native helper confirmation cancellation preserves backend and authority');
+      await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
       // Exact private descriptor is read by this test process only; never logged.
       const descriptor=JSON.parse(readFileSync(path.join(profile,'backend.json'),'utf8'));
       assert.equal((await fetch(descriptor.address+'/api/projects')).status,401);
       assert.equal((await fetch(descriptor.address+`/api/chats/${ids.chat}/events`)).status,401);
+      const duplicate=spawn(app.process().spawnfile,[path.join(root,'tests/desktop-electron-entry.cjs')],{env:{...process.env,ABYSSUS_SMOKE_HOME:home},stdio:'ignore'});
+      const duplicateExit=await once(duplicate,'exit');assert.equal(duplicateExit[0],0);
+      assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,beforeCrash);
+      console.log('PASS actual second application instance exits without a second backend');
       await page.screenshot({path:path.join(root,'test-results/electron-linux-connected.png')});
       console.log('PASS real Linux staged Node/SQLite/PTY prerequisites, authenticated API+streaming SSE, unauthenticated denial, native-picker cancellation adapter and dirty setup guard');
-      await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());
       console.log('CHECK waiting deliberate backend shutdown');
-      await new Promise<void>(resolve=>{const child=app.process();if(child.exitCode!==null)resolve();else child.once('exit',()=>resolve());});
+      await close();
       app=await launch();const reopened=await app.firstWindow();
       await expect(reopened.getByLabel('Persistent profile home (Linux path)')).toHaveValue(profile);
       await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
@@ -74,19 +120,40 @@ try {
       await expect(reopened.getByRole('heading',{name:'Optional system installs'})).toBeVisible({timeout:45000});
       const chats=await reopened.evaluate(async id=>fetch('/api/projects/'+id+'/chats').then(r=>r.json()),ids.project);
       assert(chats.some((chat:{id:string})=>chat.id===ids.chat));
-      await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());
-      await new Promise<void>(resolve=>{const child=app.process();if(child.exitCode!==null)resolve();else child.once('exit',()=>resolve());});
+      await reopened.getByRole('button',{name:'Continue to chats'}).click();page=reopened;
+      // Crash only the exact backend child of this disposable Electron process.
+      // Each restart must replace the document, even when reopening the same profile.
+      let oldSession=(await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId;
+      for(const nextHome of [profile,path.join(home,'second-profile')]) {
+        const receipt=JSON.parse(readFileSync(path.join(profile,'backend.json'),'utf8'));
+        const parent=readFileSync(`/proc/${receipt.identity.pid}/status`,'utf8').match(/^PPid:\s+(\d+)/m)?.[1];
+        assert.equal(Number(parent),app.process().pid);process.kill(receipt.identity.pid,'SIGKILL');
+        await expect.poll(()=>page.evaluate(()=>window.abyssusDesktop!.status()).then(s=>s.phase)).toBe('failed');
+        await page.getByLabel('Persistent profile home (Linux path)').fill(nextHome);
+        await page.getByLabel('Profile action').selectOption(nextHome===profile?'existing':'initialize');
+        const priorPage=page,replacement=app.waitForEvent('window');
+        await page.getByRole('button',{name:'Open profile',exact:true}).click();page=await replacement;
+        await expect.poll(()=>priorPage.isClosed()).toBe(true);
+        await expect.poll(()=>page.evaluate(()=>window.abyssusDesktop!.status()).then(s=>s.phase)).toBe('ready');
+        const nextSession=(await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId;
+        assert.notEqual(nextSession,oldSession);oldSession=nextSession;
+        const projects=await page.evaluate(()=>fetch('/api/projects').then(r=>r.json()));
+        if(nextHome===profile){assert(projects.some((p:{id:string})=>p.id===ids.project));}
+        else {assert.deepEqual(projects,[]);await expect(page.getByRole('button',{name:'Preserve desktop state',exact:true})).toHaveCount(0);}
+      }
+      console.log('PASS real same-profile and two-profile recovery replaces renderer document and old backend session');
+      await close();
       console.log('PASS deliberate actual backend drain and profile/chat persistence across desktop restart');
       app=await launch();
     } finally{rmSync(project,{recursive:true,force:true});}
   }
-  await app.evaluate(({app})=>app.exit(0));
+  await close();
   app=await launch();await expect((await app.firstWindow()).getByRole('heading',{name:'Open your workspace'})).toBeVisible();
   console.log('PASS real application restart with isolated desktop profile');
   completed=true;
 } finally {
+  await close().catch(()=>{});
   clearTimeout(deadline);
-  await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close().catch(()=>{});
   if(completed)rmSync(home,{recursive:true,force:true});
   else console.log('Failed disposable desktop profile retained at '+home);
 }
