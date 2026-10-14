@@ -16,6 +16,8 @@ const deadline=setTimeout(()=>{console.error('FAIL desktop smoke exceeded its tw
 try {
   let page=await app.firstWindow();
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  page.on('console',message=>{if(message.type()==='error')console.error('Renderer error: '+message.text());});
+  page.on('requestfailed',request=>console.error('Request failed: '+new URL(request.url()).pathname+' '+request.failure()?.errorText));
   await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible();
   assert.equal(await page.evaluate(()=>typeof (globalThis as Record<string,unknown>).require),'undefined');
   assert.equal(await page.evaluate(()=>typeof (globalThis as Record<string,unknown>).process),'undefined');
@@ -38,7 +40,7 @@ try {
     // SQLite, actual PTY/runtime and sandbox below are real.
     await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
     const profile=path.join(home,'profile'),project=mkdtempSync(path.join(tmpdir(),'abyssus-desktop-project-'));
-    writeFileSync(path.join(project,'sample.txt'),'original');
+    writeFileSync(path.join(project,'sample.json'),'{"value":1}');
     try {
       await page.getByLabel('Persistent profile home (Linux path)').fill(profile);
       await page.getByLabel('Profile action').selectOption('initialize');
@@ -62,13 +64,13 @@ try {
       await page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:'Preserve desktop state',exact:true}).click();
       await page.getByRole('button',{name:'Toggle files',exact:true}).click();
       const worker=page.waitForEvent('worker',{timeout:15000});
-      await page.getByRole('button',{name:'sample.txt',exact:true}).click();
+      await page.getByRole('button',{name:'sample.json',exact:true}).click();
       const editor=page.locator('.monaco-editor textarea').first();await expect(editor).toBeVisible({timeout:15000});
       assert((await worker).url().startsWith('abyssus://app/'));
-      await editor.press('ControlOrMeta+A');await editor.press('Backspace');await editor.pressSequentially('saved in real Electron');
+      await editor.press('ControlOrMeta+A');await editor.press('Backspace');await editor.pressSequentially('{"saved":"real Electron"}');
       await expect(page.getByLabel('Unsaved changes')).toBeVisible();
       await page.getByRole('button',{name:'Save',exact:true}).click();
-      await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.txt'),'utf8'),'saved in real Electron');
+      await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.json'),'utf8'),'{"saved":"real Electron"}');
       console.log('PASS real Monaco open, worker-backed editor input, dirty guard and version-checked save');
       const provider=createServer((req,res)=>{
         res.setHeader('content-type','application/json');
