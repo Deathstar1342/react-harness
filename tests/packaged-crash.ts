@@ -38,9 +38,16 @@ try {
   if(process.platform==='win32'){
     observer=spawn(path.join(process.env.SystemRoot!,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-File',path.resolve('tests/windows-crash-observer.ps1')],{env:{...env,ABYSSUS_CRASH_PID:String(identity.pid),ABYSSUS_CRASH_PARENT:String(launcher.pid),ABYSSUS_CRASH_EXE:realpathSync.native(executable)},windowsHide:true,stdio:['ignore','pipe','pipe']});
     observerDone=once(observer,'close');
+    observer.on('error',error=>console.error(new Date().toISOString(),'Observer launch failed',error));
+    observer.on('exit',(code,signal)=>console.log(new Date().toISOString(),'Observer exited',{pid:observer!.pid,code,signal}));
     console.log(new Date().toISOString(),'START process-handle observer',observer.pid);
     observer.stdout!.on('data',data=>{observations+=data.toString();process.stdout.write('OBSERVER '+data.toString());});observer.stderr!.on('data',data=>process.stderr.write(data));
-    await expect.poll(()=>observations.includes('"event":"ready"'),{timeout:10000}).toBe(true);
+    // Three independently bounded CIM queries can consume 15s, plus a cold
+    // PowerShell startup. Identity verification must finish before any kill.
+    await expect.poll(()=>{
+      if(observer!.exitCode!==null||observer!.signalCode!==null)throw new Error('Observer exited before verified readiness: '+observations);
+      return observations.includes('"event":"ready"');
+    },{timeout:30000}).toBe(true).catch(error=>{console.error('Observer readiness diagnostics',{pid:observer!.pid,exitCode:observer!.exitCode,signal:observer!.signalCode,observations});throw error;});
   }
   const killedAt=Date.now();let exitAt:number|undefined,closeAt:number|undefined;
   launcher.once('exit',()=>{exitAt=Date.now()-killedAt;});launcher.once('close',()=>{closeAt=Date.now()-killedAt;});

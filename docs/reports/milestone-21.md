@@ -8,6 +8,16 @@ Assisted unsigned Windows x64 NSIS installer, Ubuntu24.04 x64 desktop/backend .d
 
 See [release procedure](../release.md) for contracts and [setup guide](../installer-setup.md) for user steps. Shared/types.ts, public API, provider prompts, planStep, per-chat model snapshots and approval contracts are unchanged. Narrow internal changes: packaged source identity/launcher selection, installation leases, native bootstrap and helper administrator maintenance refusal.
 
+## Final source validation
+
+Candidate source: `da4834b00352cc1d5a2cca05f21519761d5a8b1f`. A subsequent documentation-only handoff commit updates this report; artifact receipts identify the candidate source.
+
+- [Validate 38558792296](https://github.com/Deathstar1342/react-harness/actions/runs/38558792296): typecheck, **680 passed / 7 skipped**, build and disabled-user-namespace refusal succeeded.
+- [Desktop 38558792289](https://github.com/Deathstar1342/react-harness/actions/runs/38558792289): Windows and Ubuntu desktop checks succeeded.
+- [Privileged helper 38558792309](https://github.com/Deathstar1342/react-harness/actions/runs/38558792309): disposable privileged package/policy/repair/interruption checks succeeded.
+- Local typecheck passed. The new packaged setup inventory check rejected the downloaded `6563c7a` archive before launch; regenerating its inspection copy's manifest covered every setup file with correct hashes. Original downloaded archives remain unchanged.
+- [Installer matrix 38558792251](https://github.com/Deathstar1342/react-harness/actions/runs/38558792251), Linux job `115834436158`: actual install, complete setup checksums, persistent application records across backend/desktop removal and reinstall, all maintenance/interruption/repair checks, helper ordering and actual main-crash/surviving-backend exclusion passed. Preserved data includes profile/project/chat IDs, per-chat model snapshots, settings, synthetic configuration and exact project files. Four bounded dpkg state tests passed.
+
 ## Complete matrix before final artifact correction
 
 Tested source: `6563c7a33ab48694b34abea66a0dd74ca0ccd395`. All workflows passed, but independent artifact inspection found the setup-guide checksum defect below; this source is retained evidence, not the final handoff candidate.
@@ -35,6 +45,7 @@ Tested source: `6563c7a33ab48694b34abea66a0dd74ca0ccd395`. All workflows passed,
 
 ## Retained failed evidence and review corrections
 
+- Corrected-checksum source `da4834b`, installer run `38558792251`: Linux fully passed. Windows job `115836815462` passed unpacked and installed checksum checks, installation, refusal, uninstall/reinstall and data retention. Crash setup then failed its 10-second observer-ready deadline before any forced termination; exact main6712/launcher4168 closed normally, and the transaction was quarantined. No observer stdout/stderr was captured, so the precise delay is unproven. Diagnostic archive `11891968118`, ZIP SHA256 `9564cc7f3bba3e2652e5f840cce563fa43e1b9646a601e89131fc89a614bebe0`, preserves this failure. The observer performs three CIM calls each bounded at5s; the follow-up adds stage/exit/failure diagnostics and a30s startup/readiness budget under the existing60s overall deadline. No kill occurs without verified identity/handle readiness, and the15s actual lease-reacquisition requirement is unchanged. A fresh disposable complete matrix is required.
 - Full matrix `6563c7a` passed, including Windows job `115830832754`: actual main PID2508, owned cmd launcher4184, independently opened handle signalled exit (observer wait262ms), no matching processes remained, immediate lease reacquisition and second probe succeeded (94ms total), installed restart passed. Downloaded installer SHA256 `c8fed38739cd2cca45a70e8ddb196ceb41feca0a0d0856648abf797f9d9f14c3`, 199813477 bytes, Authenticode `NotSigned`. Independent archive inspection confirmed embedded source and exact Linux .deb bytes, but found `package:prepare` overwrote SETUP.md with Windows checkout line endings while retaining Linux's earlier SHA256SUMS; the added Windows notices were also absent from that inventory. Preparation now regenerates the complete setup manifest after copying the guide and generating platform notices. Actual packaged smoke verifies every setup file and checksum before launch. This caught defect remains recorded despite green earlier CI; the corrected source requires a complete rerun.
 - Sandbox Vite build hit `EPERM realpath` in Monaco. The same isolated D: build succeeded with normal permissions; source behavior was not weakened.
 - Initial full suite put TEMP inside the installation checkout, producing **83 failures / 557 passes / 33 skips** and a project-overlap rejection. Moving fixtures to the separate permitted D: visualization temp root produced the full pass above. No sandbox rule was loosened.
@@ -53,16 +64,16 @@ Tested source: `6563c7a33ab48694b34abea66a0dd74ca0ccd395`. All workflows passed,
 
 ## Candidate artifact receipts
 
-All packages in this inventory are built from `97311e4784b0e38e3f3a4c67b8cf18ba8a32b84e`. Downloaded copies are in the ignored `build/release-candidate/97311e4/` directory on D:. These are candidate artifacts, not a published Release. Archive digests were independently checked against GitHub; extracted package hashes match their bundled SHA256SUMS. Both Linux desktop and backend embedded `release.json` files were inspected and match the source above.
+All packages in this inventory are built from `da4834b00352cc1d5a2cca05f21519761d5a8b1f`. Downloaded copies are in the ignored `build/release-candidate/da4834b/` directory in worktree6fd9 (physically on D:). These are candidate artifacts, not a published Release. Archive digests were independently checked against GitHub; extracted package hashes match their bundled SHA256SUMS. Both Linux desktop and backend embedded `release.json` files were inspected and match the source above. Earlier candidate archives remain separate and are superseded by this inventory.
 
 | Package | Bytes | SHA256 |
 | --- | ---: | --- |
-| `abysSUS-0.1.0-ubuntu24.04-amd64.deb` | 191170640 | `887526a0072b02fc353923d3dedb1c331079726779a4cef2a4aa719ca0eca059` |
-| `abyssus-backend_0.1.0_amd64.deb` | 66152742 | `07e3ab577c47db4eb532b58c37bcc239fd4cc331e814442886303eabc10e5b16` |
+| `abysSUS-0.1.0-ubuntu24.04-amd64.deb` | 191156700 | `d3020669270b319512f9fafc371793ccdf395e36a7b64baad358e3663ff175e8` |
+| `abyssus-backend_0.1.0_amd64.deb` | 66136666 | `4a41d237e4e876cc0bcab4ac08adb8bc8e631b48d81dad148815d08b7582cfb1` |
 | `abyssus-helper-staging.deb` | 328748 | `5b241bc887708e9ff56a98b725c0e3798a056866c589b5f149a13f0707a8757a` |
 
-- [Linux desktop archive 11887615826](https://github.com/Deathstar1342/react-harness/actions/runs/38551624724/artifacts/11887615826): ZIP SHA256 `60a3b3e4dd9e943cc2283fa3011e3365490f2fc44b22196248074e56992ab68d`.
-- [Bundled Linux payload 11887780026](https://github.com/Deathstar1342/react-harness/actions/runs/38551624724/artifacts/11887780026): ZIP SHA256 `03b5d4ce23c93204dd9ebb57befd32e99c2800f6536c17ff5cf659bad280d4e4`.
+- [Linux desktop archive 11891187526](https://github.com/Deathstar1342/react-harness/actions/runs/38558792251/artifacts/11891187526): ZIP SHA256 `fc5e0fac48c9dfed88c7831822b5185ae9f7c9df639f4fa4875e58436f899a7e`.
+- [Bundled Linux payload 11891467317](https://github.com/Deathstar1342/react-harness/actions/runs/38558792251/artifacts/11891467317): ZIP SHA256 `914bbf79fc10553886213eb2cbe21ad936b5b1d75b199df41a69f9b8565cc166`.
 - Bundle includes setup guide, checksums and Linux third-party notices; the helper .deb includes its relinkable object and libc notice. Final source-availability/license redistribution review belongs to release publication. The native backend runtime receipt records Node24.16.0, modules137, Linux x64 and executable SHA256 `b2959781cc5a74c357ffa02367efa8a0330cbb1c9cb347732fdfaaaca381cbcd`.
 
 ## Remaining delivery/release gates
