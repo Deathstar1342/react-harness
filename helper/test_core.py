@@ -92,6 +92,13 @@ class CoreTest(unittest.TestCase):
     def test_final_commit_failure_preserves_post_effect_uncertainty(self):
         decision = self.prepare()
         self.engine.dispatch("authorize", decision)
+        second_request = {**self.request, "requestId": "22345678-1234-1234-1234-123456789012"}
+        second = self.engine.dispatch("prepare", second_request)
+        second_decision = {**decision, "requestId": second["requestId"], "previewDigest": second["previewDigest"]}
+        self.engine.dispatch("authorize", second_decision)
+        third_request = {**self.request, "requestId": "32345678-1234-1234-1234-123456789012"}
+        third = self.engine.dispatch("prepare", third_request)
+        third_decision = {**decision, "requestId": third["requestId"], "previewDigest": third["previewDigest"]}
         original = self.audit.save
         def fail_success(record, new=False):
             if record["state"] == "succeeded":
@@ -101,6 +108,34 @@ class CoreTest(unittest.TestCase):
             result = self.engine.dispatch("execute", decision)
         self.assertEqual(self.adapter.calls, 1)
         self.assertEqual(result["state"], "uncertain")
+        self.assertNotIn("reconciliation", result)
+        with self.assertRaisesRegex(Rejected, "RECOVERY_REQUIRED"):
+            self.engine.dispatch("prepare", {**self.request, "requestId": "42345678-1234-1234-1234-123456789012"})
+        with self.assertRaisesRegex(Rejected, "RECOVERY_REQUIRED"):
+            self.engine.dispatch("authorize", third_decision)
+        with self.assertRaisesRegex(Rejected, "RECOVERY_REQUIRED"):
+            self.engine.dispatch("execute", second_decision)
+        self.engine.dispatch("reconcile", {"requestId": self.request["requestId"]})
+        self.assertFalse(self.audit.unresolved())
+        self.assertEqual(self.audit.get(self.request["requestId"])["state"], "uncertain")
+    def test_failed_uncertainty_save_blocks_same_process_until_explicit_recovery(self):
+        decision = self.prepare()
+        self.engine.dispatch("authorize", decision)
+        original = self.audit.save
+        def fail_final(record, new=False):
+            if record["state"] in ("succeeded", "uncertain"):
+                raise OSError("persistence unavailable")
+            return original(record, new)
+        with patch.object(self.audit, "save", fail_final), self.assertRaises(OSError):
+            self.engine.dispatch("execute", decision)
+        self.assertEqual(self.adapter.calls, 1)
+        self.assertEqual(self.audit.get(self.request["requestId"])["state"], "running")
+        self.assertTrue(self.audit.unresolved())
+        with self.assertRaisesRegex(Rejected, "RECOVERY_REQUIRED"):
+            self.engine.dispatch("prepare", {**self.request, "requestId": "22345678-1234-1234-1234-123456789012"})
+        observed = self.engine.dispatch("reconcile", {"requestId": self.request["requestId"]})
+        self.assertEqual(observed["state"], "uncertain")
+        self.assertFalse(self.audit.unresolved())
     def test_interrupt_restart_never_replays(self):
         decision = self.prepare()
         self.engine.dispatch("authorize", decision)

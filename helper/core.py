@@ -101,8 +101,11 @@ class Audit:
             self.db.execute("INSERT INTO events(id,event) VALUES(?,?)", (record["requestId"], canonical(record)))
 
     def unresolved(self):
-        return any(json.loads(row[0])["state"] == "uncertain" and not json.loads(row[0]).get("reconciliation", {}).get("healthy")
-                   for row in self.db.execute("SELECT record FROM requests"))
+        for (raw,) in self.db.execute("SELECT record FROM requests"):
+            record = json.loads(raw)
+            if record["state"] == "running" or (record["state"] == "uncertain" and not record.get("reconciliation", {}).get("healthy")):
+                return True
+        return False
 
 
 def authenticate(envelope, key, audit):
@@ -143,7 +146,14 @@ class Engine:
             exact(body, ["requestId"])
             record = self.audit.get(body["requestId"])
             if action == "reconcile":
-                require(record["state"] in ("uncertain", "failed", "succeeded"), "INVALID_STATE")
+                require(record["state"] in ("running", "uncertain", "failed", "succeeded"), "INVALID_STATE")
+                # Dispatch is serialized: a durable running row seen by a later
+                # request is abandoned after an audit-write failure, not a live
+                # concurrent install. Persist uncertainty before observations.
+                if record["state"] == "running":
+                    record.update(state="uncertain", code="ABANDONED_RUNNING")
+                    record.pop("reconciliation", None)
+                    self.audit.save(record)
                 with self.adapter.lock():
                     record["reconciliation"] = self.adapter.reconcile(record["preview"])
                 # Observations never rewrite the original outcome.
@@ -181,5 +191,9 @@ class Engine:
         except Exception as error:
             record.update(state="uncertain" if effects_started else "failed",
                           code=str(error) if isinstance(error, Rejected) else "PACKAGE_OPERATION_FAILED")
+            if effects_started:
+                # A pre-failure successful observation cannot authorize recovery
+                # after uncertainty. Only an explicit later reconcile can do so.
+                record.pop("reconciliation", None)
             self.audit.save(record)
         return record
