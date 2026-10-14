@@ -12,11 +12,12 @@ let backend:number|undefined;
 const deadline=setTimeout(()=>{console.error('FAIL owned crash recovery timed out');if(backend)try{process.kill(backend,'SIGCONT');}catch{}process.exit(1);},60000);
 console.log(new Date().toISOString(),'START crash launch', {executable,home});
 const app=await electron.launch({executablePath:executable,args:['--user-data-dir='+home],env,chromiumSandbox:true,timeout:30000});
+const launcher=app.process();let mainKilled=false;
 try {
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
   const identity=await app.evaluate(()=>({pid:process.pid,path:process.execPath}));
-  console.log(new Date().toISOString(),'END crash launch; actual identity',identity,'child PID',app.process().pid);
-  assert.equal(identity.pid,app.process().pid,'Crash must target the actual Electron main process');
+  console.log(new Date().toISOString(),'END crash launch; actual identity',identity,'launcher PID',launcher.pid);
+  if(process.platform!=='win32')assert.equal(identity.pid,launcher.pid);
   assert.equal(realpathSync.native(identity.path).toLowerCase(),realpathSync.native(executable).toLowerCase());
   const page=await app.firstWindow({timeout:15000});
   await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible({timeout:15000});
@@ -27,7 +28,7 @@ try {
     await expect(page.getByRole('heading',{name:'Optional system installs'})).toBeVisible({timeout:45000});
     const children=readdirSync('/proc').filter(p=>/^\d+$/.test(p)).flatMap(p=>{try{
       const status=readFileSync('/proc/'+p+'/status','utf8'),cmd=readFileSync('/proc/'+p+'/cmdline','utf8');
-      return Number(status.match(/^PPid:\s+(\d+)/m)?.[1])===app.process().pid&&realpathSync('/proc/'+p+'/exe')==='/opt/abyssus/runtime/bin/node'&&cmd.includes('/opt/abyssus/app/desktop/backend-entry.js')?[Number(p)]:[];
+      return Number(status.match(/^PPid:\s+(\d+)/m)?.[1])===identity.pid&&realpathSync('/proc/'+p+'/exe')==='/opt/abyssus/runtime/bin/node'&&cmd.includes('/opt/abyssus/app/desktop/backend-entry.js')?[Number(p)]:[];
     }catch{return [];}});
     assert.equal(children.length,1);backend=children[0];process.kill(backend,'SIGSTOP');
   }
@@ -35,17 +36,19 @@ try {
   // makes its surviving package lease observable after main dies.
   let observer:ReturnType<typeof spawn>|undefined,observerDone:Promise<unknown>|undefined,observations='';
   if(process.platform==='win32'){
-    observer=spawn(path.join(process.env.SystemRoot!,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-File',path.resolve('tests/windows-crash-observer.ps1')],{env:{...env,ABYSSUS_CRASH_PID:String(app.process().pid),ABYSSUS_CRASH_EXE:realpathSync.native(executable)},windowsHide:true,stdio:['ignore','pipe','pipe']});
+    observer=spawn(path.join(process.env.SystemRoot!,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-File',path.resolve('tests/windows-crash-observer.ps1')],{env:{...env,ABYSSUS_CRASH_PID:String(identity.pid),ABYSSUS_CRASH_PARENT:String(launcher.pid),ABYSSUS_CRASH_EXE:realpathSync.native(executable)},windowsHide:true,stdio:['ignore','pipe','pipe']});
     observerDone=once(observer,'close');
     console.log(new Date().toISOString(),'START process-handle observer',observer.pid);
     observer.stdout!.on('data',data=>{observations+=data.toString();process.stdout.write('OBSERVER '+data.toString());});observer.stderr!.on('data',data=>process.stderr.write(data));
     await expect.poll(()=>observations.includes('"event":"ready"'),{timeout:10000}).toBe(true);
   }
   const killedAt=Date.now();let exitAt:number|undefined,closeAt:number|undefined;
-  app.process().once('exit',()=>{exitAt=Date.now()-killedAt;});app.process().once('close',()=>{closeAt=Date.now()-killedAt;});
-  app.process().kill('SIGKILL');
-  console.log(new Date().toISOString(),'Requested termination of exact owned main',app.process().pid);
-  await expect.poll(()=>app.process().exitCode!==null||app.process().signalCode!==null).toBe(true);
+  launcher.once('exit',()=>{exitAt=Date.now()-killedAt;});launcher.once('close',()=>{closeAt=Date.now()-killedAt;});
+  // Windows Playwright launches through cmd.exe. The observer verified that
+  // Electron's reported main PID/path is the direct child of this owned launcher.
+  process.kill(identity.pid,'SIGKILL');mainKilled=true;
+  console.log(new Date().toISOString(),'Requested termination of exact owned main',identity.pid,'launcher',launcher.pid);
+  await expect.poll(()=>launcher.exitCode!==null||launcher.signalCode!==null,{timeout:10000}).toBe(true);
   if(backend){
     let blocked=false;try{execFileSync('/usr/bin/sudo',['/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','backend'],{stdio:'pipe'});}catch{blocked=true;}assert(blocked);
     process.kill(backend,'SIGCONT');
@@ -60,11 +63,11 @@ try {
       await observerDone;console.log('Exact owned process observations:',observations.trim());assert.equal(observer!.exitCode,0);
       const records=observations.trim().split(/\r?\n/).map(line=>JSON.parse(line));
       const before=records.find(r=>r.event==='ready'),after=records.find(r=>r.event==='process-handle');
-      assert.equal(after.exited,true);assert.deepEqual(before.processes.filter((p:{kind:string})=>p.kind==='main').map((p:{pid:number})=>p.pid),[app.process().pid]);
+      assert.equal(after.exited,true);assert.deepEqual(before.processes.filter((p:{kind:string})=>p.kind==='main').map((p:{pid:number})=>p.pid),[identity.pid]);
       assert.equal(after.processes.filter((p:{kind:string})=>p.kind==='main').length,0,'No auto-launched or unclosed fixture main may retain ownership');
     }
     await expect.poll(()=>closeAt!==undefined,{timeout:10000}).toBe(true);
-    console.log('Owned main termination timing:',{pid:app.process().pid,path:executable,exitMs:exitAt,closeMs:closeAt,immediateLeaseStatus:immediate});
+    console.log('Owned main termination timing:',{mainPid:identity.pid,launcherPid:launcher.pid,path:executable,launcherExitMs:exitAt,launcherCloseMs:closeAt,immediateLeaseStatus:immediate});
     // TerminateProcess completion and kernel-handle teardown may be observed at
     // different times. Require actual reacquisition, never assume from exit alone.
     await expect.poll(()=>{
@@ -75,11 +78,11 @@ try {
 }catch(error){console.error(new Date().toISOString(),'FAIL crash phase before cleanup',error);throw error;}
 finally{
   if(backend)try{process.kill(backend,'SIGCONT');}catch{}
-  if(app.process().exitCode===null&&app.process().signalCode===null){
-    console.log(new Date().toISOString(),'START normal cleanup of live fixture main',app.process().pid);
+  if(!mainKilled&&launcher.exitCode===null&&launcher.signalCode===null){
+    console.log(new Date().toISOString(),'START normal cleanup through owned launcher',launcher.pid);
     try{await Promise.race([app.close(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fixture cleanup timed out; transaction quarantined')),5000))]);}
     catch(error){console.error(error);process.exit(1);}
   }
-  console.log(new Date().toISOString(),'END crash fixture',{exitCode:app.process().exitCode,signal:app.process().signalCode});
+  console.log(new Date().toISOString(),'END crash fixture',{exitCode:launcher.exitCode,signal:launcher.signalCode});
   clearTimeout(deadline);
 }
