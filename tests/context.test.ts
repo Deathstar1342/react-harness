@@ -33,6 +33,15 @@ function fixture(complete?: ModelProvider['complete'], filename = ':memory:') {
   return { store, chat, frame, state, provider, config, hooks, prepare };
 }
 describe('model-written continuation contexts', () => {
+  it('keeps large testcase matching ledgers private while supplying actionable verification state',async()=>{
+    const t=fixture();
+    t.frame.acceptanceEvidence={checks:[{key:'private-check-key',eventId:99,status:'coverage_reduced',coverage:Array.from({length:1000},(_,i)=>({id:`private-case-identity-${i}`,seen:1,required:1}))}],uncertainEventIds:[],overflow:false};
+    const prepared=await t.prepare();
+    expect(JSON.stringify(prepared)).not.toContain('private-case-identity');
+    expect(JSON.stringify(prepared)).not.toContain('private-check-key');
+    expect(JSON.stringify(prepared)).toContain('Verification event 99');
+    expect(t.frame.acceptanceEvidence.checks[0].coverage).toHaveLength(1000);
+  });
   it('compacts before exhaustion, preserves originals and authoritative controls, and schedules summary calls', async () => {
     const t = fixture(), original = structuredClone(t.frame.messages);
     const action = { name: 'write_file', args: { path: 'settings.ts', content: 'unsafe', baseHash: 'old' } };

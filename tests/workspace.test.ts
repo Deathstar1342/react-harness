@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 import type { DirectoryListing, WorkspaceSettings } from '../shared/types.js';
 
@@ -15,7 +15,7 @@ async function fixture() {
   cleanup.push(async()=>{if(path.dirname(root)!==path.resolve(tmpdir()) || !path.basename(root).startsWith('harness-workspace-')) throw new Error('Unexpected cleanup path');await rm(root,{recursive:true,force:true});});
   const config = readConfig({HARNESS_DATA_DIR:path.join(root,'state'),HARNESS_WORKSPACE_ROOT:path.join(root,'default')});
   const build = async()=>{
-    const result=await createApp({config,tools:new WorkspaceTools(),provider:{models:async()=>[],complete:async()=>{throw new Error('Model calls not expected');}},hooks:{instructions:protocolInstructions}});
+    const result=await createApp({config,tools:new WorkspaceTools(),provider:{models:async()=>[],complete:async()=>{throw new Error('Model calls not expected');}},hooks:{instructions:roleInstructions}});
     return result;
   };
   const first=await build();

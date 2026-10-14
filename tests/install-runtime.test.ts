@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createApp } from '../server/app.js';
 import { Store } from '../server/store.js';
 import { readConfig } from '../server/config.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import { BUDGET_STATE_KEY } from '../server/scheduler.js';
 import type { ModelProvider, PackageHelperRecord, ToolService } from '../shared/types.js';
 import { SettingsDialog } from '../client/WorkspaceDialogs.js';
@@ -20,7 +20,7 @@ async function fixture(responses=[recommendation,nativeReply('submit_completion'
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'PRIVATE_CONFIG_KEY',HARNESS_DATA_DIR:'/uncreated-install-test-data'});
   const provider:ModelProvider={models:async()=>['reviewer'],complete:vi.fn(async input=>input.messages[0]?.content.startsWith('Evaluate a proposed')?{...nativeReply('install_decision',{decision:'approve',reason:'Specific needed dependency'}),usage:{inputTokens:20,outputTokens:12}}:responses.shift()??nativeReply('submit_completion',{summary:'Done'},'Done'))};
   const tools:ToolService={inspect:vi.fn(),execute:vi.fn(),read:async(_root,path)=>({path,content:'',hash:null}),list:async()=>[],save:vi.fn(),setDirty:vi.fn(),dispose:async()=>{},removeScope:async(_root,_chat,mutate)=>mutate()};
-  const t=await createApp({config,provider,store,tools,hooks:{instructions:protocolInstructions},packageHelper:async()=>helper});
+  const t=await createApp({config,provider,store,tools,hooks:{instructions:roleInstructions},packageHelper:async()=>helper});
   const project=store.createProject('Test','/not-present-test-project'),chat=store.createChat(project.id,'New chat','autonomous');
   cleanup.push(async()=>{await t.app.close();store.close();});
   const start=async(content='Build')=>{const response=await t.app.inject({method:'POST',url:`/api/chats/${chat.id}/messages`,payload:{content}});expect(response.statusCode).toBe(202);await t.runtime.wait(chat.id);};

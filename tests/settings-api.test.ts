@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
 import { createManagedHooks } from '../server/context.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import { StarkProvider } from '../server/provider.js';
 import { BUDGET_STATE_KEY, type Reservation } from '../server/scheduler.js';
 import { Store } from '../server/store.js';
@@ -21,7 +21,7 @@ async function fixture(provider: ModelProvider = { models: async () => ['a', 'c'
   const root = await mkdtemp(path.join(tmpdir(), 'harness-m8-'));
   cleanup.push(async () => { if (path.dirname(root) !== path.resolve(tmpdir()) || !path.basename(root).startsWith('harness-m8-')) throw new Error('Unsafe test cleanup'); await rm(root, { recursive: true, force: true }); });
   const config = readConfig({ HARNESS_DATA_DIR: path.join(root, 'state'), HARNESS_WORKSPACE_ROOT: path.join(root, 'workspace'), STARK_BASE_URL: 'http://127.0.0.1/v1', STARK_API_KEY: 'private-diagnostic-key', ARCHITECT_MODEL: 'a', CODER_MODEL: 'c', CRITIC_MODEL: 'r' });
-  const build = () => createApp({ config, provider, tools, hooks: { instructions: protocolInstructions } });
+  const build = () => createApp({ config, provider, tools, hooks: { instructions: roleInstructions } });
   let current = await build();
   const first = current;
   cleanup.push(() => current.app.close());

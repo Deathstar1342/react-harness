@@ -1,7 +1,7 @@
 import { describe,expect,it } from 'vitest';
 import { actionSchema, parseToolArguments, publishedTools, validateAction, toolRegistry, validateToolResult, RESULT_LIMITS } from '../server/tool-registry.js';
 import { parseNativeJSON } from '../server/native-json.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 const action=(name:string,args:unknown)=>({name,args});
 const cases: [string, Record<string, unknown>][] = [
   ['list_files', {}], ['read_file', { path: 'README.md' }], ['search', { query: 'hello', path: 'src' }],
@@ -53,9 +53,9 @@ describe('single native tool registry',()=>{
    for(const d of toolRegistry.values()){expect(d.handler).toBeTypeOf('function');expect(d.inspect).toBeTypeOf('function');expect(d.result.safeParse({ok:true,output:'evidence'}).success).toBe(true);}
  });
  it('keeps instructions native, truthful and bounded',()=>{
-   for(const role of ['architect','coder','critic'] as const){expect(protocolInstructions(role)).toContain('native tools');expect(protocolInstructions(role)).not.toContain('JSON recommendation');}
-   expect(protocolInstructions('coder','Preserve manual work')).toContain('Preserve manual work');
-   expect(()=>protocolInstructions('coder','x'.repeat(32001))).toThrow();
+   for(const role of ['architect','coder','critic'] as const){expect(roleInstructions(role)).toContain('native tools');expect(roleInstructions(role)).not.toContain('JSON recommendation');}
+   expect(roleInstructions('coder','Preserve manual work')).toContain('Preserve manual work');
+   expect(()=>roleInstructions('coder','x'.repeat(32001))).toThrow();
  });
  it('enforces output bytes and finite bounded serializable result data',()=>{
    const cyclic:any={};cyclic.self=cyclic;

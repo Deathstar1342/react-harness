@@ -12,10 +12,10 @@ afterEach(async()=>{for(const root of roots.splice(0)) await rm(root,{recursive:
 async function file(content: string|Buffer) {const root=await mkdtemp(path.join(tmpdir(),'harness-prompts-'));roots.push(root);const filename=path.join(root,'architect.md');await writeFile(filename,content);return filename;}
 describe('local role prompt configuration',()=>{
   it('loads configured role guidance without exposing files or text in browser settings',async()=>{
-    const filename = await file('Return exactly the described JSON object. Preserve the UI labels.');
+    const filename = await file('Use concise explanations. Preserve the UI labels.');
     const config = readConfig({ARCHITECT_PROMPT_FILE:filename});
     const prompts = await loadPromptExtensions(config);
-    expect(prompts).toEqual({architect:'Return exactly the described JSON object. Preserve the UI labels.'});
+    expect(prompts).toEqual({architect:'Use concise explanations. Preserve the UI labels.'});
     expect(JSON.stringify(publicSettings(config))).not.toContain(filename);
     expect(JSON.stringify(publicSettings(config))).not.toContain('Preserve the UI');
     const store = new Store(':memory:');

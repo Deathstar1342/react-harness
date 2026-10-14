@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { Store } from '../server/store.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 import { BUDGET_STATE_KEY } from '../server/scheduler.js';
 
@@ -15,7 +15,7 @@ export async function installPolicyIntegration(projectRoot:string) {
   const store=new Store(':memory:');
   let packageName='sl', stage=0, reviews=0;
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1:1/synthetic-unused',STARK_API_KEY:'synthetic-only',HARNESS_DATA_DIR:'/tmp/abyssus-m19-ci-data'});
-  const {app,runtime,installs}=await createApp({store,config,tools:new WorkspaceTools(),hooks:{instructions:protocolInstructions},provider:{models:async()=>['synthetic-install-reviewer'],complete:async input=>{
+  const {app,runtime,installs}=await createApp({store,config,tools:new WorkspaceTools(),hooks:{instructions:roleInstructions},provider:{models:async()=>['synthetic-install-reviewer'],complete:async input=>{
     if(input.messages[0]?.content.startsWith('Evaluate a proposed')){
       reviews++;assert.equal(input.messages.length,2);assert.equal(input.model,'synthetic-install-reviewer');
       assert(!JSON.stringify(input).includes('decisionNonce'));assert(!JSON.stringify(input).includes('synthetic-only'));

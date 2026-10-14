@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../server/store.js';
 import { Runtime, type Frame, type RunState } from '../server/runtime.js';
 import { readConfig } from '../server/config.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 import { validateNativeHistory } from '../server/provider.js';
 import type { CompletionResult, ModelMessage, ToolService } from '../shared/types.js';
 import { nativeReply, nativeState } from './native-fixture.js';
@@ -17,7 +17,7 @@ function fixture(replies:CompletionResult[]) {
   const requests:ModelMessage[][]=[];
   const tools:ToolService={inspect:vi.fn<ToolService['inspect']>(async()=>({effect:'read',risk:'routine',description:'Read evidence'})),execute:vi.fn(async()=>({ok:true,output:'Observed file'})),read:async(_root,path)=>({path,content:'',hash:null}),list:async()=>[],save:async()=>{throw new Error('No write');},setDirty(){},dispose:async()=>{}};
   const provider={models:async()=>[],complete:vi.fn(async(input:any)=>{validateNativeHistory(input.messages);requests.push(structuredClone(input.messages));const reply=replies.shift();if(!reply)throw new Error('Unexpected provider request');return reply;})};
-  const runtime=new Runtime(store,provider,tools,readConfig({}),{instructions:protocolInstructions});resources.push({store,runtime});
+  const runtime=new Runtime(store,provider,tools,readConfig({}),{instructions:roleInstructions});resources.push({store,runtime});
   const run=async()=>{await runtime.submit(chat.id,'Inspect a file');await runtime.wait(chat.id);};
   return {store,chat,runtime,tools,provider,requests,run};
 }

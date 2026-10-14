@@ -8,7 +8,7 @@ import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 import { Store } from '../server/store.js';
-import { protocolInstructions } from '../server/protocol.js';
+import { roleInstructions } from '../server/prompts.js';
 const parent=await realpath(tmpdir()),root=await mkdtemp(path.join(parent,'rh-m15-browser-'));
 const config=readConfig({PORT:'3185',STARK_BASE_URL:'http://127.0.0.1:1/synthetic-not-used',STARK_API_KEY:'synthetic-fixture-only',HARNESS_DATA_DIR:path.join(root,'data'),HARNESS_WORKSPACE_ROOT:path.join(root,'workspace')});
 const store=new Store(path.join(config.dataDir,'state.sqlite'));
@@ -24,7 +24,7 @@ const replies=[
  nativeReply('review_result',{verdict:'pass',findings:['Fixture read was recorded. No edit or live provider validation is claimed.']}),
  nativeReply('submit_completion',{summary:'Fixture inspection reviewed.'})
 ];
-const {app}=await createApp({config,store,tools:new WorkspaceTools(),provider:{models:async()=>['synthetic-fixture'],complete:async()=>replies.shift()??nativeReply('submit_completion',{summary:'Synthetic planning response only.'})},hooks:{instructions:protocolInstructions}});
+const {app}=await createApp({config,store,tools:new WorkspaceTools(),provider:{models:async()=>['synthetic-fixture'],complete:async()=>replies.shift()??nativeReply('submit_completion',{summary:'Synthetic planning response only.'})},hooks:{instructions:roleInstructions}});
 await app.listen({host:'127.0.0.1',port:config.port});console.log(JSON.stringify({url:'http://127.0.0.1:3185',fixtureRoot:root,chatId:chat.id}));
 let stopping=false;const stop=async()=>{if(stopping)return;stopping=true;await app.close();store.close();if(path.dirname(root)!==parent||!path.basename(root).startsWith('rh-m15-browser-'))throw new Error('Invalid fixture cleanup target');await rm(root,{recursive:true,force:true});process.exit(0);};
 process.once('SIGINT',()=>void stop());process.once('SIGTERM',()=>void stop());process.stdin.resume();process.stdin.on('data',()=>void stop());setTimeout(()=>void stop(),30*60_000).unref();
