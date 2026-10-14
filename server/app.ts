@@ -8,6 +8,7 @@ import type { ServerResponse } from 'node:http';
 import type { Config } from './config.js';
 import { publicSettings } from './config.js';
 import { Runtime, type RuntimeHooks } from './runtime.js';
+import { goalInput, goalOf, goalRevisionInput } from './goals.js';
 import { Store } from './store.js';
 import { WorkspaceLocations } from './workspace.js';
 import { Settings } from './settings.js';
@@ -250,6 +251,17 @@ export async function createApp(options: AppOptions) {
     await runtime.startBuilding(paramId(request.params),body);
     return reply.code(202).send({accepted:true});
   });
+  app.get('/api/chats/:id/goal',async request=>{const id=paramId(request.params);store.chat(id);return {goal:goalOf(store,id)??null};});
+  app.post('/api/chats/:id/goal',async(request,reply)=>{
+    const body=goalInput.parse(request.body);
+    if(!config.baseUrl || !config.apiKey)return reply.code(503).send({error:'Configure the provider before starting a goal.'});
+    return reply.code(202).send(await runtime.setGoal(paramId(request.params),body));
+  });
+  app.patch('/api/chats/:id/goal',async(request,reply)=>{
+    const {expectedRevision,reason,...body}=goalRevisionInput.parse(request.body);
+    if(!config.baseUrl || !config.apiKey)return reply.code(503).send({error:'Configure the provider before revising a goal.'});
+    return reply.code(202).send(await runtime.setGoal(paramId(request.params),body,{expectedRevision,reason}));
+  });
   app.post('/api/chats/:id/control',async request=> {const {action} = z.object({action:z.enum(['pause','resume','interrupt'])}).strict().parse(request.body);await runtime.control(paramId(request.params),action);return {ok:true};});
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
@@ -309,7 +321,9 @@ export async function createApp(options: AppOptions) {
     await app.register(staticFiles,{root:staticRoot,prefix:'/',index:'index.html'});
     app.setNotFoundHandler((request,reply)=>request.url.startsWith('/api') ? reply.code(404).send({error:'API route not found'}) : reply.sendFile('index.html'));
   }
-  app.addHook('preClose',async()=>{closing=true;installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();});
+  // Persist runtime/goal shutdown before an embedding owner's onClose hook can
+  // close its supplied Store. Runtime.close is idempotent for the later hook.
+  app.addHook('preClose',async()=>{closing=true;installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
   return {app,store,runtime,installs};
 }

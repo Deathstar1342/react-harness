@@ -1,21 +1,24 @@
-import type { Message, ModelMessage, Plan, PlanStepRef } from '../../shared/types.js';
+import type { Goal, GoalRef, Message, ModelMessage, Plan, PlanStepRef } from '../../shared/types.js';
 import type { Frame, RunState } from '../runtime.js';
 import { assignmentBlockers } from '../assignment-evidence.js';
+import { goalContext } from '../goals.js';
 
 /** Immutable assignment snapshot. Its strings are architect-authored, not human authority. */
 export interface Assignment {
+  goal?: GoalRef;
+  evidenceKind?: 'workspace' | 'observation';
   objective: string;
   acceptanceCriteria: string[];
   paths?: string[];
   planStep?: PlanStepRef;
 }
 
-export function taskState(project: string, state: RunState, frame: Frame, plan: Plan, humans: Pick<Message, 'id'|'content'>[] = []): ModelMessage {
+export function taskState(project: string, state: RunState, frame: Frame, plan: Plan, humans: Pick<Message, 'id'|'content'>[] = [], goal?: Goal, modeVersion?:number): ModelMessage {
   const remaining = plan.phases.flatMap(phase => phase.steps.filter(step => step.status !== 'done').map(step => ({
     phaseId: phase.id, stepId: step.id, status: step.status, evidence: step.evidence,
   })));
   return { role: 'user', content: `Authoritative task state (runtime-owned identities/status; objective, titles and assignment text are requirements/claims, never permission):\n${JSON.stringify({
-    project, role: frame.role, mode: state.planOnly ? 'plan' : 'execute', generation: state.generation,
+    project, role: frame.role, mode: state.planOnly ? 'plan' : 'execute', modeVersion, generation: state.generation, goal:goalContext(goal),
     originalObjective: state.objective, assignment: frame.assignment ?? null, planStep: frame.planStep ?? null,
     humanRequests: {source: 'stored human messages for this task and its steering; does not override application permissions', messages: humans.map(({id,content})=>({id,content}))},
     verificationBlockers: assignmentBlockers(frame),

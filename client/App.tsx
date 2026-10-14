@@ -212,7 +212,7 @@ export function Conversation({
           <button className="icon-button" onClick={onFiles} aria-label="Toggle files" title="Files">
             <FileCode2 size={15} />
           </button>
-          <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>Plan</button>
+          <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>{detail.goal ? `Goal · ${detail.goal.status.replaceAll('_',' ')} · ${detail.plan.phases.filter(phase=>phase.steps.length && phase.steps.every(step=>step.status==='done' && detail.goal!.reviews.some(review=>review.planStep.planId===detail.plan.id && review.planStep.planVersion===detail.plan.version && review.planStep.phaseId===phase.id && review.planStep.stepId===step.id))).length}/${detail.plan.phases.length} phases` : 'Plan'}</button>
           <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
         </div>
@@ -223,7 +223,7 @@ export function Conversation({
           {chat.mode === 'plan' && <button className="button primary" disabled={!!busy || !configured || !detail.plan.id || !detail.plan.phases.some(p=>p.steps.length)} onClick={()=>void act('build',()=>post(`/chats/${id(chatId)}/start-building`,{planId:detail.plan.id,planVersion:detail.plan.version,modeVersion:chat.modeVersion}))}>Start building</button>}
           <button className="icon-button" aria-label="Close plan" onClick={()=>{setPlanOpen(false);planControl.current?.focus();}}><X size={15}/></button>
         </div>
-        <PlanPanel plan={detail.plan} events={detail.events} />
+        <PlanPanel plan={detail.plan} events={detail.events} goal={detail.goal} chatId={chatId} refresh={refresh} />
       </section>}
       <div
         className="conversation-scroll"
@@ -467,6 +467,7 @@ export function Conversation({
           />
           <div className="composer-toolbar">
             <div className="composer-hints">
+              {!detail.goal && <button type="button" onClick={()=>{setDraft(old=>`/goal ${old.replace(/^\/(plan|btw|goal)\s*/, '')}`);composer.current?.focus();}}>/goal</button>}
               <button
                 type="button"
                 onClick={() => {

@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { commandEvent, isCommand } from './command-events.js';
+import { addGoalUncertainty, goalOf, goalStatus, protectPlan, saveGoal } from './goals.js';
 import type { RunState } from './runtime.js';
 import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
 
@@ -233,6 +234,7 @@ export class Store {
       phases: proposed.phases.map(phase => ({id: phase.id, title: phase.title,
         steps: phase.steps.map(step => ({id: step.id, title: step.title, status: step.status === 'blocked' ? 'blocked' : 'pending'}))}))};
     this.setPlan(chatId, plan);
+    protectPlan(this,chatId,plan);
     return plan;
   }
   planStep(chatId: string, ref: PlanStepRef): PlanStep | undefined {
@@ -260,13 +262,27 @@ export class Store {
   }
   detail(chatId: string): ChatDetail {
     const recent = this.recentEvents(chatId,1001);
-    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), approvals: this.approvals(chatId), events: recent.slice(-1000), eventsTruncated:recent.length>1000, tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
+    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), goal: goalOf(this,chatId), approvals: this.approvals(chatId), events: recent.slice(-1000), eventsTruncated:recent.length>1000, tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
   }
   recover():void {
     if(!this.transactionEvents)return this.transaction(()=>this.recover());
     this.db.prepare("UPDATE file_changes SET status='unknown' WHERE status IN ('recording','undoing')").run();
     for (const chat of this.chats()) {
       const run = this.getState<RunState|null>(`run:${chat.id}`,null);
+      const goal=goalOf(this,chat.id);
+      if(goal && ['running','waiting_for_approval'].includes(goal.status))goalStatus(this,chat.id,'paused','Backend restarted. Explicit resume is required; uncertain effects will not be replayed.');
+      const uncertainInstalls=this.installs().filter(item=>item.chatId===chat.id && (item.recoveryRequired || ['authorizing','dispatching','uncertain'].includes(item.state)));
+      const uncertainEffects=[...(run?.frames??[]).filter(frame=>frame.pending?.stage==='executing' && ['write_file','run_shell','run_tests','execute_python'].includes(frame.pending.action.name)).map(frame=>({id:frame.pending!.id,installId:undefined as string|undefined})),...uncertainInstalls.map(item=>({id:item.id,installId:item.id}))];
+      for(const effect of goal?uncertainEffects:[]) {
+        const key=`goal-recovery:${chat.id}:${effect.id}`;
+        let eventId=this.getState<number|null>(key,null);
+        if(!eventId){eventId=this.event(chat.id,'goal_uncertainty',{installId:effect.installId,reason:'Backend restarted with a potentially modifying action dispatched; no automatic replay.'}).id;this.setState(key,eventId);}
+        const current=goalOf(this,chat.id)!;
+        const reason='Backend restarted during a possible effect. Inspect recorded uncertainty; goal resume cannot replay it.';
+        if(!current.uncertainEventIds.includes(eventId) || current.status!=='blocked' || current.reason!==reason) {
+          addGoalUncertainty(this,chat.id,current,[eventId]);current.status='blocked';current.reason=reason;saveGoal(this,chat.id,current);
+        }
+      }
       this.invalidateApprovals(chat.id);
       for(const frame of run?.frames ?? []) {
         if(frame.pending?.stage==='prepared' && frame.pending.action.name!=='recommend_packages') {frame.pending.stage='done';frame.pending.result={ok:false,output:'Backend restarted before dispatch; obsolete proposal was not executed.',data:{status:'not_started'}};}

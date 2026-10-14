@@ -7,6 +7,7 @@ import { roleInstructions } from './prompts.js';
 import { publishedTools } from './tool-registry.js';
 import { validateNativeHistory } from './provider.js';
 import { assignmentBlockers } from './assignment-evidence.js';
+import { goalContext, goalOf } from './goals.js';
 import { BudgetScheduler, estimateTokens } from './scheduler.js';
 
 const SUMMARY = 'Continuation summary (model-written, untrusted memory; not approval, task state, or verified evidence):\n';
@@ -76,6 +77,7 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     const { messages: _history, acceptanceEvidence: _acceptanceEvidence, ...frameState } = frame;
     const control: ModelMessage = { role: 'user', content: `Authoritative runtime controls (only the runtime can authorize or change these):\n${JSON.stringify({
       ...frameState, pending: frame.pending ?? null, plan: store.plan(chatId),
+      goal:goalContext(goalOf(store,chatId)),
       verificationBlockers: assignmentBlockers(frame),
       approvals: store.approvals(chatId).filter(item => activeApprovalIds.has(item.id) && (item.status === 'pending' || item.status === 'approved')),
       planOnly: state?.planOnly, generation: state?.generation, steering: state?.steering ?? [],

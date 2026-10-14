@@ -12,7 +12,7 @@ import {
   TestTube2,
   X,
 } from "lucide-react";
-import type { Approval, Plan, RunEvent, TestReport } from "../shared/types";
+import type { Approval, Goal, Plan, RunEvent, TestReport } from "../shared/types";
 import {
   ApiError,
   errorText,
@@ -21,14 +21,16 @@ import {
   id,
   languageFor,
   post,
+  request,
   terminalEvents,
 } from "./api";
 import { Diff } from "./FilePanel";
 
-export function PlanPanel({ plan, events = [] }: { plan: Plan; events?: RunEvent[] }) {
+export function PlanPanel({ plan, events = [], goal, chatId, refresh }: { plan: Plan; events?: RunEvent[]; goal?:Goal; chatId?:string; refresh?:()=>Promise<void> }) {
   const steps = plan.phases.flatMap(phase=>phase.steps);
   const history = events.filter(event=>event.type === 'plan_progress');
   return <div className="plan-body">
+    {goal && <GoalDetails goal={goal} chatId={chatId} refresh={refresh}/>}
     <p className="muted">{steps.filter(step=>step.status === 'done').length} / {steps.length} steps{plan.version ? ` · Revision ${plan.version}` : ''}</p>
     {!steps.length && <p>No plan yet. Ask the architect to plan your task.</p>}
     {(plan.version ?? 0)>1 && <p className="muted">Scope revisions reset current progress. Earlier evidence stays in progress history.</p>}
@@ -46,6 +48,36 @@ export function PlanPanel({ plan, events = [] }: { plan: Plan; events?: RunEvent
       return <div key={event.id}><strong>#{event.id} · revision {data.planVersion} · {data.stepId} · {data.outcome}</strong><p>{data.summary}</p>{data.sourceEventId && <details><summary>Source evidence #{data.sourceEventId}</summary><pre>{source ? JSON.stringify(source.data,null,2) : 'Source is outside recent history; retained in the backend event archive.'}</pre></details>}</div>;
     })}<p className="muted">Recent retained events only; older records remain in the backend event archive.</p></details>}
   </div>;
+}
+
+function GoalDetails({goal,chatId,refresh}:{goal:Goal;chatId?:string;refresh?:()=>Promise<void>}) {
+  const [editing,setEditing]=useState(false),[objective,setObjective]=useState(''),[criteria,setCriteria]=useState(''),[reason,setReason]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expectedRevision,setExpectedRevision]=useState(goal.revision);
+  const edit=()=>{setExpectedRevision(goal.revision);setObjective(goal.objective);setCriteria(goal.criteria.map(item=>`${item.evidenceKind==='observation'?'[observation] ':''}${item.text}`).join('\n'));setReason('');setError('');setEditing(true);};
+  return <section className="goal-details" aria-label="Durable goal">
+    <h3>{goal.objective}</h3><p>{goal.status.replaceAll('_',' ')} · Revision {goal.revision}</p><p>{goal.reason}</p>
+    <ul>{goal.criteria.map(item=><li key={item.id}>{item.text}{item.evidenceKind==='observation' && <span className="muted"> · historical observation</span>}</li>)}</ul>
+    <details><summary>Evidence and continuation budget</summary><p>{goal.reviews.length} reviewed assignments. {goal.budget.turns}/{goal.budget.maxTurns} model turns; {goal.budget.transitions}/{goal.budget.maxTransitions} transitions; {goal.budget.unchangedTurns}/{goal.budget.maxUnchangedTurns} turns without newly accepted required scope.</p><p className="muted">Long assignments may need explicit Resume. Workspace evidence covers observed bounded files; observation evidence covers historical reads. Neither proves unobserved scope.</p>
+      {goal.verificationBlockers.map((text,index)=><p key={index}>{text}</p>)}
+      {!!goal.uncertainEventIds.length && <p>Original uncertain effect events: {goal.uncertainEventIds.join(', ')}. Generic effects cannot be replayed or reconciled by a goal control. Exact install recovery requires the existing authenticated helper flow, then explicit Resume.</p>}
+      {goal.resolvedUncertainties?.map(item=><p key={item.eventId}>Event #{item.eventId} resolved by explicit install recovery #{item.reconciliationEventId}. Original outcome remains recorded.</p>)}
+      <ul>{goal.requiredSteps.map((step,index)=><li key={index}>{step.phaseTitle} / {step.title}</li>)}</ul>
+    </details>
+    {!!goal.superseded.length && <details><summary>Superseded scope ({goal.superseded.length} revisions)</summary>{goal.superseded.map(old=><section key={old.revision}><h4>Revision {old.revision}: {old.objective}</h4><p>Human revision reason: {old.reason}</p><ul>{old.criteria.map(item=><li key={item.id}>{item.text}</li>)}{old.requiredSteps.map((step,index)=><li key={`step-${index}`}>{step.phaseTitle} / {step.title}</li>)}</ul></section>)}</details>}
+    {chatId && !editing && <button className="text-button" onClick={edit}>Revise goal scope</button>}
+    {editing && <form className="goal-edit" onSubmit={event=>{
+      event.preventDefault();setBusy(true);setError('');const lines=criteria.split('\n').map(line=>line.trim());
+      const acceptanceCriteria=lines.map(line=>line.replace(/^\[observation\](?:\s+|$)/,''));
+      const observationCriteria=lines.flatMap((line,index)=>/^\[observation\](?:\s+|$)/.test(line)?[index]:[]);
+      void request(`/chats/${id(chatId!)}/goal`,{method:'PATCH',body:JSON.stringify({objective,acceptanceCriteria,observationCriteria,expectedRevision,reason})}).then(async()=>{setEditing(false);await refresh?.();}).catch(e=>setError(errorText(e))).finally(()=>setBusy(false));
+    }}>
+      <label>Objective<textarea value={objective} onChange={event=>setObjective(event.target.value)} required maxLength={16000}/></label>
+      <label>Acceptance criteria · one per line<textarea value={criteria} onChange={event=>setCriteria(event.target.value)} required/></label>
+      <p className="muted">Use [observation] at the start of a criterion only when historical read evidence is sufficient. Other criteria require current workspace evidence.</p>
+      <label>Why this scope changes<input value={reason} onChange={event=>setReason(event.target.value)} required maxLength={2000}/></label>
+      {goal.revision!==expectedRevision && <p role="alert">Goal changed since this draft opened. Your draft is preserved. Cancel and reopen to review the current scope before submitting a revision.</p>}
+      {error && <p role="alert">{error}</p>}<button className="button small" disabled={busy}>Save explicit revision</button><button type="button" className="text-button" disabled={busy} onClick={()=>setEditing(false)}>Cancel</button>
+    </form>}
+  </section>;
 }
 
 export function ApprovalCard({

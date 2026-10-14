@@ -85,6 +85,7 @@ const phases = z.array(planPhaseSchema).max(50).superRefine(
 );
 
 export const actionSchema = z.discriminatedUnion('name', [
+  z.strictObject({ name: z.literal('request_goal_completion'), args: z.strictObject({goalId:id,goalRevision:z.number().int().positive(),planId:id,planVersion:z.number().int().positive(),modeVersion:z.number().int().nonnegative(),reviewEventIds:z.array(z.number().int().positive()).min(1).max(256)}) }),
   z.strictObject({ name: z.literal('submit_completion'), args: z.strictObject({ summary: text(64_000) }) }),
   z.strictObject({ name: z.literal('install_decision'), args: z.strictObject({ decision: z.enum(['approve','reject','ask']), reason: text(400) }) }),
   z.strictObject({ name: z.literal('recommend_packages'), args: packageRecommendation }),
@@ -148,6 +149,8 @@ export const actionSchema = z.discriminatedUnion('name', [
   z.strictObject({
     name: z.literal('delegate'),
     args: z.strictObject({
+      evidenceKind:z.enum(['workspace','observation']).optional(),
+      goal: z.strictObject({goalId:id,goalRevision:z.number().int().positive(),criterionIds:z.array(id).min(1).max(32).refine(ids=>new Set(ids).size===ids.length)}).optional(),
       planStep: z.strictObject({planId: id, planVersion: z.number().int().positive(), phaseId: id, stepId: id}).optional(),
       objective: text(16_000),
       acceptanceCriteria: z.array(text(4_096)).min(1).max(100),
@@ -219,8 +222,9 @@ export function validateToolResult(result:unknown):ToolResult {
 }
 const read = new Set(['list_files','read_file','search','git_status','git_diff']);
 const execute = new Set(['run_shell','execute_python','run_tests']);
-const terminal = new Set(['delegate','review','review_result','submit_completion','ask_user']);
+const terminal = new Set(['delegate','review','review_result','submit_completion','ask_user','request_goal_completion']);
 const descriptions: Record<string,string> = {
+  request_goal_completion:'Request whole-goal completion using the exact current goal and plan revisions and recorded accepted review event IDs. Runtime checks all protected criteria/steps, current evidence and uncertainty. Claims, removed steps and critic PASS alone do not suffice. Must be last in a batch.',
   list_files:'List a confined project directory. Omit path for the root.',
   read_file:'Read a project file and its current SHA-256 hash. Missing files return a null hash.',
   search:'Search bounded project text. Protected files are excluded.',
@@ -246,7 +250,7 @@ export const toolRegistry: ReadonlyMap<string,ToolDefinition> = new Map(actionSc
   const roles: ToolRole[] = name === 'install_decision' ? ['install_reviewer'] : read.has(name) ? ['architect','coder','critic'] : name === 'review_result' ? ['critic'] : name === 'submit_completion' || name === 'recommend_packages' ? ['architect','coder'] : workspace ? ['coder'] : ['architect'];
   const definition: ToolDefinition = {
     name, description:descriptions[name], arguments:option.shape.args, result:resultSchema, roles,
-    modes: effect !== 'read' || name === 'delegate' ? ['execute'] : ['plan','execute'],
+    modes: effect !== 'read' || name === 'delegate' || name === 'request_goal_completion' ? ['execute'] : ['plan','execute'],
     effect, risk:effect === 'execute' ? 'elevated' : 'routine', kind:workspace ? 'workspace' : name === 'install_decision' ? 'decision' : 'control', terminal:terminal.has(name),
     inspect:async (dispatch,action) => workspace ? dispatch.workspace.inspect(dispatch.context,action) : {effect,risk:effect === 'execute' ? 'elevated' : 'routine',description:descriptions[name]},
     handler:async (dispatch,action) => {

@@ -20,6 +20,19 @@ export interface PlanEvidence { eventId: number; delegationId: string; outcome: 
 export interface PlanStep { evidence?: PlanEvidence; id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }
 export interface PlanPhase { id: string; title: string; steps: PlanStep[] }
 export interface Plan { id?: string; version?: number; phases: PlanPhase[] }
+export type GoalStatus = 'running' | 'waiting_for_approval' | 'waiting_for_user' | 'paused' | 'blocked' | 'completed';
+export interface GoalRef { goalId: string; goalRevision: number; criterionIds: string[] }
+export interface GoalCriterion { id: string; text: string; evidenceKind: 'workspace' | 'observation' }
+export interface GoalStep { phaseId: string; phaseTitle: string; stepId: string; title: string }
+export interface GoalRevision { revision: number; objective: string; criteria: GoalCriterion[]; requiredSteps: GoalStep[]; humanMessageId: string; reason: string; verificationBlockers?: string[] }
+export interface GoalReview { eventId: number; delegationId: string; criterionIds: string[]; planStep: PlanStepRef; evidenceEventIds: number[] }
+export interface Goal extends GoalRevision {
+  id: string; status: GoalStatus; reason: string; generation: number; createdAt: string; updatedAt: string;
+  superseded: GoalRevision[]; reviews: GoalReview[]; uncertainEventIds: number[]; uncertaintyOverflow?: boolean; evidenceOverflow?: boolean; verificationBlockers: string[];
+  resolvedUncertainties?: {eventId:number;installId:string;reconciliationEventId:number}[];
+  budget: { turns: number; transitions: number; unchangedTurns: number; maxTurns: number; maxTransitions: number; maxUnchangedTurns: number };
+  completion?: { eventId: number; planId: string; planVersion: number; reviewEventIds: number[] };
+}
 export interface Action { name: string; args: Record<string, unknown> }
 export interface NativeToolCall { id: string; type: 'function'; function: { name: string; arguments: string } }
 export interface NativeToolDefinition { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }
@@ -67,7 +80,7 @@ export interface CommandEvent {
   shellReset?: boolean; truncated?: boolean; message?: string;
 }
 export interface CommandOutput { agentId: string; commandId?: string; sessionId?: string; output: string; truncated?: boolean }
-export interface ChatDetail { chat: Chat; messages: Message[]; plan: Plan; approvals: Approval[]; events: RunEvent[]; eventsTruncated?: boolean; tests: TestReport[] }
+export interface ChatDetail { chat: Chat; messages: Message[]; plan: Plan; goal?: Goal; approvals: Approval[]; events: RunEvent[]; eventsTruncated?: boolean; tests: TestReport[] }
 export interface PublicSettings { limitSource?:'application-budget'; providerLimits?:'unknown'; configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
 /** Private launcher protocol; keys and provider secrets are never included. */
 export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; profileId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }
