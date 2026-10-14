@@ -191,4 +191,3 @@ Each step retains its latest evidence summary and durable event IDs. `plan_progr
 ## M18 privileged helper boundary
 
 The trusted non-root backend has an explicit versioned Unix client to a separately provisioned root service. M18 implements structured apt previews, single-use decisions, exact-state revalidation, durable outcomes and administrator setup/repair/uninstall entrypoints. It introduces no renderer/model install action or policy UI. Runtime/code trust starts at a verified administrator-staged artifact and a static native launcher, never user-writable Node or Python modules. Agent namespaces and file tools cannot reach helper credentials, audit or socket. See [helper architecture and operating limits](helper.md) and [wire contract](api-contract.md#m18-trusted-package-helper). M19 policy and M20 desktop provisioning remain separate milestones.
-

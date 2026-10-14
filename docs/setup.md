@@ -273,4 +273,3 @@ Unix home/config directories must be owned by the current user with mode 0700; c
 ## Optional privileged system installs (M18)
 
 System installs stay disabled until explicit administrator provisioning in the selected Linux/WSL environment. Backend launch does not provision/start the helper. M18 provides trusted backend interfaces and fixed administrator setup/repair/uninstall entrypoints; it does not add the later Settings or guided desktop setup. See [helper prerequisites, trusted staging and recovery](helper.md). Do not run the privileged CI probes on a workstation. No WSL service distro, kernel settings, helper or system packages were changed locally for M18.
-
