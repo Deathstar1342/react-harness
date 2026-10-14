@@ -22,3 +22,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Required unsupported-namespace fail-closed check
+        run: |
+          previous_limit=$(sysctl -n user.max_user_namespaces)
+          trap 'sudo sysctl -w "user.max_user_namespaces=$previous_limit"' EXIT
+          sudo sysctl -w user.max_user_namespaces=0
+          test "$(id -u)" != 0
+          node --import tsx tests/sandbox-unsupported.ts

@@ -14,7 +14,7 @@ afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close()
 async function fixture(){
   const parent=await mkdtemp(path.join(tmpdir(),'sandbox-policy-'));
   cleanup.push(()=>rm(parent,{recursive:true,force:true}));
-  const root=path.join(parent,'project'),home=path.join(parent,'app');await mkdir(root);await mkdir(home);
+  const root=path.join(parent,'project'),home=path.join(parent,'app');await mkdir(root);await mkdir(home,{mode:0o700});
   const sandbox=new LinuxSandbox();sandbox.configure({home,protectedPaths:[],projects:()=>[]});
   return {parent,root,home,sandbox};
 }
@@ -121,9 +121,12 @@ PY`);
   });
   it('installs real pinned npm and PyPI packages and preserves local dependencies across shell restart',async()=>{
     const {run,tools,root}=await execution();
+    await writeFile(path.join(root,'package.json'),JSON.stringify({name:'sandbox-build-fixture',version:'1.0.0',scripts:{build:'node build.cjs',test:'node --test built.test.cjs'}}));
+    await writeFile(path.join(root,'build.cjs'),`require('fs').writeFileSync('built.cjs',"module.exports = require('is-number');");`);
+    await writeFile(path.join(root,'built.test.cjs'),`const test=require('node:test'),assert=require('node:assert/strict'),number=require('./built.cjs');test('real dependency behavior',()=>{assert.equal(number(42),true);assert.equal(number('no'),false);});`);
     const install=await run('npm install --no-audit --no-fund --save-exact is-number@7.0.0 && python3 -m venv .venv && .venv/bin/pip install --disable-pip-version-check --index-url https://pypi.org/simple six==1.17.0',120_000);
     expect(install.ok,install.output).toBe(true);
-    const useCommand=`node -e "if(!require('is-number')(42)) process.exit(1)" && .venv/bin/python -c "import six; print(six.__version__)"`;
+    const useCommand=`npm run build && npm test && .venv/bin/python -c "import six; assert six.__version__ == '1.17.0'; print(six.__version__)"`;
     let use=await run(useCommand);if(!use.ok && use.output.includes('layout changed'))use=await run(useCommand);expect(use.ok,use.output).toBe(true);
     await run('exit 0');await run('true'); // acknowledge uncertain shell exit
     const again=await run('.venv/bin/python -c "import six; print(six.__version__)" && test -d node_modules/is-number');expect(again.ok,again.output).toBe(true);

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { lookup } from 'node:dns/promises';
-import { chmod, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, lstat, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -18,7 +18,10 @@ export function publicAddress(address: string): boolean {
   if (net.isIP(address) !== 6 || address.includes('.') || address.includes('%')) return false;
   const words=address.toLowerCase().split(':');
   const first=parseInt(words[0],16), second=parseInt(words[1] || '0',16);
-  return first>=0x2000 && first<=0x3fff && first!==0x2002 && !(first===0x2001 && (second<0x200 || second===0xdb8)) && !(first===0x3fff && second<0x1000);
+  // Conservative currently allocated global prefixes; unknown allocations fail
+  // closed until this policy is deliberately updated.
+  return (first===0x2001 && second>=0x200 && second!==0xdb8) || first===0x2003 ||
+    [0x2400,0x2600,0x2800,0x2a00,0x2c00].includes(first&0xfff0);
 }
 export function registryAuthority(authority: string): string {
   const match=/^([a-z0-9.-]+):443$/.exec(authority);
@@ -37,6 +40,7 @@ export async function resolveRegistry(host: string, resolver: typeof lookup = lo
 export async function startRegistryProxy() {
   const directory=await mkdtemp(path.join(tmpdir(),'abyssus-registry-'));
   await chmod(directory,0o700);
+  const directoryIdentity=await lstat(directory);
   const socket=path.join(directory,'proxy.sock');
   const connections=new Set<net.Socket>();
   let closed=false;
@@ -72,12 +76,18 @@ export async function startRegistryProxy() {
       client.once('close',()=>upstream.destroy());
     } catch { if(!client.destroyed)client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); }
   });
-  try { await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(socket,()=>{server.removeListener('error',reject);resolve();});});await chmod(socket,0o600); }
+  const verify=async()=>{
+    const dir=await lstat(directory),entry=await lstat(socket);
+    if(!dir.isDirectory() || dir.dev!==directoryIdentity.dev || dir.ino!==directoryIdentity.ino || dir.uid!==process.getuid?.() || (dir.mode&0o777)!==0o700 || !entry.isSocket() || entry.uid!==dir.uid || (entry.mode&0o777)!==0o600 || (await readdir(directory)).join()!=='proxy.sock')throw new Error('Private registry bridge identity changed');
+  };
+  try { await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(socket,()=>{server.removeListener('error',reject);resolve();});});await chmod(socket,0o600);await verify(); }
   catch(error){server.close();await rm(directory,{recursive:true,force:true});throw error;}
   let closePromise:Promise<void>|undefined;
-  return {directory,socket,close:()=>closePromise ??= (async()=>{
+  return {directory,socket,verify,close:()=>closePromise ??= (async()=>{
     closed=true;for(const connection of connections)connection.destroy();
     await new Promise<void>(resolve=>server.close(()=>resolve()));
+    const remaining=await lstat(directory).catch(()=>undefined);
+    if(remaining && (remaining.dev!==directoryIdentity.dev || remaining.ino!==directoryIdentity.ino))throw new Error('Registry bridge directory changed during cleanup');
     await rm(directory,{recursive:true,force:true});
   })()};
 }
