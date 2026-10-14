@@ -1,4 +1,4 @@
-# Milestone 21 — Installer candidate (work in progress)
+# Milestone 21 — Installer candidate handoff
 
 Isolated `codex/milestone-21`, base `6f99a5345f59b5099612d579edc0fb52e9fe2dfa`, worktree `6fd9`. Coordinator-approved packaging and native lease contracts. This report is not milestone closeout or release acceptance. The user's installed preview, Ubuntu-24.04 WSL environment, Podman environment, M20 branch/worktree and local data remain untouched.
 
@@ -8,7 +8,16 @@ Assisted unsigned Windows x64 NSIS installer, Ubuntu24.04 x64 desktop/backend .d
 
 See [release procedure](../release.md) for contracts and [setup guide](../installer-setup.md) for user steps. Shared/types.ts, public API, provider prompts, planStep, per-chat model snapshots and approval contracts are unchanged. Narrow internal changes: packaged source identity/launcher selection, installation leases, native bootstrap and helper administrator maintenance refusal.
 
-## Evidence so far
+## Complete matrix before final artifact correction
+
+Tested source: `6563c7a33ab48694b34abea66a0dd74ca0ccd395`. All workflows passed, but independent artifact inspection found the setup-guide checksum defect below; this source is retained evidence, not the final handoff candidate.
+
+- [Validate 38557142214](https://github.com/Deathstar1342/react-harness/actions/runs/38557142214): typecheck, **680 passed / 7 skipped**, build and disabled-user-namespace refusal succeeded.
+- [Desktop 38557142291](https://github.com/Deathstar1342/react-harness/actions/runs/38557142291): Windows and Ubuntu desktop checks succeeded.
+- [Privileged helper 38557142317](https://github.com/Deathstar1342/react-harness/actions/runs/38557142317): disposable privileged package/policy/repair/interruption checks succeeded.
+- [Installer matrix 38557142251](https://github.com/Deathstar1342/react-harness/actions/runs/38557142251), Linux job `115828968056`: actual installation, native runtime/PTY/sandbox, real application state across backend/desktop removal and reinstall, all maintenance/interruption/repair guards, helper ordering and actual main-crash/surviving-backend exclusion passed. Preserved records include profile/project/chat IDs, per-chat model snapshot, settings, synthetic test configuration and exact project file. The four bounded package-state tests also passed.
+
+## Earlier evidence and iteration history
 
 - Consolidated crash-observation source `95106962fafea7d9ffd14872ad754e794f52128f`: [Validate 38553595417](https://github.com/Deathstar1342/react-harness/actions/runs/38553595417), [Desktop 38553595855](https://github.com/Deathstar1342/react-harness/actions/runs/38553595855) and [helper 38553595407](https://github.com/Deathstar1342/react-harness/actions/runs/38553595407) all succeeded. This follow-up changes acceptance observations, not production exclusion.
 - Corrected source `97311e4784b0e38e3f3a4c67b8cf18ba8a32b84e`: [Validate 38551625018](https://github.com/Deathstar1342/react-harness/actions/runs/38551625018) passed **680 tests / 7 skips**, typecheck, build and disabled-user-namespace refusal; [Desktop 38551624785](https://github.com/Deathstar1342/react-harness/actions/runs/38551624785) and [helper 38551624819](https://github.com/Deathstar1342/react-harness/actions/runs/38551624819) also succeeded. Linux package job [115810703454](https://github.com/Deathstar1342/react-harness/actions/runs/38551624724/job/115810703454) repeated every package/maintenance/crash/data-preservation gate below successfully on this source. Final artifact receipts follow separately.
@@ -26,6 +35,7 @@ See [release procedure](../release.md) for contracts and [setup guide](../instal
 
 ## Retained failed evidence and review corrections
 
+- Full matrix `6563c7a` passed, including Windows job `115830832754`: actual main PID2508, owned cmd launcher4184, independently opened handle signalled exit (observer wait262ms), no matching processes remained, immediate lease reacquisition and second probe succeeded (94ms total), installed restart passed. Downloaded installer SHA256 `c8fed38739cd2cca45a70e8ddb196ceb41feca0a0d0856648abf797f9d9f14c3`, 199813477 bytes, Authenticode `NotSigned`. Independent archive inspection confirmed embedded source and exact Linux .deb bytes, but found `package:prepare` overwrote SETUP.md with Windows checkout line endings while retaining Linux's earlier SHA256SUMS; the added Windows notices were also absent from that inventory. Preparation now regenerates the complete setup manifest after copying the guide and generating platform notices. Actual packaged smoke verifies every setup file and checksum before launch. This caught defect remains recorded despite green earlier CI; the corrected source requires a complete rerun.
 - Sandbox Vite build hit `EPERM realpath` in Monaco. The same isolated D: build succeeded with normal permissions; source behavior was not weakened.
 - Initial full suite put TEMP inside the installation checkout, producing **83 failures / 557 passes / 33 skips** and a project-overlap rejection. Moving fixtures to the separate permitted D: visualization temp root produced the full pass above. No sandbox rule was loosened.
 - First electron-builder config used unsupported `beforeInstall`/`beforeRemove` keys; pinned schema requires FPM options. First NSIS compile rejected an unused uninstaller variable; declarations now match installer scope.

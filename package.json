@@ -14,7 +14,7 @@
     "desktop:stage-runtime": "node scripts/stage-runtime.mjs",
     "desktop:start": "electron build/app/desktop/entry.cjs",
     "desktop:smoke": "node tests/desktop-smoke.ts",
-    "package:prepare": "node scripts/prepare-desktop-package.mjs && node scripts/package-notices.mjs",
+    "package:prepare": "node scripts/prepare-desktop-package.mjs && node scripts/package-notices.mjs && node scripts/package-manifest.mjs build/bundled",
     "package:windows": "electron-builder --config packaging/electron-builder.cjs --win --x64 --publish never",
     "package:linux": "electron-builder --config packaging/electron-builder.cjs --linux --x64 --publish never",
     "start": "tsx server/index.ts",

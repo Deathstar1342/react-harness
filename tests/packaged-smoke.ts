@@ -9,6 +9,13 @@ import { once } from 'node:events';
 import { readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 const executable=process.argv[2];if(!executable)throw new Error('Provide an actual packaged executable');
+const setup=path.join(path.dirname(path.resolve(executable)),'resources/setup');
+const setupEntries=readFileSync(path.join(setup,'SHA256SUMS'),'utf8').trim().split('\n').map(line=>{
+  const match=/^([a-f0-9]{64})  ([^/\\]+)$/.exec(line);assert(match,'Invalid setup checksum record');return {name:match[2],hash:match[1]};
+});
+assert.deepEqual(setupEntries.map(e=>e.name).sort(),readdirSync(setup).filter(name=>name!=='SHA256SUMS').sort(),'Every bundled setup file must have one checksum');
+for(const entry of setupEntries)assert.equal(createHash('sha256').update(readFileSync(path.join(setup,entry.name))).digest('hex'),entry.hash,`Bundled checksum mismatch: ${entry.name}`);
+console.log('PASS actual packaged setup payload has complete matching checksums');
 const mode=process.argv[3]??'create';assert(['create','verify'].includes(mode));
 const home=process.env.ABYSSUS_PACKAGE_TEST_HOME??mkdtempSync(path.join(tmpdir(),'abyssus-package-'));
 mkdirSync(home,{recursive:true});
