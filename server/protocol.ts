@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { AgentResponse, AgentRole } from '../shared/types.js';
+import { packageRecommendation } from './install-review.js';
 
 // These are transport bounds, not filesystem authorization. WorkspaceTools must
 // still validate paths, versions, permissions, leases, and action effects.
@@ -75,6 +76,7 @@ const phases = z.array(planPhaseSchema).max(50).superRefine(
 );
 
 export const actionSchema = z.discriminatedUnion('name', [
+  z.strictObject({ name: z.literal('recommend_packages'), args: packageRecommendation }),
   z.strictObject({
     name: z.literal('list_files'),
     args: z.strictObject({ path: path.optional() }),
@@ -353,6 +355,7 @@ delegate {objective:string,acceptanceCriteria:string[],paths?:string[],planStep?
 set_plan {phases:[{id:string,title:string,steps:[{id:string,title:string,status:"pending"|"in_progress"|"done"|"blocked"}]}]}
 review {focus:string}
 ask_user {question:string}
+recommend_packages {packages:[{name:string,version?:string}],reason:string}
 list_files {path?:string}
 read_file {path:string}
 search {query:string,path?:string}
@@ -370,6 +373,7 @@ execute_python {code:string,timeoutMs?:integer}
 git_status {}
 git_diff {path?:string}
 run_tests {command:string,reportPath?:string,timeoutMs?:integer}
+recommend_packages {packages:[{name:string,version?:string}],reason:string}
 complete {}`,
 
   critic: `Allowed actions:

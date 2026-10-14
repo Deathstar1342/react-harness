@@ -2,6 +2,16 @@
 
 ## Product direction
 
+### M19 system installation decisions
+
+`InstallService` wraps the M18 authenticated helper with independent profile/selected-local-Linux-target policy. Lazy readiness checks never provision or activate the helper. Settings defaults to Ask every time; Auto-approve and AI review remain independent of workspace approvals. The reviewer ID is copied once from the critic default; changing it does not alter saved chat models. An authenticated target change resets policy to Ask and invalidates pending decisions. M20 owns selection/launch of a different backend environment.
+
+Architect/coder `recommend_packages` is a bounded advisor recommendation containing names, optional exact versions and a reason. Planning and critic roles cannot request installation. Strict helper DTO/closure/digest validation precedes any decision. Ask uses the existing approval card with exact target, requested/dependency versions, provenance, expiry and the root maintainer-script/trigger/service-impact exception. Auto approves only supported concrete previews. AI review uses separate fixed guidance and curated evidence, with no chat transcript, extensions, secrets, tools or helper authority. It uses the managed critic account ledger with the snapshotted reviewer ID, 1024 output tokens, a 20-second deadline and per-call transport retries disabled. Strict two-field JSON rejects duplicate keys; errors/refusal/timeout/ambiguity ask a human only while the original preview remains valid.
+
+SQLite install records are independent of chat/project cascading cleanup. Policy/target/reviewer revision, requesting frame/role, generation/mode version, recommendation, exact preview, decision source and actual outcome are durable. A changed or expired preview requires a new UUID and decision via explicit refresh; old pending work is never released by raising autonomy. Following all awaited context/authorization work, the service synchronously rechecks bindings, persists dispatch and immediately invokes execute. Cancellation or steering after that boundary cannot undo apt effects. Lost replies/restart only permit authenticated status/reconcile, never execute replay. Healthy explicit reconciliation can release the recovery gate while retaining the original uncertain outcome. History is available on demand, including after safe scoped deletion.
+
+Shutdown invalidates pre-dispatch work and drains local helper/reviewer calls before releasing lifecycle ownership. Durable historical uncertainty does not prevent ordinary closure; it gates new installs and scoped removal on restart. Missing/unsupported helper leaves ordinary application use available. No privileged shell fallback, automatic setup, provider transport mode change or Electron implementation is introduced.
+
 ### M17 execution boundary
 
 `WorkspaceTools` requires non-root Linux Bubblewrap for every persistent PTY/Python/test process and fixed Git subprocess. There is no host-execution fallback, including on Windows. Project creation writes a fixed empty Git layout without invoking ambient host Git/templates. The application wires M16's effective home, state/config/prompt locations and registered project set into trusted sandbox policy. Imported projects stay in place.

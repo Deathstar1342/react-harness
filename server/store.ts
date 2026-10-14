@@ -42,6 +42,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS test_reports (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS file_changes (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, snapshots TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS file_changes_project ON file_changes(project_id);
+      CREATE TABLE IF NOT EXISTS install_requests (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, chat_id TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS installs_project ON install_requests(project_id);
     `);
     this.changes.setMaxListeners(100);
   }
@@ -105,10 +107,12 @@ export class Store {
   }
   deleteChat(chatId: string) {
     this.chat(chatId);
+    this.assertInstallRemovalSafe(this.chat(chatId).projectId);
     this.transaction(()=>this.deleteChatRecords(chatId));
   }
   deleteProject(projectId: string) {
     this.project(projectId);
+    this.assertInstallRemovalSafe(projectId);
     this.transaction(()=>{
       for (const chat of this.chats(projectId)) this.deleteChatRecords(chat.id);
       this.db.prepare('DELETE FROM file_changes WHERE project_id=?').run(projectId);
@@ -117,6 +121,20 @@ export class Store {
   }
   chats(projectId?: string): Chat[] {
     return (projectId ? this.db.prepare('SELECT data FROM chats WHERE project_id=?').all(projectId) : this.db.prepare('SELECT data FROM chats').all()).map(row => JSON.parse(String(row.data))).sort((a: Chat,b: Chat) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+  install(id: string): import('../shared/types.js').InstallRecord {
+    const row = this.db.prepare('SELECT data FROM install_requests WHERE id=?').get(id);
+    if (!row) throw Object.assign(new Error('Install request not found'), {statusCode:404});
+    return JSON.parse(String(row.data));
+  }
+  installs(): import('../shared/types.js').InstallRecord[] {
+    return this.db.prepare('SELECT data FROM install_requests ORDER BY rowid DESC').all().map(row=>JSON.parse(String(row.data)));
+  }
+  saveInstall(item: import('../shared/types.js').InstallRecord) {
+    this.db.prepare('INSERT INTO install_requests VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(item.id,item.projectId,item.chatId,JSON.stringify(item));
+  }
+  assertInstallRemovalSafe(projectId: string) {
+    if (this.installs().some(item=>item.projectId === projectId && (item.recoveryRequired || ['preparing','reviewing','pending','approved','authorizing','dispatching'].includes(item.state)))) throw Object.assign(new Error('Resolve system install requests and recovery before removing this project or its chats'), {statusCode:409});
   }
   chat(id: string): Chat {
     const row = this.db.prepare('SELECT data FROM chats WHERE id=?').get(id);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { InstallHistory } from './InstallControls';
 import {
   ArrowDown,
   ArrowUp,
@@ -325,6 +326,7 @@ export function Conversation({
               refresh={refresh}
             />
           ))}
+          <InstallHistory key={detail.chat.id} chatId={detail.chat.id}/>
           {detail.approvals.some(
             (approval) => approval.status !== "pending",
           ) && (

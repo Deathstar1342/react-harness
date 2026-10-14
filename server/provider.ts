@@ -145,7 +145,7 @@ export class StarkProvider implements ModelProvider {
     }
   }
 
-  async #request<T>(endpoint: string, init: RequestInit, external: AbortSignal | undefined, consume: (response: Response) => Promise<T>): Promise<T> {
+  async #request<T>(endpoint: string, init: RequestInit, external: AbortSignal | undefined, consume: (response: Response) => Promise<T>, noRetry = false): Promise<T> {
     // Allow an unconfigured application to start; fail safely when it requests a model.
     try {
       const url = new URL(this.#baseUrl);
@@ -167,7 +167,7 @@ export class StarkProvider implements ModelProvider {
         if (!response.ok) {
           await response.body?.cancel().catch(() => undefined);
           const retryable = [429, 502, 503, 504].includes(response.status);
-          if (retryable && attempt < this.#maxRetries) {
+          if (retryable && !noRetry && attempt < this.#maxRetries) {
             const retryHeader = response.headers.get('retry-after');
             const numericDelay = retryHeader === null ? NaN : Number(retryHeader) * 1_000;
             const dateDelay = retryHeader === null ? NaN : Date.parse(retryHeader) - Date.now();
@@ -267,6 +267,6 @@ export class StarkProvider implements ModelProvider {
         }
       }
       throw truncated();
-    });
+    }, input.noRetry === true);
   }
 }

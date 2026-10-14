@@ -20,9 +20,10 @@ import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 import { installationRoot, applicationHome } from './locations.js';
 import { LinuxSandbox } from './tools/sandbox.js';
 import type { BackendLifecycle } from './lifecycle.js';
+import { InstallService, type InstallHelper } from './installs.js';
 
 const approvalMode = z.enum(['autonomous','balanced','review']);
-export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>} }
+export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper> }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
@@ -31,7 +32,9 @@ export async function createApp(options: AppOptions) {
   sandbox.configure(sandboxPolicy);tools.configureSandbox?.(sandboxPolicy);
   store.initializeModels(config.models);
   store.recover();
-  const runtime = new Runtime(store,provider,tools,config,hooks);
+  const managedComplete=hooks.complete ?? createManagedHooks(provider,store,config).complete!;
+  const installs=new InstallService(store,config.models.critic,managedComplete,options.packageHelper);
+  const runtime = new Runtime(store,provider,tools,config,hooks,installs);
   const changes = new Changes(store,tools,runtime);
   const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root));
   const settings = new Settings(store,config.approvalMode);
@@ -158,6 +161,12 @@ export async function createApp(options: AppOptions) {
   app.get('/api/provider-settings',async()=>providerSettings.get());
   app.patch('/api/provider-settings',async request=>providerSettings.update(request.body));
   app.get('/api/preferences',async()=>settings.get());
+  app.get('/api/system-installs/settings',async()=>installs.view());
+  app.patch('/api/system-installs/settings',async request=>{installs.update(request.body);return installs.view();});
+  app.get('/api/system-installs/history',async()=>installs.history());
+  app.post('/api/system-installs/:id/refresh',async request=>{z.object({}).strict().parse(request.body);return runtime.refreshInstall(paramId(request.params));});
+  app.post('/api/system-installs/:id/status',async request=>{z.object({}).strict().parse(request.body);return installs.recover(paramId(request.params),false);});
+  app.post('/api/system-installs/:id/reconcile',async request=>{z.object({}).strict().parse(request.body);return installs.recover(paramId(request.params),true);});
   app.patch('/api/preferences',async request=>settings.update(z.object({debugMode:z.boolean().optional(),defaultApprovalMode:approvalMode.optional()}).strict().parse(request.body)));
   app.post('/api/connection-check',async(request,reply)=> {
     z.object({}).strict().parse(request.body);
@@ -211,7 +220,7 @@ export async function createApp(options: AppOptions) {
     const id = paramId(request.params); watchProject(id);
     return reply.code(201).send(store.createChat(id,body.title ?? 'New chat',body.approvalMode ?? settings.get().defaultApprovalMode));
   });
-  app.get('/api/chats/:id',async request=> {const id = paramId(request.params);watchProject(store.chat(id).projectId);return store.detail(id);});
+  app.get('/api/chats/:id',async request=> {installs.expire();const id = paramId(request.params);watchProject(store.chat(id).projectId);return store.detail(id);});
   app.patch('/api/chats/:id',async request=> {
     const body = z.object({title:z.string().trim().min(1).max(200).optional(),approvalMode:approvalMode.optional()}).strict().parse(request.body);
     const id = paramId(request.params), chat = store.chat(id);
@@ -292,7 +301,7 @@ export async function createApp(options: AppOptions) {
     await app.register(staticFiles,{root:staticRoot,prefix:'/',index:'index.html'});
     app.setNotFoundHandler((request,reply)=>request.url.startsWith('/api') ? reply.code(404).send({error:'API route not found'}) : reply.sendFile('index.html'));
   }
-  app.addHook('preClose',async()=>{closing=true;for(const stream of eventStreams) stream.end();await diagnostics.close();});
+  app.addHook('preClose',async()=>{closing=true;installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
-  return {app,store,runtime};
+  return {app,store,runtime,installs};
 }

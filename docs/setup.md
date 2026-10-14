@@ -1,5 +1,15 @@
 # Setup guide
 
+## System install settings (M19)
+
+Open Settings: **System installs** immediately follows workspace approvals. **Ask every time** is the default. Workspace autonomy never changes it. **Auto-approve** admits only supported concrete apt previews; **AI review** uses an independent selected reviewer and falls back to a human when review is invalid/unavailable. Reviewer selection starts from the critic default and is separate from saved chat models. Policy and reviewer edits save to this profile and invalidate pending decisions.
+
+The environment label identifies the authenticated helper in the local backend's Linux target. This milestone does not select another WSL distribution or provision/start a helper. Missing/unsupported helper is shown clearly; normal application use remains available. Follow the explicit administrator/setup contract in [helper.md](helper.md); do not use an agent shell or grant it sudo as a fallback. M20 owns guided desktop provisioning/selection.
+
+Review every requested/dependency version, provenance and target in the approval card. Trusted apt package scripts execute as root, triggers may affect existing packages/services, and metadata bounds do not bound these effects. Previews expire after two minutes. **Request a new preview** creates a new decision; expired approval cannot carry over. A changed/steered task requires a new package recommendation. Planning cannot install under any policy.
+
+**System install history** in the conversation or Settings shows actual outcomes and decision sources on demand. Cancellation stops subsequent agent work but cannot undo dispatched package effects. Lost replies/restarts preserve correlation; use **Check helper status** then **Reconcile installed state**, never repeat execution to guess the outcome. Healthy reconciliation is an observation, not a rewrite of uncertain history. Unhealthy package state needs separate administrator recovery. Pending/uncertain installs protect chat/project removal; pause undecided work or resolve recovery first. Historical uncertainty alone does not prevent closing the app.
+
 ## M17 sandbox prerequisites and limits
 
 Agent execution and fixed Git reads require a **non-root Linux backend**, Bubblewrap with `--disable-userns` support, permitted unprivileged user namespaces, `socat`, distro bash/Python, Python venv support, and the existing Node 24+/node-pty prerequisites. Missing/blocked prerequisites produce an actionable failure; commands never run on the host as a fallback. On Ubuntu/Debian, a trusted administrator can provision `bubblewrap socat python3-venv` through normal package setup. This application does not install those system packages or change kernel/AppArmor settings automatically. The CI workflow's sudo/sysctl commands apply only to its disposable runner; do not copy those host-policy changes blindly onto a workstation. Native Windows file/UI tests are portable checks, not Linux sandbox acceptance. No local Podman service distro is used.
