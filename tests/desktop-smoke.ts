@@ -11,6 +11,13 @@ mkdirSync(path.join(root,'test-results'),{recursive:true});
 const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],chromiumSandbox:true,cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home,MODEL_STREAMING:'false'},timeout:30000});
 let app=await launch();
 const close=async()=>{await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});await app.close();};
+const crashRenderer=()=>app.evaluate(({BrowserWindow})=>{
+  const contents=BrowserWindow.getAllWindows()[0].webContents;
+  // Kill only the exact owned renderer. SIGKILL avoids Linux crash/core-dump
+  // handlers delaying the renderer-exit notification in a disposable runner.
+  if(process.platform==='linux'){const pid=contents.getOSProcessId();if(!pid||pid===process.pid)throw new Error('Invalid renderer PID');process.kill(pid,'SIGKILL');}
+  else contents.forcefullyCrashRenderer();
+});
 let completed=false;
 const deadline=setTimeout(()=>{console.error('FAIL desktop smoke exceeded its two-minute bound');void app.evaluate(({app})=>app.exit(1)).finally(()=>process.exit(1));},120000);
 try {
@@ -37,7 +44,7 @@ try {
   console.log('PASS real window restart');
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
   const shellRecovery=app.waitForEvent('window');
-  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+  await crashRenderer();
   page=await shellRecovery;await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible();
   console.log(`PASS real ${process.platform} renderer crash and fresh window recovery`);
   if(process.platform==='linux') {
@@ -98,11 +105,14 @@ try {
         console.log('PASS blank-profile endpoint/key through real Settings and explicit synthetic HTTP connection test');
       }finally{provider.closeAllConnections();await new Promise<void>(resolve=>provider.close(()=>resolve()));}
       const beforeCrash=(await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId;
+      const originalBackendPid=JSON.parse(readFileSync(path.join(profile,'backend.json'),'utf8')).identity.pid,crashedPage=page;
       const recoveredWindow=app.waitForEvent('window');
-      await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+      await crashRenderer();
       page=await recoveredWindow;
+      await expect.poll(()=>crashedPage.isClosed()).toBe(true);
       await expect(page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:'Preserve desktop state',exact:true})).toBeVisible({timeout:20000});
       assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,beforeCrash);
+      assert.equal(JSON.parse(readFileSync(path.join(profile,'backend.json'),'utf8')).identity.pid,originalBackendPid);
       console.log('PASS actual renderer crash/reopen retains exact backend session');
       await app.evaluate(({dialog})=>{dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});});
       assert.equal(await page.evaluate(()=>window.abyssusDesktop!.pickDirectory()),null);
