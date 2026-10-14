@@ -1,5 +1,19 @@
 # M22 independent coordinator review
 
+## Corrected source approved for integration
+
+Final handoff `ff18d124e57978ad0764009f440e850991bdfe45`, tested source `6ee864eb182ee44a1e4059aca99b978efa6f24bb`. Independently verified that their only difference is the child report and that the source worktree was clean. The earlier findings below are retained history and are addressed in this corrected source.
+
+Coordinator reviewed the 13-file correction delta: pending transitions now clone and publish after COMMIT across interruption/approval/install/stale-file/refresh branches; result schemas bound UTF-8 output and finite JSON data and retain uncertainty after malformed post-effect results; empty call lists with ordinary replies are accepted without execution; one-time/normal event listener semantics survive isolated subscriber failures. Meaningful tests cover after-write/pre-COMMIT faults, post-effect uncertainty without replay, independent helper-state success after failed native result persistence, ordinary zero-call replies and diagnostic lane presentation.
+
+Independent corrected-source checks passed `npm run typecheck`, `npm run desktop:build`, **696 portable Windows tests / 0 failures / 33 platform skips**, and baseline/delta diff checks. Real Windows Electron smoke passed render/isolation, IPC status, navigation/window/network denial, changed working directory, window restart, renderer crash recovery and application restart in an isolated physical D: profile. Expected CSP network-denial messages are part of that negative test. No WSL launch, installed preview change, privileged workstation transaction or live provider request was performed.
+
+Every required exact-source job/step verified successful: [Validate 38637910623](https://github.com/Deathstar1342/react-harness/actions/runs/38637910623), [Desktop Windows/Ubuntu 38637910708](https://github.com/Deathstar1342/react-harness/actions/runs/38637910708), [helper 38637910652](https://github.com/Deathstar1342/react-harness/actions/runs/38637910652). Linux/PTY/connected desktop/privileged evidence comes from disposable CI. Actual picker and authentication dialogs remain synthetic adapters in that evidence; no manual device or live-STARK claim is made. The unchanged installer auto-workflow is not an M22 acceptance gate or a resumed M21 release.
+
+Integration into main is approved; publication and exact-main CI are pending. No M23 dispatch before those steps pass. Preserve M22 branch/worktree and M21's paused uncommitted work. No release publication or installed-app update.
+
+## Earlier candidate review (retained failures)
+
 Candidate source `01ff6a8fd5c74af642d521c8e0a770aa7406960f`, assigned `codex/milestone-22`, isolated worktree `8cbf`, baseline `7bee8bc`. Not accepted or integrated. M21 packaging and its separate uncommitted source/notices work remain paused and untouched.
 
 ## Independently verified

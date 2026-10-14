@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentRole, CompletionResult, ModelMessage, PublicSettings } from '../shared/types.js';
+import type { AgentRole, CompletionResult, ModelMessage, NativeToolDefinition, PublicSettings } from '../shared/types.js';
 import { Store } from './store.js';
 
 const MINUTE = 60_000;
@@ -24,8 +24,8 @@ export class BudgetError extends Error {
 
 // One token per UTF-8 byte plus message framing is deliberately conservative in
 // the absence of a provider tokenizer (including non-ASCII and code).
-export function estimateTokens(messages: ModelMessage[]): number {
-  return 16 + messages.reduce((total, message) => total + 16 + Buffer.byteLength(message.content, 'utf8'), 0);
+export function estimateTokens(messages: ModelMessage[], tools: NativeToolDefinition[] = []): number {
+  return 16 + Buffer.byteLength(JSON.stringify(tools),'utf8') + messages.reduce((total, message) => total + 16 + Buffer.byteLength(JSON.stringify(message), 'utf8'), 0);
 }
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

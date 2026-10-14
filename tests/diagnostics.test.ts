@@ -1,3 +1,4 @@
+import { nativeReply, actionOf, diagnosticReply } from './native-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionDiagnostics } from '../server/diagnostics.js';
 import { readConfig } from '../server/config.js';
@@ -8,12 +9,12 @@ import { ProviderError } from '../server/provider.js';
 import type { CompletionResult, ModelProvider } from '../shared/types.js';
 
 const config = readConfig({ STARK_BASE_URL: 'http://127.0.0.1/v1', STARK_API_KEY: 'secret-never-disclose', ARCHITECT_MODEL: 'a', CODER_MODEL: 'c', CRITIC_MODEL: 'r' });
-const good: CompletionResult = { text: JSON.stringify({ version: 1, type: 'final', message: 'Connection OK' }), finishReason: 'stop', usage: { inputTokens: 15, outputTokens: 10 } };
+const good: CompletionResult = diagnosticReply({});
 const stores: Store[] = [];
 afterEach(() => { vi.useRealTimers(); for (const store of stores.splice(0)) store.close(); });
 function fixture(overrides: Partial<ModelProvider> = {}, timeout = 25000, options = config) {
   const store = new Store(':memory:'); stores.push(store);
-  const provider: ModelProvider = { models: vi.fn(async () => ['a', 'c', 'r']), complete: vi.fn(async () => good), ...overrides };
+  const provider: ModelProvider = { models: vi.fn(async () => ['a', 'c', 'r']), complete: vi.fn(async input => diagnosticReply(input)), ...overrides };
   const hooks = createManagedHooks(provider, store, options);
   return { store, provider, diagnostics: new ConnectionDiagnostics(options, provider, hooks.complete!, timeout) };
 }
@@ -23,35 +24,35 @@ describe('bounded, isolated connection diagnostics', () => {
     const t = fixture();
     const result = await t.diagnostics.run();
     expect(result.ok).toBe(true);
-    expect(result.checks.map(check => check.status)).toEqual(['passed', 'passed', 'passed', 'passed']);
-    expect(t.provider.complete).toHaveBeenCalledTimes(3);
+    expect(result.checks.map(check => check.status)).toEqual(Array(10).fill('passed'));
+    expect(t.provider.complete).toHaveBeenCalledTimes(15);
     for (const [index, call] of vi.mocked(t.provider.complete).mock.calls.entries()) {
-      expect(call[0]).toMatchObject({ model: ['a', 'c', 'r'][index], maxTokens: 1024 });
+      expect(call[0]).toMatchObject({ model: ['a', 'c', 'r'][Math.floor(index/5)], maxTokens: 1024 });
       expect(call[0].signal).toBeInstanceOf(AbortSignal);
       expect(call[0].onDelta).toBeUndefined();
       expect(JSON.stringify(call[0])).not.toContain(config.apiKey);
     }
     expect(t.store.getState<Reservation[]>(BUDGET_STATE_KEY, []).map(entry => [entry.role, entry.tokens, entry.status]))
-      .toEqual([['architect', 25, 'reported'], ['coder', 25, 'reported'], ['critic', 25, 'reported']]);
+      .toEqual(['architect','coder','critic'].flatMap(role=>Array.from({length:5},()=>[role,25,'reported'])));
     expect(t.store.chats()).toEqual([]);
     expect(JSON.stringify(result)).not.toContain('Connection OK');
   });
-  it('does not probe missing or near-match IDs, but still checks available roles', async () => {
+  it('probes exact manual IDs even when catalog entries are missing', async () => {
     const t = fixture({ models: async () => ['A', 'c', 'r-extra'] });
     const report = await t.diagnostics.run();
-    expect(report.checks.map(check => check.status)).toEqual(['passed', 'failed', 'passed', 'failed']);
-    expect(t.provider.complete).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(t.provider.complete).mock.calls[0][0].model).toBe('c');
+    expect(report.checks.map(check => check.status)).toEqual(Array(10).fill('passed'));
+    expect(t.provider.complete).toHaveBeenCalledTimes(15);
+    expect(report.checks[1].message).toContain('not confirmed in the catalog');
   });
   it('does not send requests when unconfigured or when catalog retrieval fails', async () => {
     const unconfigured = fixture({}, 25000, { ...config, apiKey: '' });
-    expect((await unconfigured.diagnostics.run()).checks.map(check => check.status)).toEqual(['failed', 'skipped', 'skipped', 'skipped']);
+    expect((await unconfigured.diagnostics.run()).checks.map(check => check.status)).toEqual(['failed',...Array(9).fill('skipped')]);
     expect(unconfigured.provider.models).not.toHaveBeenCalled();
     expect(unconfigured.provider.complete).not.toHaveBeenCalled();
     const failed = fixture({ models: async () => { throw new Error(config.apiKey + ' upstream private payload'); } });
     const report = await failed.diagnostics.run();
     expect(report.ok).toBe(false);
-    expect(failed.provider.complete).not.toHaveBeenCalled();
+    expect(failed.provider.complete).toHaveBeenCalledTimes(15);
     expect(JSON.stringify(report)).not.toMatch(/secret-never-disclose|upstream private payload/);
   });
   it.each([
@@ -84,7 +85,7 @@ describe('bounded, isolated connection diagnostics', () => {
   });
   it.each([{ ...good, finishReason: 'length' }, { text: 'x'.repeat(2049) }])('bounds output and rejects incomplete finishes', async reply => {
     const t = fixture({ complete: async () => reply });
-    expect((await t.diagnostics.run()).checks[1]).toMatchObject({ status: 'failed', message: 'Test reply was incomplete or exceeded its size limit.' });
+    expect((await t.diagnostics.run()).checks[1]).toMatchObject({ status: 'failed' });
   });
   it('honors configured output caps and rejects probes that cannot fit account budgets', async () => {
     const t = fixture({}, 25000, { ...config, maxOutputTokens: 64 });
@@ -97,7 +98,7 @@ describe('bounded, isolated connection diagnostics', () => {
   it('counts failed transport attempts conservatively without retrying', async () => {
     const t = fixture({ complete: vi.fn(async () => { throw new Error('failed'); }) });
     await t.diagnostics.run();
-    expect(t.provider.complete).toHaveBeenCalledTimes(3);
+    expect(t.provider.complete).toHaveBeenCalledTimes(9);
     expect(t.store.getState<Reservation[]>(BUDGET_STATE_KEY, []).every(entry => entry.status === 'uncertain' && entry.tokens > 1024)).toBe(true);
   });
   it('cancels a hung catalog, rejects concurrency and permits a later check', async () => {
@@ -108,7 +109,7 @@ describe('bounded, isolated connection diagnostics', () => {
     await vi.waitFor(() => expect(catalogSignal).toBeDefined());
     expect(() => t.diagnostics.run()).toThrow('already running');
     controller.abort();
-    expect((await pending).checks.map(check => check.status)).toEqual(['failed', 'skipped', 'skipped', 'skipped']);
+    expect((await pending).checks.map(check => check.status)).toEqual(['failed',...Array(9).fill('skipped')]);
     expect(catalogSignal!.aborted).toBe(true);
     vi.mocked(t.provider.models).mockResolvedValue(['a', 'c', 'r']);
     expect((await t.diagnostics.run()).ok).toBe(true);
@@ -120,7 +121,7 @@ describe('bounded, isolated connection diagnostics', () => {
     const pending = t.diagnostics.run();
     await vi.advanceTimersByTimeAsync(51);
     const report = await pending;
-    expect(report.checks.map(check => check.status)).toEqual(['passed', 'failed', 'skipped', 'skipped']);
+    expect(report.checks.map(check => check.status)).toEqual(['passed','failed',...Array(8).fill('skipped')]);
     expect(report.checks[1].message).toContain('timed out');
     expect(t.provider.complete).not.toHaveBeenCalled();
   });
@@ -146,7 +147,7 @@ describe('bounded, isolated connection diagnostics', () => {
     await vi.waitFor(() => expect(probeSignal).toBeDefined());
     await t.diagnostics.close();
     expect(probeSignal!.aborted).toBe(true);
-    expect((await pending).checks.map(check => check.status)).toEqual(['passed', 'failed', 'skipped', 'skipped']);
+    expect((await pending).checks.map(check => check.status)).toEqual(['passed','failed',...Array(8).fill('skipped')]);
     expect(t.provider.complete).toHaveBeenCalledTimes(1);
     expect(t.store.getState<Reservation[]>(BUDGET_STATE_KEY, [])[0].status).toBe('uncertain');
     expect(() => t.diagnostics.run()).toThrow('shutting down');

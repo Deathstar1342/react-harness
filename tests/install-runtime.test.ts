@@ -1,10 +1,11 @@
+import { nativeReply } from './native-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createApp } from '../server/app.js';
 import { Store } from '../server/store.js';
 import { readConfig } from '../server/config.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
+import { protocolInstructions } from '../server/protocol.js';
 import { BUDGET_STATE_KEY } from '../server/scheduler.js';
 import type { ModelProvider, PackageHelperRecord, ToolService } from '../shared/types.js';
 import { SettingsDialog } from '../client/WorkspaceDialogs.js';
@@ -13,19 +14,34 @@ import { deferred, fakeHelper } from './install-fixture.js';
 
 const cleanup:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const close of cleanup.splice(0))await close();});
-const recommendation=JSON.stringify({message:'System dependency needed',action:'recommend_packages',parameters:{packages:[{name:'hello'}],reason:'Print a greeting for the requested build'}});
-async function fixture(responses=[recommendation,JSON.stringify({message:'Done',action:'complete',parameters:{}})]) {
+const recommendation=nativeReply('recommend_packages',{packages:[{name:'hello'}],reason:'Print a greeting for the requested build'},'System dependency needed');
+async function fixture(responses=[recommendation,nativeReply('submit_completion',{summary:'Done'},'Done')]) {
   const store=new Store(':memory:'),{helper,records}=fakeHelper();
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'PRIVATE_CONFIG_KEY',HARNESS_DATA_DIR:'/uncreated-install-test-data'});
-  const provider:ModelProvider={models:async()=>['reviewer'],complete:vi.fn(async input=>input.messages[0]?.content.startsWith('Evaluate a proposed')?{text:'{"decision":"approve","reason":"Specific needed dependency"}',usage:{inputTokens:20,outputTokens:12}}:{text:responses.shift()??JSON.stringify({message:'Done',action:'complete',parameters:{}})})};
+  const provider:ModelProvider={models:async()=>['reviewer'],complete:vi.fn(async input=>input.messages[0]?.content.startsWith('Evaluate a proposed')?{...nativeReply('install_decision',{decision:'approve',reason:'Specific needed dependency'}),usage:{inputTokens:20,outputTokens:12}}:responses.shift()??nativeReply('submit_completion',{summary:'Done'},'Done'))};
   const tools:ToolService={inspect:vi.fn(),execute:vi.fn(),read:async(_root,path)=>({path,content:'',hash:null}),list:async()=>[],save:vi.fn(),setDirty:vi.fn(),dispose:async()=>{},removeScope:async(_root,_chat,mutate)=>mutate()};
-  const t=await createApp({config,provider,store,tools,hooks:{parse:parseAgentResponse,instructions:protocolInstructions},packageHelper:async()=>helper});
+  const t=await createApp({config,provider,store,tools,hooks:{instructions:protocolInstructions},packageHelper:async()=>helper});
   const project=store.createProject('Test','/not-present-test-project'),chat=store.createChat(project.id,'New chat','autonomous');
   cleanup.push(async()=>{await t.app.close();store.close();});
   const start=async(content='Build')=>{const response=await t.app.inject({method:'POST',url:`/api/chats/${chat.id}/messages`,payload:{content}});expect(response.statusCode).toBe(202);await t.runtime.wait(chat.id);};
   return {...t,helper,records,config,provider,tools,project,chat,start};
 }
 describe('system install runtime and public API',()=>{
+  it.each(['after-write','before-commit'])('never repeats helper effects after native outcome %s failure',async point=>{
+    const t=await fixture();t.installs.update({policy:'auto',revision:0});
+    const write=t.store.setState.bind(t.store),exec=t.store.db.exec.bind(t.store.db);let armed=false,failed=false;
+    const writeSpy=vi.spyOn(t.store,'setState').mockImplementation((key,value)=>{
+      write(key,value);
+      if(!failed&&key===`run:${t.chat.id}`&&(value as any).frames?.some((frame:any)=>frame.pending?.action.name==='recommend_packages'&&frame.pending.stage==='done')){
+        armed=true;if(point==='after-write'){failed=true;throw new Error('Injected install outcome failure');}
+      }
+    });
+    const commitSpy=vi.spyOn(t.store.db,'exec').mockImplementation(sql=>{if(sql==='COMMIT'&&armed&&!failed&&point==='before-commit'){failed=true;throw new Error('Injected install outcome failure');}return exec(sql);});
+    await t.start();expect(failed).toBe(true);expect(t.helper.execute).toHaveBeenCalledTimes(1);expect(t.store.installs()[0].state).toBe('succeeded');
+    const durable=t.store.getState<any>(`run:${t.chat.id}`,null);expect(durable.frames[0].pending.stage).toBe('prepared');expect(durable.frames[0].pending.result).toBeUndefined();expect((t.runtime as any).runs.get(t.chat.id)).toEqual(durable);
+    writeSpy.mockRestore();commitSpy.mockRestore();await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
+    expect(t.helper.execute).toHaveBeenCalledTimes(1);expect(t.store.chat(t.chat.id).status).toBe('idle');expect(t.store.messages(t.chat.id).some(m=>m.role==='tool'&&m.metadata?.name==='recommend_packages')).toBe(true);
+  });
   it('workspace autonomy still asks and ordinary approval executes exactly once',async()=>{
     const t=await fixture();await t.start();const [item]=t.store.installs();
     expect(t.store.chat(t.chat.id).status).toBe('awaiting_approval');expect(t.helper.execute).not.toHaveBeenCalled();
@@ -65,7 +81,7 @@ describe('system install runtime and public API',()=>{
   });
   it('plan-only rejects the action under auto policy without preparation',async()=>{
     const t=await fixture();t.installs.update({policy:'auto',revision:0});await t.start('/plan Build');
-    expect(t.helper.prepare).not.toHaveBeenCalled();expect(t.store.installs()).toHaveLength(0);expect(t.store.messages(t.chat.id).some(m=>m.content.includes('unavailable in this mode'))).toBe(true);
+    expect(t.helper.prepare).not.toHaveBeenCalled();expect(t.store.installs()).toHaveLength(0);expect(t.store.messages(t.chat.id).some(m=>m.content.includes('not permitted for this role or mode'))).toBe(true);
   });
   it('mode/steering during final context refresh prevents execute',async()=>{
     const t=await fixture();t.installs.update({policy:'auto',revision:0});const block=deferred<PackageHelperRecord>();

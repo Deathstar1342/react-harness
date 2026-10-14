@@ -1,3 +1,5 @@
+import { parseToolArguments } from '../server/tool-registry.js';
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,11 +8,11 @@ import { Store } from '../server/store.js';
 import { Runtime, type RunState } from '../server/runtime.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
-import type { AgentResponse, Plan, PlanStepRef, ToolService } from '../shared/types.js';
+import { protocolInstructions } from '../server/protocol.js';
+import type { CompletionResult, Plan, PlanStepRef, ToolService } from '../shared/types.js';
 
-const action = (name:string,args:Record<string,unknown>={}):AgentResponse=>({version:1,type:'action',message:'',action:{name,args}});
-const final = ():AgentResponse=>({version:1,type:'final',message:'Fixture conclusion'});
+const action = (name:string,args:Record<string,unknown>={}):CompletionResult=>(nativeReply(name,args));
+const final = ():CompletionResult=>(nativeReply('submit_completion',{summary:'Fixture conclusion'},'Fixture conclusion'));
 const pass = ()=>action('review_result',{verdict:'pass',findings:[]});
 const fail = ()=>action('review_result',{verdict:'changes_requested',findings:['Missing acceptance evidence']});
 const shape = ():Plan=>({phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement and verify',status:'pending'}]}]});
@@ -20,12 +22,12 @@ function fixture(filename=':memory:') {
   const store=new Store(filename);
   const project=store.createProject('Fixture','/fixture');
   const chat=store.createChat(project.id,'Fixture chat','autonomous');
-  const queue:(AgentResponse|(()=>Promise<AgentResponse>))[]=[];
+  const queue:(CompletionResult|(()=>Promise<CompletionResult>))[]=[];
   const executed:string[]=[];
   const tools:ToolService={inspect:async(_ctx,a)=>({effect:a.name==='read_file'?'read':'write',risk:'routine',description:a.name}),execute:async(_ctx,a)=>{executed.push(a.name);return {ok:true,output:'Observed fixture result'};},read:async(_root,p)=>({path:p,content:'',hash:null}),list:async()=>[],save:async()=>{throw new Error('unused');},setDirty:()=>{},dispose:async()=>{}};
-  const provider={models:async()=>['fixture'],complete:async()=>{const value=queue.shift();if(!value)throw new Error('Unexpected fixture request');return {text:JSON.stringify(typeof value==='function'?await value():value)};}};
+  const provider={models:async()=>['fixture'],complete:async()=>{const value=queue.shift();if(!value)throw new Error('Unexpected fixture request');return (typeof value==='function'?await value():value);}};
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'synthetic-test-only'});
-  const hooks={parse:parseAgentResponse,instructions:protocolInstructions};
+  const hooks={instructions:protocolInstructions};
   let runtime=new Runtime(store,provider,tools,config,hooks);
   cleanups.push(async()=>{await runtime.close();store.close();});
   const plan=store.revisePlan(chat.id,shape());
@@ -68,7 +70,7 @@ it('makes concurrent button requests idempotent and rejects stale epochs and rev
 });
 
 it('discards an in-flight planning response when Start building changes the generation',async()=>{
-  const t=fixture();let resolve!:(r:AgentResponse)=>void;let entered!:()=>void;const started=new Promise<void>(r=>entered=r);
+  const t=fixture();let resolve!:(r:CompletionResult)=>void;let entered!:()=>void;const started=new Promise<void>(r=>entered=r);
   t.queue.push(()=>{entered();return new Promise(r=>resolve=r);},final());
   await t.runtime.submit(t.chat.id,'/plan fixture');await started;
   await t.runtime.startBuilding(t.chat.id,t.expected());resolve(action('set_plan',{phases:[]}));await t.runtime.wait(t.chat.id);
@@ -87,7 +89,7 @@ it('/plan invalidates pending approval and does not resurrect it on a later buil
 it('refuses build transition during an executing operation and retains uncertain recovery evidence',async()=>{
   const t=fixture();t.queue.push(final());await t.submit('/plan fixture');await t.restart();
   const run:RunState={planOnly:true,steps:0,generation:0,steering:[],frames:[{id:'coder',role:'coder',messages:[],repairs:0,planStep:t.ref,pending:{id:'uncertain',stage:'executing',action:{name:'run_shell',args:{command:'fixture'}}}}]};
-  t.store.setState(`run:${t.chat.id}`,run);t.store.progress(t.chat.id,t.ref,'coder','in_progress','started','fixture');await t.restart();
+  t.store.setState(`run:${t.chat.id}`,nativeState(run));t.store.progress(t.chat.id,t.ref,'coder','in_progress','started','fixture');await t.restart();
   await expect(t.runtime.startBuilding(t.chat.id,t.expected())).rejects.toThrow('current operation');
   expect(t.step().status).toBe('blocked');t.queue.push(final(),pass());await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
   expect(t.executed).toEqual([]);expect(t.step().status).not.toBe('done');
@@ -96,13 +98,13 @@ it('refuses build transition during an executing operation and retains uncertain
 
 it('blocks recovered prepared writes in durable planning mode even if a saved frame says execute',async()=>{
   const t=fixture();t.store.updateChat(t.chat.id,{mode:'plan',modeVersion:1});
-  t.store.setState(`run:${t.chat.id}`,{planOnly:false,steps:0,generation:0,steering:[],instructionsHash:null,frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending:{id:'write',stage:'prepared',instructionsHash:null,action:{name:'write_file',args:{path:'x',content:'new',baseHash:null}}}}]} satisfies RunState);
+  t.store.setState(`run:${t.chat.id}`,nativeState({planOnly:false,steps:0,generation:0,steering:[],instructionsHash:null,frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending:{id:'write',stage:'prepared',instructionsHash:null,action:{name:'write_file',args:{path:'x',content:'new',baseHash:null}}}}]} satisfies RunState));
   t.queue.push(final(),pass());await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
   expect(t.executed).toEqual([]);expect(t.store.messages(t.chat.id).some(m=>m.content.includes('Planning mode forbids'))).toBe(true);
 });
 
 it('a successful tool alone is in progress; only matching coder completion and critic acceptance completes',async()=>{
-  const t=fixture();let finish!:(r:AgentResponse)=>void;let entered!:()=>void;const reviewing=new Promise<void>(r=>entered=r);
+  const t=fixture();let finish!:(r:CompletionResult)=>void;let entered!:()=>void;const reviewing=new Promise<void>(r=>entered=r);
   t.queue.push(t.delegate(),action('read_file',{path:'x'}),()=>{expect(t.step().status).toBe('in_progress');return Promise.resolve(final());},()=>{entered();return new Promise(r=>finish=r);},final());
   await t.runtime.submit(t.chat.id,'Build');await reviewing;
   expect(t.step().evidence?.outcome).toBe('reviewing');finish(pass());await t.runtime.wait(t.chat.id);
@@ -133,7 +135,7 @@ it('identical structure ignores model statuses and preserves progress; revision 
 });
 
 it('late completion cannot modify a revised step with reused IDs',async()=>{
-  const t=fixture();let verdict!:(r:AgentResponse)=>void;let entered!:()=>void;const waiting=new Promise<void>(r=>entered=r);
+  const t=fixture();let verdict!:(r:CompletionResult)=>void;let entered!:()=>void;const waiting=new Promise<void>(r=>entered=r);
   t.queue.push(t.delegate(),action('read_file',{path:'x'}),final(),()=>{entered();return new Promise(r=>verdict=r);},final());await t.runtime.submit(t.chat.id,'Build');await waiting;
   const changed=shape();changed.phases[0].steps[0].title='Revised work';t.store.revisePlan(t.chat.id,changed);verdict(pass());await t.runtime.wait(t.chat.id);
   expect(t.step().status).toBe('pending');expect(t.step().evidence).toBeUndefined();
@@ -148,7 +150,7 @@ it('backfills legacy mode and plan identity from disk without inventing old comp
   const root=await mkdtemp(path.join(tmpdir(),'rh-plan-migrate-'));const filename=path.join(root,'state.sqlite');cleanups.push(()=>rm(root,{recursive:true,force:true}));
   const store=new Store(filename);const p=store.createProject('legacy','/legacy');const c=store.createChat(p.id,'legacy','review');
   store.db.prepare('UPDATE chats SET data=? WHERE id=?').run(JSON.stringify({...c,mode:undefined,modeVersion:undefined}),c.id);
-  store.setState(`run:${c.id}`,{frames:[],planOnly:true,steps:0,generation:0,steering:[]} satisfies RunState);
+  store.setState(`run:${c.id}`,nativeState({frames:[],planOnly:true,steps:0,generation:0,steering:[]} satisfies RunState));
   const legacy=shape();legacy.phases[0].steps[0].status='done';store.setPlan(c.id,legacy);store.close();
   const reopened=new Store(filename);try{reopened.initializePlanning();expect(reopened.chat(c.id).mode).toBe('plan');expect(reopened.plan(c.id).id).toBeTruthy();expect(reopened.plan(c.id).phases[0].steps[0].status).toBe('pending');}finally{reopened.close();}
 });
@@ -159,17 +161,17 @@ it('validates the HTTP start contract and rejects model/API mode injection',asyn
     t.queue.push(final());await t.submit('/plan fixture');
     expect((await app.inject({method:'PATCH',url:`/api/chats/${t.chat.id}`,payload:{mode:'execute'}})).statusCode).toBe(400);
     expect((await app.inject({method:'POST',url:`/api/chats/${t.chat.id}/start-building`,payload:{...t.expected(),authorized:true}})).statusCode).toBe(400);
-    expect(()=>parseAgentResponse(JSON.stringify(action('start_building',{})))).toThrow();
+    expect(()=>parseToolArguments('start_building','{}')).toThrow();
     t.queue.push(final());const response=await app.inject({method:'POST',url:`/api/chats/${t.chat.id}/start-building`,payload:t.expected()});expect(response.statusCode).toBe(202);
   }finally{await app.close();}
 });
-it('binds review acceptance to the exact delegation and preserves legacy phase reviews without plan overwrite',async()=>{
-  for(const kind of ['mismatched','checkpoint','legacy-phase'] as const){
+it('binds review acceptance to the exact delegation and rejects unassociated reviews without plan overwrite',async()=>{
+  for(const kind of ['mismatched','checkpoint','unassociated'] as const){
     const t=fixture();t.store.progress(t.chat.id,t.ref,'coder','in_progress','started','fixture');
     const frames:RunState['frames']=[{id:'architect',role:'architect',messages:[],repairs:0}];
-    if(kind!=='legacy-phase')frames.push({id:'coder',role:'coder',messages:[],repairs:0,final:'Complete',planStep:t.ref,evidenceEventIds:[1]});
-    frames.push({id:'critic',role:'critic',messages:[],repairs:0,reviewDelegationId:'different-delegation',...(kind==='checkpoint'?{reviewKind:'checkpoint'}:{}),...(kind==='legacy-phase'?{reviewKind:'phase',proposedPlan:{phases:[]}}:{})});
-    t.store.setState(`run:${t.chat.id}`,{frames,planOnly:false,steps:0,generation:0,steering:[]});
+    if(kind!=='unassociated')frames.push({id:'coder',role:'coder',messages:[],repairs:0,final:'Complete',planStep:t.ref,evidenceEventIds:[1]});
+    frames.push({id:'critic',role:'critic',messages:[],repairs:0,reviewDelegationId:'different-delegation',...(kind==='checkpoint'?{reviewKind:'checkpoint'}:{})});
+    t.store.setState(`run:${t.chat.id}`,nativeState({frames,planOnly:false,steps:0,generation:0,steering:[]}));
     // Stop after the structured verdict so no later matching completion can obscure it.
     t.queue.push(pass());await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
     expect(t.store.plan(t.chat.id).version).toBe(1);expect(t.step().status).not.toBe('done');
@@ -218,7 +220,7 @@ function failRunPersistence(t: ReturnType<typeof fixture>, point: 'write'|'commi
 }
 
 it.each([['write','button'],['commit','button'],['write','text'],['commit','text']] as const)('failed active build %s via %s preserves durable AND live planning before provider reply resolves',async (point,input)=>{
-  const t=fixture();let reply!:(response:AgentResponse)=>void;let entered!:()=>void;const pending=new Promise<void>(r=>entered=r);
+  const t=fixture();let reply!:(response:CompletionResult)=>void;let entered!:()=>void;const pending=new Promise<void>(r=>entered=r);
   t.queue.push(()=>{entered();return new Promise(r=>reply=r);},action('write_file',{path:'x',content:'must not execute',baseHash:null}),final(),pass(),final());
   await t.runtime.submit(t.chat.id,'/plan fixture');await pending;
   const live=(t.runtime as unknown as {runs:Map<string,RunState>}).runs.get(t.chat.id)!;

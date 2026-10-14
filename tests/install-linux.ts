@@ -1,3 +1,4 @@
+import { nativeReply } from './native-fixture.js';
 /** Invoked only by the existing explicitly provisioned disposable helper CI.
  * This module never provisions, starts, repairs or removes the helper. */
 import assert from 'node:assert/strict';
@@ -5,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { Store } from '../server/store.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
+import { protocolInstructions } from '../server/protocol.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 import { BUDGET_STATE_KEY } from '../server/scheduler.js';
 
@@ -14,13 +15,13 @@ export async function installPolicyIntegration(projectRoot:string) {
   const store=new Store(':memory:');
   let packageName='sl', stage=0, reviews=0;
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1:1/synthetic-unused',STARK_API_KEY:'synthetic-only',HARNESS_DATA_DIR:'/tmp/abyssus-m19-ci-data'});
-  const {app,runtime,installs}=await createApp({store,config,tools:new WorkspaceTools(),hooks:{parse:parseAgentResponse,instructions:protocolInstructions},provider:{models:async()=>['synthetic-install-reviewer'],complete:async input=>{
+  const {app,runtime,installs}=await createApp({store,config,tools:new WorkspaceTools(),hooks:{instructions:protocolInstructions},provider:{models:async()=>['synthetic-install-reviewer'],complete:async input=>{
     if(input.messages[0]?.content.startsWith('Evaluate a proposed')){
       reviews++;assert.equal(input.messages.length,2);assert.equal(input.model,'synthetic-install-reviewer');
       assert(!JSON.stringify(input).includes('decisionNonce'));assert(!JSON.stringify(input).includes('synthetic-only'));
-      return {text:'{"decision":"approve","reason":"Specific disposable CI dependency requested."}',usage:{inputTokens:10,outputTokens:10}};
+      return {...nativeReply('install_decision',{decision:'approve',reason:'Specific disposable CI dependency requested.'}),usage:{inputTokens:10,outputTokens:10}};
     }
-    return {text:JSON.stringify(stage++===0?{message:'Recommend the explicit CI dependency.',action:'recommend_packages',parameters:{packages:[{name:packageName}],reason:'Required representative dependency in this disposable acceptance fixture.'}}:{message:'Recorded helper evidence received.',action:'complete',parameters:{}})};
+    return stage++===0?nativeReply('recommend_packages',{packages:[{name:packageName}],reason:'Required representative dependency in this disposable acceptance fixture.'},'Recommend the explicit CI dependency.'):nativeReply('submit_completion',{summary:'Recorded helper evidence received.'},'Recorded helper evidence received.');
   }}});
   try {
     const project=store.createProject('M19 disposable CI',projectRoot);

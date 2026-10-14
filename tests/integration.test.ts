@@ -1,10 +1,11 @@
+import { nativeReply, actionOf } from './native-fixture.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { AgentResponse } from '../shared/types.js';
+import type { CompletionResult } from '../shared/types.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
 import { StarkProvider } from '../server/provider.js';
@@ -15,10 +16,10 @@ import { WorkspaceTools } from '../server/tools/index.js';
 
 const roots: string[] = []; const servers: Server[] = [];const apps:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const close of apps.splice(0).reverse())await close();for(const server of servers.splice(0)){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}for(const root of roots.splice(0)) await rm(root,{recursive:true,force:true});});
-const action = (name: string,args: Record<string,unknown>): AgentResponse => ({version:1,type:'action',message:'',action:{name,args}});
-const final = (message: string): AgentResponse => ({version:1,type:'final',message});
+const action = (name: string,args: Record<string,unknown>): CompletionResult => (nativeReply(name,args));
+const final = (message: string): CompletionResult => (nativeReply('submit_completion',{summary:message},message));
 
-async function fakeStark(responses: AgentResponse[]) {
+async function fakeStark(responses: CompletionResult[]) {
   const requests: {model:string;messages:unknown[];tools?:unknown;response_format?:unknown}[] = [];
   const server = createServer(async(req,res)=> {
     if (req.url === '/v1/models') {res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'gemini-3.1-pro-preview'}]}));return;}
@@ -27,9 +28,12 @@ async function fakeStark(responses: AgentResponse[]) {
     const response = responses.shift();
     if (!response) {res.statusCode=500;res.end();return;}
     res.setHeader('Content-Type','text/event-stream');
-    const text = JSON.stringify(response);
-    for(let index=0;index<text.length;index+=13) res.write(`data: ${JSON.stringify({choices:[{index:0,delta:{content:text.slice(index,index+13)},finish_reason:null}]})}\n\n`);
-    res.end(`data: ${JSON.stringify({choices:[{index:0,delta:{},finish_reason:'stop'}]})}\n\ndata: [DONE]\n\n`);
+    for(const [index,call] of (response.toolCalls ?? []).entries()) {
+      res.write(`data: ${JSON.stringify({choices:[{index:0,delta:{tool_calls:[{index,id:call.id,type:'function',function:{name:call.function.name,arguments:''}}]},finish_reason:null}]})}\n\n`);
+      for(let offset=0;offset<call.function.arguments.length;offset+=13)res.write(`data: ${JSON.stringify({choices:[{index:0,delta:{tool_calls:[{index,function:{arguments:call.function.arguments.slice(offset,offset+13)}}]},finish_reason:null}]})}\n\n`);
+    }
+    res.end(`data: ${JSON.stringify({choices:[{index:0,delta:{content:response.text},finish_reason:response.finishReason}]})}\n\ndata: [DONE]\n\n`);
+
   });servers.push(server);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   return {baseUrl:`http://127.0.0.1:${(server.address() as {port:number}).port}/v1`,requests};
@@ -41,6 +45,8 @@ describe('real HTTP provider + runtime + workspace integration',()=> {
     const hash=createHash('sha256').update(oldContent).digest('hex');
     const fake=await fakeStark([
       action('delegate',{objective:'Update label',acceptanceCriteria:['Only change label.txt'],paths:['label.txt']}),
+      action('read_file',{path:'label.txt'}),
+      action('write_file',{path:'label.txt',content:newContent,baseHash:hash}),
       action('read_file',{path:'label.txt'}),
       action('write_file',{path:'label.txt',content:newContent,baseHash:hash}),
       final('Updated label.txt.'),
@@ -75,13 +81,16 @@ describe('real HTTP provider + runtime + workspace integration',()=> {
     const next=await build();
     try {
       expect(next.store.messages(chat.id)[0].content).toBe('Update the label');
-      expect((await next.app.inject({method:'POST',url:`/api/approvals/${approval.id}`,payload:{decision:'approve'}})).statusCode).toBe(200);
+      expect((await next.app.inject({method:'POST',url:`/api/approvals/${approval.id}`,payload:{decision:'approve'}})).statusCode).toBe(409);
+      await next.runtime.control(chat.id,'resume');await next.runtime.wait(chat.id);
+      const fresh=next.store.approvals(chat.id).find(item=>item.status==='pending')!;expect(fresh.id).not.toBe(approval.id);
+      expect((await next.app.inject({method:'POST',url:`/api/approvals/${fresh.id}`,payload:{decision:'approve'}})).statusCode).toBe(200);
       await next.runtime.wait(chat.id);
       expect(next.store.chat(chat.id).status).toBe('idle');
       expect(await readFile(path.join(project.path,'label.txt'),'utf8')).toBe(newContent);
       expect(next.store.messages(chat.id).at(-1)?.content).toContain('independently reviewed');
       expect(new Set(fake.requests.map(request=>request.model))).toEqual(new Set(Object.values(config.models)));
-      expect(fake.requests.every(request=>request.tools===undefined && request.response_format===undefined)).toBe(true);
+      expect(fake.requests.every(request=>Array.isArray(request.tools) && request.response_format===undefined)).toBe(true);
       expect(next.store.events(chat.id).some(event=>event.type==='delta')).toBe(true);
       const ledger = next.store.getState<Reservation[]>(BUDGET_STATE_KEY,[]);
       expect(ledger).toHaveLength(fake.requests.length);

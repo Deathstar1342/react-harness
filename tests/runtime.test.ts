@@ -1,16 +1,18 @@
+import { hash } from '../server/tools/paths.js';
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Store } from '../server/store.js';
 import { Runtime, type RunState } from '../server/runtime.js';
 import { readConfig } from '../server/config.js';
-import type { Action, AgentResponse, ModelProvider, ToolService } from '../shared/types.js';
+import type { Action, CompletionResult, ModelProvider, ToolService } from '../shared/types.js';
 
-const action = (name: string,args: Record<string,unknown> = {}): AgentResponse => ({version:1,type:'action',message:'',action:{name,args}});
-const final = (message = 'Done'): AgentResponse => ({version:1,type:'final',message});
+const action = (name: string,args: Record<string,unknown> = {}): CompletionResult => (nativeReply(name,args));
+const final = (message = 'Done'): CompletionResult => (nativeReply('submit_completion',{summary:message},message));
 const delegate = () => action('delegate',{objective:'Change the label',acceptanceCriteria:['Preserve manual edits']});
 const verdict = () => action('review_result',{verdict:'pass',findings:[]});
 const stores: Store[] = [];
 afterEach(()=>{for (const store of stores.splice(0)) store.close();});
-function setup(responses: Array<AgentResponse | (()=>Promise<AgentResponse>)>,mode: 'review'|'balanced'|'autonomous' = 'review') {
+function setup(responses: Array<CompletionResult | (()=>Promise<CompletionResult>)>,mode: 'review'|'balanced'|'autonomous' = 'review') {
   const store = new Store(':memory:'); stores.push(store);
   const project = store.createProject('Test','/workspace');
   const chat = store.createChat(project.id,'New chat',mode);
@@ -19,22 +21,22 @@ function setup(responses: Array<AgentResponse | (()=>Promise<AgentResponse>)>,mo
   const tools: ToolService = {
     inspect:async(_ctx,request)=>({effect:request.name === 'read_file' ? 'read' : 'write',risk:'routine',description:'Change label',before:current,after:'new',diff:`${current}->new`}),
     execute:async(_ctx,request)=>{executed.push(request);return {ok:true,output:'changed'};},
-    read:async(_root,path)=>path === 'AGENTS.md' ? {path,content:'',hash:null} : {path:'label.txt',content:current,hash:current},list:async()=>[],
+    read:async(_root,path)=>path === 'AGENTS.md' ? {path,content:'',hash:null} : {path:'label.txt',content:current,hash:hash(current)},list:async()=>[],
     save:async()=>({path:'label.txt',content:'',hash:''}),setDirty:()=>{},dispose:async()=>{},
   };
   const provider: ModelProvider = { models:async()=>['test'],complete:async()=> {
     const next = responses.shift(); if (!next) throw new Error('Unexpected extra model request');
-    return {text:JSON.stringify(typeof next === 'function' ? await next() : next)};
+    return (typeof next === 'function' ? await next() : next);
   }};
   const config = readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'test'});
-  const hooks = {parse:(text: string)=>JSON.parse(text) as AgentResponse,instructions:()=> 'JSON'};
+  const hooks = {instructions:()=> 'JSON'};
   const runtime = new Runtime(store,provider,tools,config,hooks);
   return {store,chat,executed,runtime,tools,provider,config,hooks,change:()=>{current='manual';}};
 }
 
 describe('durable architect orchestration',()=> {
   it('waits for approval, executes once, reviews the coder, and completes through the architect',async()=> {
-    const t = setup([delegate(),action('write_file',{path:'label.txt',content:'new',baseHash:'old'}),final('Changed label'),verdict(),final('Change reviewed')]);
+    const t = setup([delegate(),action('write_file',{path:'label.txt',content:'new',baseHash:hash('old')}),final('Changed label'),verdict(),final('Change reviewed')]);
     await t.runtime.submit(t.chat.id,'Change the label'); await t.runtime.wait(t.chat.id);
     expect(t.store.chat(t.chat.id).status).toBe('awaiting_approval'); expect(t.executed).toEqual([]);
     const approval = t.store.approvals(t.chat.id)[0]; expect(approval.inspection.diff).toBe('old->new');
@@ -46,7 +48,7 @@ describe('durable architect orchestration',()=> {
     await expect(t.runtime.decide(approval.id,'approve')).rejects.toThrow('no longer pending');
   });
   it('invalidates an approved edit if the reviewed file changed',async()=> {
-    const t = setup([delegate(),action('write_file',{path:'label.txt',content:'new',baseHash:'old'}),final('Could not apply stale edit'),verdict(),final()]);
+    const t = setup([delegate(),action('write_file',{path:'label.txt',content:'new',baseHash:hash('old')}),final('Could not apply stale edit'),verdict(),final()]);
     await t.runtime.submit(t.chat.id,'Change it'); await t.runtime.wait(t.chat.id);
     const approval = t.store.approvals(t.chat.id)[0];t.change();
     await t.runtime.decide(approval.id,'approve');await t.runtime.wait(t.chat.id);
@@ -59,7 +61,7 @@ describe('durable architect orchestration',()=> {
     expect(t.store.chat(t.chat.id).status).toBe('idle');
   });
   it('delivers steering and discards an in-flight stale model proposal',async()=> {
-    let deliver!: (value:AgentResponse)=>void;
+    let deliver!: (value:CompletionResult)=>void;
     let entered!: ()=>void; const started = new Promise<void>(resolve=>{entered=resolve;});
     const t = setup([()=>{entered();return new Promise(resolve=>{deliver=resolve;});},final('Following the new scope')]);
     await t.runtime.submit(t.chat.id,'Original task');await started;
@@ -75,7 +77,7 @@ describe('durable architect orchestration',()=> {
       {id:'architect',role:'architect',messages:[],repairs:0},
       {id:'coder',role:'coder',messages:[],repairs:0,pending:{id:'operation',stage:'executing',action:{name:'run_shell',args:{command:'a modifying command'}}}},
     ]};
-    t.store.setState(`run:${t.chat.id}`,state); t.store.updateChat(t.chat.id,{status:'interrupted'});
+    t.store.setState(`run:${t.chat.id}`,nativeState(state)); t.store.updateChat(t.chat.id,{status:'interrupted'});
     await t.runtime.control(t.chat.id,'resume'); await t.runtime.wait(t.chat.id);
     expect(t.executed).toEqual([]);
     expect(t.store.messages(t.chat.id).some(message=>message.role==='tool' && message.content.includes('NOT been rerun'))).toBe(true);
@@ -107,7 +109,7 @@ describe('durable architect orchestration',()=> {
     expect(t.store.chat(t.chat.id).status).toBe('idle');
   });
   it('notifies active agents of manual file edits and invalidates pending approvals',async()=> {
-    const t = setup([delegate(),action('write_file',{path:'label.txt',content:'new',baseHash:'old'}),final('Preserved manual edit'),verdict(),final()]);
+    const t = setup([delegate(),action('write_file',{path:'label.txt',content:'new',baseHash:hash('old')}),final('Preserved manual edit'),verdict(),final()]);
     await t.runtime.submit(t.chat.id,'Build it');await t.runtime.wait(t.chat.id);
     const approval = t.store.approvals(t.chat.id)[0];
     t.runtime.notifyFileChange(t.chat.projectId,'label.txt','editor');

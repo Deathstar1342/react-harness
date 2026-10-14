@@ -25,7 +25,7 @@ it.each([429,502,503,504])('review HTTP %s makes one transport attempt then asks
     expect(await service.advance(item.id,()=>true,new AbortController().signal)).toBeNull();expect(bodies).toHaveLength(1);
     expect(store.install(item.id).state).toBe('pending');expect(helper.execute).not.toHaveBeenCalled();
     expect(store.getState<any[]>(BUDGET_STATE_KEY,[])).toMatchObject([{role:'critic',status:'uncertain',requests:1}]);
-    expect(bodies[0]).not.toHaveProperty('noRetry');expect(bodies[0]).not.toHaveProperty('tools');expect(bodies[0]).not.toHaveProperty('response_format');
+    expect(bodies[0]).not.toHaveProperty('noRetry');expect(bodies[0].tools).toMatchObject([{function:{name:'install_decision'}}]);expect(bodies[0]).not.toHaveProperty('response_format');
     await expect(provider.complete({model:'ordinary',messages:[{role:'user',content:'ordinary'}]})).rejects.toThrow();
     expect(bodies).toHaveLength(4); // Existing default: initial attempt plus two retries.
   }finally{await service.close();store.close();}

@@ -59,33 +59,34 @@ cd ~/apps
 git clone https://github.com/Deathstar1342/react-harness.git
 cd react-harness
 npm ci
+export HARNESS_HOME="$HOME/.local/share/abyssus-native"
 npm run profile:init
 ```
 
-`profile:init` prints the private configuration path and creates a new profile only when no known legacy source needs selection. For an existing installation, use the migration instructions below instead. Use `.env.example` as a reference; never copy over saved settings. No separate database service or Python backend is required.
+`profile:init` explicitly creates a fresh profile in the selected home and prints its private configuration path. M22 requires a new `HARNESS_HOME`; keep the installed preview and old profiles unchanged. Use `.env.example` as a reference; never copy over saved settings. No separate database service or Python backend is required.
 
 ## 3. Configure STARK
 
-Open the path printed by `profile:init`, normally `~/.local/share/abyssus/profile/config/.env` (or `$XDG_DATA_HOME/abyssus/profile/config/.env`), in your local editor. Set your work provider's URL and key:
+Open the path printed by `profile:init`, `$HARNESS_HOME/profile/config/.env`, in your local editor. Keep that explicit `HARNESS_HOME` exported in every launch shell. Set your work provider's URL and key:
 
 ```dotenv
 STARK_BASE_URL=https://your-provider.example/v1
 STARK_API_KEY=your-local-key
 
-ARCHITECT_MODEL=gemini-3.1-pro-preview
-CODER_MODEL=gemini-3.8-flash
-CRITIC_MODEL=gemini-3.6-flash
+ARCHITECT_MODEL=gemini-3.5-pro
+CODER_MODEL=gemini-3.5-flash-withtools
+CRITIC_MODEL=gemini-3.5-pro
 ```
 
 Use the API prefix supplied by your provider. If the discovery endpoint is `https://example.internal/api/v1/models`, set the base URL to `https://example.internal/api/v1`. Do not include `/models` or `/chat/completions` in the base URL. The backend appends these paths itself.
 
-Model IDs must match your STARK catalog exactly. The role names above are configurable defaults, not a guarantee that every STARK deployment exposes them. Requests use Chat Completions with ordinary-text JSON instructions; they do not send native tool definitions, `response_format`, or Responses API requests.
+Model IDs must match your STARK catalog exactly. The role names above are configurable defaults, not a guarantee that every STARK deployment exposes them. Requests use native Chat Completions tools and matching tool results, without requiring `response_format` or Responses API requests. These model IDs are provisional candidates, not live-verified aliases. Provider limits remain unknown; `.env.example` contains configurable application budgets. Catalog metadata and ordinary/native/streaming diagnostic evidence are separate. Assist lanes that ignore tools cannot perform execution roles.
 
 Keep real keys in the local `.env`, which Git ignores. Do not put them in chat messages, screenshots, or repository files. Leaving `STARK_API_KEY` empty lets you explore the UI without calling models. Restart after manual `.env` edits. Model defaults and the shared API key can also be saved through Settings without restarting, as described below.
 
 ### Provider Settings
 
-Open Settings to select architect/coder/critic defaults from the discovered catalog or type exact model IDs manually when discovery is unavailable or incomplete. Choose **Save provider settings**. These defaults apply to **new chats only**; existing chats retain their saved role assignments through resume, compaction and restart. On the first M14 startup, older chats are assigned the effective models from the startup configuration before settings changes are accepted.
+Open Settings to select architect/coder/critic defaults from the discovered catalog or type exact model IDs manually when discovery is unavailable or incomplete. Choose **Save provider settings**. These defaults apply to **new chats only**; existing chats retain their saved role assignments through resume, compaction and restart. M22 requires a fresh native profile; old chats are not converted.
 
 The password field always starts empty. Leaving it blank keeps the saved key. Enter a replacement or explicitly select **Clear saved API key**, then save. The input is cleared after submission and the saved key is never sent back to the browser. A replacement/clear affects the next dispatched provider request in every chat; in-flight requests retain their captured credentials. Test connection remains a separate operation, and saving provider settings clears results that describe an older configuration. Approval, Debug and workspace controls retain their existing behavior.
 
@@ -105,7 +106,7 @@ Useful optional settings:
 | `APPROVAL_MODE` | `balanced` | Default for new chats: `balanced`, `review`, or `autonomous` |
 | `MODEL_STREAMING` | `true` | Set `false` if the provider does not support streaming |
 
-Settings in the UI can override the new-project workspace locally. Existing projects stay in place. Relative paths saved in the profile `.env` resolve from `profile/config`; relative paths explicitly supplied in the process environment retain launch-directory semantics. Migration normalizes legacy paths against their source root. Use absolute override paths for stable launches. Use `.env.example` for token budgets, request limits, and optional per-role prompt files.
+Settings in the UI can override the new-project workspace locally. Existing projects stay in place. Relative paths saved in the profile `.env` resolve from `profile/config`; relative paths explicitly supplied in the process environment retain launch-directory semantics. Use absolute override paths for stable launches. Use `.env.example` for token budgets, request limits, and optional per-role prompt files.
 
 ## 4. Build and start
 
@@ -135,7 +136,7 @@ curl --fail-with-body http://127.0.0.1:3000/api/health
 curl --fail-with-body http://127.0.0.1:3000/api/models
 ```
 
-The health check should return `{"ok":true}`. The models route calls STARK through the backend using your local configuration; you do not need to put the API key in a shell command. Check that the returned catalog includes your three configured role IDs. Discovery success alone does not prove Chat Completions or JSON protocol compatibility.
+The health check should return `{"ok":true}`. The models route calls STARK through the backend using your local configuration; you do not need to put the API key in a shell command. Check that the returned catalog includes your three configured role IDs. Discovery success alone does not prove native tool or streaming compatibility.
 
 Try this first workflow in a disposable project:
 
@@ -176,7 +177,7 @@ These are content-snapshot checks, not an atomic lock against external filesyste
 ## Updating and keeping your data
 
 
-Stop the backend before making a consistent backup. Back up the selected application home, any external data override, and your separate project folders to private storage. `profile/state` (or the explicit override) contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again. For the first M16 upgrade from a legacy checkout, follow the migration section before ordinary startup.
+Stop the backend before making a consistent backup. Back up the selected application home, any external data override, and your separate project folders to private storage. `profile/state` (or the explicit override) contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again. For this redesign use a fresh native profile; preserve the old profile as a private backup.
 
 From the repository root, update with:
 
@@ -197,7 +198,7 @@ Preserve your `.env` and data directory. Compare `.env.example` for new options 
 | Model discovery fails | Confirm you are on the work network/VPN, the URL includes the correct API prefix, and the key is valid. WSL must have its own working network and certificate trust; Windows browser access alone is not sufficient. |
 | Certificate validation fails | Use your organization's approved CA configuration for Node/WSL; do not disable TLS verification. |
 | Model is missing or completions fail | Compare exact model IDs with `/api/models`. Confirm the provider supports Chat Completions and the requested streaming/output limits. |
-| Model returns prose/refuses the JSON instructions | Capture a sanitized error/example for protocol investigation. The runtime rejects invalid actions; model discovery does not test this behavior. |
+| Model refuses native tools or returns only internal status prose | Capture a sanitized error/example for protocol investigation. The runtime rejects invalid native calls; discovery alone does not verify tools. Use Test connection for separate harmless evidence. |
 | PTY unavailable or `node-pty` failed to install | Confirm `process.platform` is `linux`, install Python/make/C++ prerequisites, and rerun `npm ci`. Check installation output; do not reuse Windows `node_modules` in WSL. |
 | Page cannot connect | Confirm the startup terminal is still running and the WSL health check succeeds. Check the port and Windows-to-WSL localhost forwarding. Keep the listener local. |
 | Port already in use | Stop the earlier app instance or choose a different `PORT`; update the dev proxy too if using Vite. |
@@ -266,13 +267,9 @@ For a **new installation**, run `npm run profile:init`, edit the printed `.env`,
 
 For an **upgrade from a legacy checkout**:
 
-1. Stop every old backend using that checkout/config/data. Preserve a backup. The legacy version does not hold the new ownership lock while idle, so automatic detection cannot prove that an idle legacy backend is stopped.
-2. From the updated installation, run `npm run profile:migrate -- /absolute/path/to/legacy/checkout`. Alternatively use `HARNESS_LEGACY_ROOT=/absolute/path/to/legacy/checkout npm start`. Only the selected root's known `.env` and `.harness` are inspected. Discovery checks launch cwd and installation root; it does not search your home or disk. Multiple detected sources require selecting exactly one, never merging.
-3. Start normally with `npm start`. Keep any intentional `HARNESS_HOME`, process provider overrides and external data override in the launcher environment. Do not persist initialization/migration flags in `.env`.
+For M22, choose a fresh explicit `HARNESS_HOME`, run `npm run profile:init`, and use that same home on every launch. Do not reuse the installed preview's home or external state directory. Profile and database markers require `native-tools-v1`; old state is rejected without deletion, profile conversion, or silent `.env` reset. Existing project folders remain intact and can be explicitly imported into the fresh profile.
 
-Migration uses SQLite's backup API to include committed WAL contents, checks database integrity/tables, copies bounded regular artifacts, and atomically publishes configuration, database and profile identity together. IDs, project registrations, models, approvals, plans, change snapshots and uncertain action evidence stay intact. SQLite stores existing summary artifacts in its state table. Legacy relative data/workspace/prompt paths become absolute source-based paths. An explicit legacy `HARNESS_DATA_DIR` stays in place rather than being copied; its missing database is an error. Source files and imported projects are never deleted. Stop legacy processes before migration: a source ownership lock and active SQLite write transaction are detected, but older idle processes and external artifact editors cannot be conclusively detected.
-
-`migration.json` records preparing/ready/committed state without credentials. Interrupted staging is retained. Before publication, retry with `HARNESS_MIGRATION_RETRY=1 npm run profile:migrate -- /same/source`; a fresh snapshot avoids accepting writes lost after a prior backup. Previous receipts and staging directories remain for inspection. After publication, matching metadata completes the receipt on restart. Damaged/missing metadata, modified staging, missing sources and unsupported versions fail for explicit recovery. Never manually merge databases. Regular artifact copying is bounded to 10,000 entries, depth 64 and 1 GiB; oversized or linked trees require explicit external recovery. Unix files are flushed and directory metadata is synced; Windows file contents are flushed, without a universal power-loss guarantee for directory metadata.
+The existing relocation command supports only sources already marked with the same native format; it cannot convert old prototype chats. Ownership, WAL backup, bounded artifact copying, interruption receipts and explicit data-directory selection protections remain. Never remove ownership files, erase an old profile, or merge databases to bypass rejection.
 
 The backend locks the canonical home and effective data/config directories with persistent SQLite ownership files. Different homes sharing data collide; process exit releases locks without stale PID cleanup. Never remove ownership files to bypass a running instance. A port collision fails and releases startup resources without attaching to or killing that listener. A successful launch remembers its effective data directory. Losing/changing an override fails; restore the old value or deliberately select the new location with `HARNESS_SELECT_DATA=1 HARNESS_DATA_DIR=/absolute/selected/state npm start`. This selects a profile target and does not copy or merge old chats. A failed listen does not replace a previously working data binding.
 

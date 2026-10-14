@@ -1,3 +1,4 @@
+import { nativeReply } from './native-fixture.js';
 // Disposable UI evidence only: synthetic preview/provider; execute is disabled.
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,7 @@ import { createApp } from '../server/app.js';
 import { Store } from '../server/store.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 import { readConfig } from '../server/config.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
+import { protocolInstructions } from '../server/protocol.js';
 import { helperCanonical, helperProtocol } from '../server/package-helper.js';
 import type { PackageHelperRecord, PackageHelperTarget } from '../shared/types.js';
 import type { InstallHelper } from '../server/installs.js';
@@ -24,7 +25,7 @@ const helper:InstallHelper={hello:async()=>({protocol:helperProtocol,target}),pr
 },authorize:disabled,execute:disabled,status:disabled,reconcile:disabled};
 const project=store.createProject('M19 synthetic browser fixture',directory),chat=store.createChat(project.id,'System install preview — synthetic only','autonomous');
 let count=0;
-const {app,runtime}=await createApp({store,config,tools:new WorkspaceTools(),packageHelper:async()=>helper,hooks:{parse:parseAgentResponse,instructions:protocolInstructions},provider:{models:async()=>['synthetic-reviewer','alternate-reviewer'],complete:async()=>({text:JSON.stringify(count++===0?{message:'Synthetic UI fixture: review a package recommendation. This fixture cannot install anything.',action:'recommend_packages',parameters:{packages:[{name:'hello'}],reason:'Synthetic browser acceptance preview only; no package effects are enabled.'}}:{message:'Synthetic evidence received. No installation occurred.',action:'complete',parameters:{}})})}});
+const {app,runtime}=await createApp({store,config,tools:new WorkspaceTools(),packageHelper:async()=>helper,hooks:{instructions:protocolInstructions},provider:{models:async()=>['synthetic-reviewer','alternate-reviewer'],complete:async()=>count++===0?nativeReply('recommend_packages',{packages:[{name:'hello'}],reason:'Synthetic browser acceptance preview only; no package effects are enabled.'},'Synthetic UI fixture: review a package recommendation. This fixture cannot install anything.'):nativeReply('submit_completion',{summary:'Synthetic evidence received. No installation occurred.'},'Synthetic evidence received. No installation occurred.')}});
 await runtime.submit(chat.id,'Show the synthetic system install preview');await runtime.wait(chat.id);
 await app.listen({host:'127.0.0.1',port:config.port});console.log(JSON.stringify({url:'http://127.0.0.1:3189',chatId:chat.id}));
 let stopping=false;const stop=async()=>{if(stopping)return;stopping=true;await app.close();store.close();if(path.dirname(root)!==parent||!path.basename(root).startsWith('rh-m19-browser-'))throw new Error('Invalid cleanup target');await rm(root,{recursive:true,force:true});process.exit(0);};

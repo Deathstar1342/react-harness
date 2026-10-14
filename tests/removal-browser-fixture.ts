@@ -15,7 +15,7 @@ for(const name of ['Keep files','Delete files','Dirty editor']) {
   const directory=path.join(config.workspaceRoot,name);await mkdir(directory,{recursive:true});await writeFile(path.join(directory,'hello.txt'),'Isolated M13 browser fixture.\n');
   const project=store.createProject(name,directory);store.createChat(project.id,'Disposable chat','review');store.createChat(project.id,'Sibling chat','review');
 }
-const {app}=await createApp({config,store,tools:new WorkspaceTools(),provider:{models:async()=>[],complete:async()=>{throw new Error('No provider in browser fixture');}},hooks:{instructions:()=>'',parse:()=>{throw new Error('No model output in browser fixture');}}});
+const {app}=await createApp({config,store,tools:new WorkspaceTools(),provider:{models:async()=>[],complete:async()=>{throw new Error('No provider in browser fixture');}},hooks:{instructions:()=>'',}});
 await app.listen({host:'127.0.0.1',port:config.port});
 console.log(JSON.stringify({url:'http://127.0.0.1:3183',fixtureRoot:root}));
 let stopping=false;

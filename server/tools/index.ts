@@ -2,7 +2,7 @@ import { lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
-import { z } from 'zod';
+import { definitionFor, validateAction } from '../tool-registry.js';
 import type { Action, FileSnapshot, ToolContext, ToolInspection, ToolResult, ToolService, TestReport } from '../../shared/types.js';
 import { WorkspaceFiles, type FileOptions } from './files.js';
 import { allowed, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
@@ -12,25 +12,9 @@ import { LinuxSandbox, type SandboxPolicy } from './sandbox.js';
 export { ToolError } from './paths.js';
 
 const busyReports = new Set<string>();
-const pathArg = z.string().max(4096);
-const timeout = z.number().int().min(1).max(600_000).optional();
-const schemas: Record<string, z.ZodType> = {
-  list_files: z.object({ path: pathArg.optional() }).strict(),
-  read_file: z.object({ path: pathArg.min(1) }).strict(),
-  search: z.object({ query: z.string().min(1).max(1000), path: pathArg.optional() }).strict(),
-  write_file: z.object({ path: pathArg.min(1), content: z.string(), baseHash: z.string().regex(/^[a-f0-9]{64}$/).nullable() }).strict(),
-  run_shell: z.object({ command: z.string().min(1).max(64_000), timeoutMs: timeout }).strict(),
-  execute_python: z.object({ code: z.string().min(1).max(64_000), timeoutMs: timeout }).strict(),
-  git_status: z.object({}).strict(),
-  git_diff: z.object({ path: pathArg.optional() }).strict(),
-  run_tests: z.object({ command: z.string().min(1).max(64_000), reportPath: pathArg.min(1).optional(), timeoutMs: timeout }).strict(),
-};
 function validate(action: Action): Record<string, any> {
-  const schema = Object.hasOwn(schemas, action?.name ?? '') ? schemas[action.name] : undefined;
-  if (!schema) throw new ToolError('Unknown workspace tool. Runtime actions must be handled by the orchestrator.');
-  const parsed = schema.safeParse(action.args);
-  if (!parsed.success) throw new ToolError(`Invalid ${action.name} arguments: ${parsed.error.issues.map(i => i.path.join('.') + ' ' + i.message).join('; ')}`);
-  return parsed.data as Record<string, any>;
+  if (definitionFor(action.name).kind !== 'workspace') throw new ToolError('Unknown workspace tool.');
+  return validateAction(action).args;
 }
 export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<Omit<ShellOptions, 'sandbox'>> { maxReportBytes?: number }
 export class WorkspaceTools implements ToolService {

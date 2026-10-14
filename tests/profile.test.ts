@@ -1,3 +1,4 @@
+import { nativeState } from './native-fixture.js';
 import { afterEach, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, renameSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ function legacy(root:string) {
   const chat=store.createChat(project.id,'Original chat','review');
   store.message(chat.id,'user','keep me');
   store.setState(`plan:${chat.id}`,{phases:[{id:'phase',steps:[{id:'step',evidence:{outcome:'failed'}}]}]});
-  store.setState(`run:${chat.id}`,{frames:[{pending:{stage:'executing',id:'uncertain-action'}}]});
+  store.setState(`run:${chat.id}`,nativeState({frames:[{pending:{stage:'executing',id:'uncertain-action'}}]}));
   store.approval({id:'approval',chatId:chat.id,agentId:'coder',action:{name:'run_shell',args:{command:'test'}},inspection:{effect:'execute',risk:'elevated',description:'Command'},status:'approved',createdAt:new Date().toISOString()});
   store.setState('artifact:original','retained');
   store.db.prepare('INSERT INTO file_changes VALUES (?,?,?,?,?)').run('change',project.id,'unknown',JSON.stringify({chatId:chat.id}),JSON.stringify({before:'original',after:'changed'}));
@@ -49,7 +50,7 @@ it('uses a platform home independent of cwd and requires explicit first initiali
 });
 it('does not choose ambiguous sources or missing profiles and ignores empty legacy/example files',async()=>{
   const t=fixture();writeFileSync(path.join(t.cwd,'.env'),'STARK_API_KEY=one');writeFileSync(path.join(t.other,'.env'),'STARK_API_KEY=two');
-  await expect(prepareProfile({...t.options,installRoot:t.other})).rejects.toThrow('Select exactly one');
+  await expect(prepareProfile({...t.options,env:{HARNESS_HOME:t.home},installRoot:t.other})).rejects.toThrow('Select exactly one');
   await expect(prepareProfile({...t.options,env:{...t.options.env,HARNESS_LEGACY_ROOT:path.join(t.root,'missing')}})).rejects.toThrow('missing');
   const u=fixture();mkdirSync(path.join(u.cwd,'.harness'));writeFileSync(path.join(u.cwd,'.env.example'),'STARK_API_KEY=example');
   const profile=await prepared(u.options);profile.ownership.close();

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { _electron as electron, expect } from '@playwright/test';
 import { mkdtempSync, mkdirSync, rmSync,writeFileSync,readFileSync,existsSync,unlinkSync } from 'node:fs';
 import path from 'node:path';
@@ -6,6 +7,12 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
+// This entrypoint runs with Node's native TypeScript loader, without tsx resolution.
+function diagnosticReply(input:{tools?:unknown[]}) {
+  return {text:input.tools?.length?'':'Connection OK',finishReason:input.tools?.length?'tool_calls':'stop',
+    toolCalls:input.tools?.length?[{id:`call_${randomUUID()}`,type:'function' as const,function:{name:'connection_echo',arguments:JSON.stringify({value:'Connection OK'})}}]:[],
+    usage:{inputTokens:15,outputTokens:10}};
+}
 const root=path.resolve(import.meta.dirname,'..'),home=mkdtempSync(path.join(tmpdir(),'abyssus-electron-'));
 mkdirSync(path.join(root,'test-results'),{recursive:true});
 const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],chromiumSandbox:true,cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home,MODEL_STREAMING:'false'},timeout:30000});
@@ -101,10 +108,12 @@ try {
       await page.getByRole('button',{name:'Save',exact:true}).click();
       await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.json'),'utf8'),'42');
       console.log('PASS real Monaco open, worker-backed editor input, dirty guard and version-checked save');
-      const provider=createServer((req,res)=>{
-        res.setHeader('content-type','application/json');
-        if(req.url==='/v1/models')res.end(JSON.stringify({data:['gemini-3.1-pro-preview','gemini-3.8-flash','gemini-3.6-flash'].map(id=>({id}))}));
-        else {req.resume();req.once('end',()=>res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({version:1,type:'final',message:'Connection OK'})},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:10,total_tokens:20}})));}
+      const provider=createServer(async(req,res)=>{
+        if(req.url==='/v1/models'){res.setHeader('content-type','application/json');res.end(JSON.stringify({data:['gemini-3.5-pro','gemini-3.5-flash-withtools'].map(id=>({id}))}));return;}
+        let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw),result=diagnosticReply(body);
+        const message={role:'assistant',content:result.text,...(result.toolCalls.length?{tool_calls:result.toolCalls}:{})};
+        if(body.stream){res.setHeader('content-type','text/event-stream');res.end(`data: ${JSON.stringify({choices:[{index:0,delta:{...message,...(result.toolCalls.length?{tool_calls:result.toolCalls.map((call,index)=>({...call,index}))}:{})},finish_reason:result.finishReason}],usage:{prompt_tokens:10,completion_tokens:10}})}\n\ndata: [DONE]\n\n`);}
+        else{res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message,finish_reason:result.finishReason}],usage:{prompt_tokens:10,completion_tokens:10}}));}
       });provider.listen(0,'127.0.0.1');await once(provider,'listening');
       try {
         await page.getByRole('button',{name:'Settings',exact:true}).click();
@@ -114,6 +123,9 @@ try {
         await expect(page.getByText('Provider settings saved. Model defaults apply to new chats only.')).toBeVisible();
         await page.getByRole('button',{name:'Test connection',exact:true}).click();
         await expect(page.getByText('Connection checks passed',{exact:true})).toBeVisible({timeout:30000});
+        for(const role of ['architect','coder','critic'])for(const evidence of ['ordinary','native','streaming']) {
+          await expect(page.getByText(`${role} · ${evidence} · passed`,{exact:true})).toBeVisible();
+        }
         await page.getByRole('button',{name:'Close',exact:true}).click();
         console.log('PASS blank-profile endpoint/key through real Settings and explicit synthetic HTTP connection test');
       }finally{provider.closeAllConnections();await new Promise<void>(resolve=>provider.close(()=>resolve()));}

@@ -8,7 +8,8 @@ import type {
 } from '../shared/types.js';
 import type { Config } from './config.js';
 import type { RuntimeHooks } from './runtime.js';
-import { parseAgentResponse } from './protocol.js';
+import { validateNativeCalls } from './provider.js';
+import { parseNativeJSON } from './native-json.js';
 import { ProviderError } from './provider.js';
 import { BudgetError } from './scheduler.js';
 
@@ -82,43 +83,6 @@ async function bounded<T>(
   } finally {
     signal.removeEventListener('abort', abort);
   }
-}
-
-function diagnosticMessages(): ModelMessage[] {
-  return [
-    {
-      role: 'system',
-      content:
-        'This is a connection diagnostic, not a task. Return exactly one JSON object: ' +
-        '{"version":1,"type":"final","message":"Connection OK"}. ' +
-        'Do not request actions or include any other text.',
-    },
-    {
-      role: 'user',
-      content: 'Return the specified connection diagnostic reply.',
-    },
-  ];
-}
-
-function validDiagnosticReply(text: string): boolean {
-  try {
-    const reply = parseAgentResponse(text);
-
-    return (
-      reply.type === 'final' &&
-      reply.message === 'Connection OK' &&
-      !reply.action
-    );
-  } catch {
-    return false;
-  }
-}
-
-function unusableDiagnosticReply(result: CompletionResult): boolean {
-  return (
-    result.text.length > 2048 ||
-    (result.finishReason !== undefined && result.finishReason !== 'stop')
-  );
 }
 
 /** Probes have no chat, tools, project context, or executable action path. */
@@ -228,99 +192,32 @@ export class ConnectionDiagnostics {
     }
 
     for (const role of roles) {
-      if (!models || signal.aborted) {
-        checks.push({
-          target: role,
-          status: 'skipped',
-          message:
-            'Reply test was not sent because the catalog failed or the check stopped.',
-        });
-        continue;
-      }
-
-      if (
-        !modelsByRole[role] ||
-        !models.includes(modelsByRole[role])
-      ) {
-        checks.push({
-          target: role,
-          status: 'failed',
-          message: 'The exact configured model ID is missing from the catalog.',
-        });
-        continue;
-      }
-
-      try {
-        const request = (messages: ModelMessage[]) =>
-          bounded(signal, () =>
-            this.complete(role, {
-              model: modelsByRole[role],
-              signal,
-              maxTokens: Math.min(1024, this.config.maxOutputTokens),
-              messages,
-            }),
-          );
-
-        const initialMessages = diagnosticMessages();
-
-        let result = await request(initialMessages);
-
-        if (unusableDiagnosticReply(result)) {
-          checks.push({
-            target: role,
-            status: 'failed',
-            message: 'Test reply was incomplete or exceeded its size limit.',
-          });
+      for (const evidence of ['ordinary','native','streaming'] as const) {
+        if (signal.aborted || !this.config.baseUrl || !this.config.apiKey) {
+          checks.push({target:role,evidence,model:modelsByRole[role],status:'skipped',message:'Probe not sent because configuration is missing or the check stopped.'});
           continue;
         }
-
-        let valid = validDiagnosticReply(result.text);
-
-        // Match Runtime's one-time strict JSON formatting recovery.
-        if (!valid) {
-          result = await request([
-            ...initialMessages,
-            {
-              role: 'assistant',
-              content: result.text.slice(0, 64_000),
-            },
-            {
-              role: 'user',
-              content:
-                'FORMAT REPAIR: Your immediately preceding response did not match the required JSON protocol. ' +
-                'Return exactly this JSON object and nothing else: ' +
-                '{"version":1,"type":"final","message":"Connection OK"}',
-            },
-          ]);
-
-          if (unusableDiagnosticReply(result)) {
-            checks.push({
-              target: role,
-              status: 'failed',
-              message: 'Test reply was incomplete or exceeded its size limit.',
-            });
-            continue;
+        try {
+          const streaming = evidence === 'streaming';
+          const messages:ModelMessage[]=[{role:'system',content:'Harmless connection diagnostic. No workspace, files, shell or packages are available.'},{role:'user',content:evidence==='ordinary'?'Reply exactly Connection OK.':'Call connection_echo exactly once with value Connection OK. After receiving its result, reply exactly Connection OK.'}];
+          const tools = evidence==='ordinary'?undefined:[{type:'function' as const,function:{name:'connection_echo',description:'Echo a harmless in-memory diagnostic value. No external effects.',parameters:{type:'object',properties:{value:{type:'string',const:'Connection OK'}},required:['value'],additionalProperties:false}}}];
+          const request=(history:ModelMessage[],useTools=true)=>bounded(signal,()=>this.complete(role,{model:modelsByRole[role],messages:history,tools:useTools?tools:undefined,toolChoice:tools&&useTools?'required':undefined,streaming,signal,maxTokens:Math.min(1024,this.config.maxOutputTokens),noRetry:true}));
+          let result=await request(messages);
+          if(evidence!=='ordinary') {
+            const calls=validateNativeCalls(result.toolCalls);
+            if(result.finishReason!=='tool_calls'||result.text.length>2048||calls.length!==1||calls[0].function.name!=='connection_echo')throw new Error();
+            const args=parseNativeJSON(calls[0].function.arguments,2048) as Record<string,unknown>;
+            if(!args||Object.keys(args).length!==1||args.value!=='Connection OK')throw new Error();
+            result=await request([...messages,{role:'assistant',content:result.text,tool_calls:calls},{role:'tool',tool_call_id:calls[0].id,content:JSON.stringify({value:args.value})}],false);
           }
-
-          valid = validDiagnosticReply(result.text);
+          if(result.finishReason!=='stop'||result.toolCalls?.length||result.text.length>2048||result.text.trim()!=='Connection OK')throw new Error();
+          checks.push({target:role,evidence,model:modelsByRole[role],status:'passed',message:`${evidence} probe passed${models?.includes(modelsByRole[role])?'':'; configured ID was not confirmed in the catalog'}.`,...(result.requestId?{requestId:result.requestId}:{})});
+        } catch(error) {
+          failed(role,error);
+          Object.assign(checks.at(-1)!,{evidence,model:modelsByRole[role]});
         }
-
-        checks.push({
-          target: role,
-          status: valid ? 'passed' : 'failed',
-          message: valid
-            ? 'Configured model returned a valid test reply.'
-            : 'Model did not return the required test reply. No action was executed.',
-        });
-      } catch (error) {
-        failed(role, error);
       }
     }
-
-    return {
-      ok: checks.every(check => check.status === 'passed'),
-      checks,
-      completedAt: new Date().toISOString(),
-    };
+    return {ok:checks.every(check=>check.status==='passed'),checks,completedAt:new Date().toISOString()};
   }
 }

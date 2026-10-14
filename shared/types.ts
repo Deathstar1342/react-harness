@@ -6,8 +6,8 @@ export interface DeletionPreview { canonicalPath: string; confirmationToken: str
 export type ProjectRemoval = { mode: 'app-only' } | { mode: 'disk'; canonicalPath: string; confirmationToken: string };
 export interface WorkspaceSettings { workspaceRoot: string; defaultWorkspaceRoot: string }
 export interface Preferences { debugMode: boolean; defaultApprovalMode: ApprovalMode }
-export interface ConnectionCheck { target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
-export interface ConnectionReport { ok: boolean; checks: ConnectionCheck[]; completedAt: string }
+export interface ConnectionCheck { evidence?: 'ordinary'|'native'|'streaming'; model?:string; requestId?:string; target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
+export interface ConnectionReport { catalog?:ModelCatalogEntry[]; ok: boolean; checks: ConnectionCheck[]; completedAt: string }
 export interface DirectoryListing { path: string; parentPath: string | null; entries: {name:string;path:string}[]; roots: {name:string;path:string}[]; truncated: boolean }
 export type RoleModels = Record<AgentRole, string>;
 export interface ProviderSettings { models: RoleModels; apiKeyConfigured: boolean; lockedFields: string[]; baseUrl?:string }
@@ -21,11 +21,15 @@ export interface PlanStep { evidence?: PlanEvidence; id: string; title: string; 
 export interface PlanPhase { id: string; title: string; steps: PlanStep[] }
 export interface Plan { id?: string; version?: number; phases: PlanPhase[] }
 export interface Action { name: string; args: Record<string, unknown> }
-export interface AgentResponse { version: 1; type: 'message' | 'action' | 'final'; message: string; action?: Action }
-export interface ModelMessage { role: 'system' | 'user' | 'assistant'; content: string }
+export interface NativeToolCall { id: string; type: 'function'; function: { name: string; arguments: string } }
+export interface NativeToolDefinition { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }
+export type ModelMessage = { role: 'system' | 'user'; content: string } |
+  { role: 'assistant'; content: string; tool_calls?: NativeToolCall[] } |
+  { role: 'tool'; tool_call_id: string; content: string };
+export interface ModelCatalogEntry { id: string; metadata: Record<string, unknown>; capabilities: { ordinary: 'unknown'; native: 'unknown'; streaming: 'unknown' } }
 export interface ModelUsage { inputTokens: number; outputTokens: number }
-export interface CompletionResult { text: string; usage?: ModelUsage; finishReason?: string }
-export interface ModelProvider { complete(input: { model: string; messages: ModelMessage[]; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number; noRetry?: boolean }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]> }
+export interface CompletionResult { text: string; toolCalls?: NativeToolCall[]; usage?: ModelUsage; finishReason?: string; requestId?: string }
+export interface ModelProvider { complete(input: { model: string; messages: ModelMessage[]; tools?: NativeToolDefinition[]; toolChoice?: 'auto' | 'required' | 'none'; streaming?: boolean; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number; noRetry?: boolean }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]>; catalog?(signal?: AbortSignal): Promise<ModelCatalogEntry[]> }
 export interface FileEntry { path: string; name: string; type: 'file' | 'directory'; size?: number }
 export interface FileSnapshot { path: string; content: string; hash: string | null }
 export type FileChangeStatus = 'recording' | 'confirmed' | 'rejected' | 'unknown' | 'undoing' | 'undone';
@@ -64,7 +68,7 @@ export interface CommandEvent {
 }
 export interface CommandOutput { agentId: string; commandId?: string; sessionId?: string; output: string; truncated?: boolean }
 export interface ChatDetail { chat: Chat; messages: Message[]; plan: Plan; approvals: Approval[]; events: RunEvent[]; eventsTruncated?: boolean; tests: TestReport[] }
-export interface PublicSettings { configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
+export interface PublicSettings { limitSource?:'application-budget'; providerLimits?:'unknown'; configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
 /** Private launcher protocol; keys and provider secrets are never included. */
 export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; profileId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }
 export interface BackendProofRequest { instanceId:string; nonce:string; expiresAt:number; mac:string }

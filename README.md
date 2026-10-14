@@ -14,17 +14,18 @@ Prerequisites: Node.js 24 or newer, npm, Git, Bash, and Python 3 for Python tool
 git clone https://github.com/Deathstar1342/react-harness.git
 cd react-harness
 npm ci
+export HARNESS_HOME="$HOME/.local/share/abyssus-native"
 npm run profile:init
 ```
 
-Edit the configuration path printed by `profile:init` (normally `~/.local/share/abyssus/profile/config/.env` in Linux/WSL). Use `.env.example` as a reference; never overwrite an existing profile's settings:
+Edit the configuration path printed by `profile:init` (`$HARNESS_HOME/profile/config/.env`). Use `.env.example` as a reference; never overwrite an existing profile's settings:
 
 ```dotenv
 STARK_BASE_URL=https://your-provider.example/v1
 STARK_API_KEY=your-local-key
 ```
 
-Use your provider's real API prefix in the base URL. The backend appends `/models` and `/chat/completions`; it does not use `/responses`, native tool parameters, or `response_format`.
+Use your provider's real API prefix in the base URL. The backend appends `/models` and `/chat/completions`; it sends native `tools`, assistant `tool_calls` and matching `role:tool` results. It does not depend on `/responses` or `response_format`.
 
 ```bash
 npm run build
@@ -33,7 +34,7 @@ npm start
 
 Open http://localhost:3000. For development, `npm run dev` runs the backend on port 3000 and Vite on port 5173. Restart the backend after changing its profile `.env`. Configuration, state and built UI lookup no longer depend on the backend launch directory.
 
-For an existing installation, stop its old backend, then run `npm run profile:migrate -- /absolute/path/to/old/checkout` instead of `profile:init`. This selects only that checkout's known `.env`/`.harness` source, retains originals, and never merges profiles. Explicit legacy data overrides stay in place. Ambiguous sources, interrupted migration and missing state stop with recovery guidance. See [migration and lifecycle](docs/setup.md#durable-profile-migration-and-lifecycle) before upgrading. Keep `HARNESS_HOME=/absolute/private/path` consistent on every command if selecting a nondefault home.
+M22 requires a fresh native prototype profile. Keep the same explicit `HARNESS_HOME` for initialization and every launch. Old profiles are rejected without deletion or conversion; preserve the installed preview and its project folders. Do not point this prototype at the installed preview's home. Same-format profile relocation retains the existing lifecycle protections; it does not migrate the old action protocol.
 
 The UI opens without credentials so you can manage projects and files. Sending model messages requires the STARK URL and key. Windows can run the UI and portable tests, but persistent shell/Python/test execution requires the Linux backend; unsupported PTY execution returns an explicit error.
 
@@ -79,15 +80,17 @@ Default roles are configurable in `.env`:
 
 | Role | Default model |
 | --- | --- |
-| Architect | `gemini-3.1-pro-preview` |
-| Coder | `gemini-3.8-flash` |
-| Critic | `gemini-3.6-flash` |
+| Architect | `gemini-3.5-pro` |
+| Coder | `gemini-3.5-flash-withtools` |
+| Critic | `gemini-3.5-pro` |
 
-To customize role guidance without editing code, create local UTF-8 text files and set `ARCHITECT_PROMPT_FILE`, `CODER_PROMPT_FILE`, or `CRITIC_PROMPT_FILE` in the profile `.env`. Relative file values resolve from `profile/config`; explicit process environment paths retain launch-directory semantics. Migration converts legacy relative paths to absolute paths. Each file must be nonempty and at most 32,000 bytes. Restart after edits. Guidance is appended to the fixed JSON instructions; schema validation, approvals and file checks still apply. Prompt contents and filenames are excluded from frontend settings.
+These are provisional model candidates, not live-verified IDs. Provider capabilities and limits remain unknown until checked. Connection tests independently probe ordinary replies, native round trips and streaming. Application token/rate budgets are conservative local settings, not claims about provider limits.
+
+To customize role guidance without editing code, create local UTF-8 text files and set `ARCHITECT_PROMPT_FILE`, `CODER_PROMPT_FILE`, or `CRITIC_PROMPT_FILE` in the profile `.env`. Relative file values resolve from `profile/config`; explicit process environment paths retain launch-directory semantics. Each file must be nonempty and at most 32,000 bytes. Restart after edits. Guidance is appended to the native role instructions; schema validation, approvals and file checks still apply. Prompt contents and filenames are excluded from frontend settings.
 
 The current implementation delegates to one coder at a time. Parallel coders/worktree integration remain a later extension.
 
-Ordinary streamed text carries a strict JSON action proposal. Only a complete, validated proposal can execute. Model-written continuation summaries preserve original transcripts and reattach authoritative state separately. Conservative token estimates and a persistent account ledger coordinate requests across roles and chats; the scheduler reserves headroom for architect/critic work and counts compaction calls. Configure context, output, minute, and daily limits in `.env`. These budgets cover this backend database, not other clients using the same API account.
+Native Chat Completions carries typed tool calls. Only complete validated calls can execute; ordinary prose never executes. Model-written continuation summaries preserve original transcripts and reattach authoritative state separately. Conservative token estimates and a persistent account ledger coordinate requests across roles and chats; the scheduler reserves headroom for architect/critic work and counts compaction calls. Configure context, output, minute, and daily limits in `.env`. These budgets cover this backend database, not other clients using the same API account.
 
 Structured tests use fresh JUnit XML. For example, ask the coder to run:
 

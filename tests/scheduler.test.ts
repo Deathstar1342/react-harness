@@ -136,7 +136,7 @@ describe('durable account scheduling', () => {
     expect(t.ledger()[0].status).toBe('uncertain');
   });
   it('estimates UTF-8 conservatively and rejects invalid budgets', () => {
-    expect(estimateTokens([{ role: 'user', content: '😀' }])).toBe(36);
+    expect(estimateTokens([{ role: 'user', content: '😀' }])).toBe(16+2+16+Buffer.byteLength(JSON.stringify({role:'user',content:'🌍'})));
     expect(() => setup({ tokensPerMinute: 0 })).toThrow('positive');
   });
 });
