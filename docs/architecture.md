@@ -1,5 +1,13 @@
 # Architecture and implementation plan
 
+## Active native-tool redesign — approved 2026-10-14
+
+The user approved M22–M27 implementation and explicitly rejected legacy compatibility work. [Native-tool redesign](native-tool-redesign.md) is the authoritative target architecture and [milestones](milestones.md) define implementation order. Provider-native assistant/tool messages replace the custom JSON recommendation envelope, prose extraction and format-repair loops. Native arguments remain validated before the existing sandbox/approval/version checks. There is no Responses endpoint dependency or silent prose fallback. Existing implementation details below describe the pre-redesign system where they conflict; they are not constraints to preserve the obsolete protocol.
+
+The target separates the STARK transport adapter, a single typed tool registry, agent orchestration, and durable conversation/goal state. Architect/coder/critic prompts become versioned modules with behavior evaluations. M24 adds `/goal` and runtime-enforced continuation/completion; M25 makes project guidance maintainable and tools more precise; M26 adds reusable project/personal skills. Model defaults target a verified standard-lane Gemini3.5 Pro architect/critic and Gemini3.5 Flash tool-capable coder, with exact IDs configurable and Gemini3.8 Flash available when exposed by the endpoint. Model IDs, limits and tool/streaming support must not be inferred from branding alone.
+
+The current desktop, Linux process sandbox, workspace approvals, independent system-install policies, protected editor buffers, plan identities and backend-only secrets remain the foundation. New chats still snapshot selected model assignments; old prototype profile migration is not required. Require a fresh redesigned profile or clearly reject an incompatible profile without deleting it or project folders. M21 source/notices and final packaging work is paused until M22–M27 is delivered; preserve its uncommitted work and manual acceptance gates.
+
 ## Product direction
 
 ### M19 system installation decisions

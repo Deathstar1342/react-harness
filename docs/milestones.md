@@ -1,5 +1,58 @@
 # Delivery milestones
 
+## Active M22–M27 native-tool redesign — approved 2026-10-14
+
+User approved implementation with "boom lets do it! document the redesign and milestones, then start M22". The revised [redesign](native-tool-redesign.md) supersedes earlier no-native-tools, preserve-advisor-wording, legacy-profile and no-successor instructions. Run **M22 -> M23 -> M24 -> M25 -> M26 -> M27** sequentially in dedicated **Milestone x** chats and isolated `codex/milestone-x` worktrees from reviewed/published main. Coordinator independently reviews each delivery, requests corrections, validates integration, pushes GitHub main and verifies applicable CI before dispatching the next milestone. Child tasks may commit/push their assigned branches; they do not merge main, close milestones, publish releases or start successors.
+
+Resume the existing 15-minute heartbeat for this redesign only. Check compact child status when no report has arrived, assist routine stalls and decide routine contracts as coordinator. Pause immediately when user information/manual assistance is truly required; known work-only STARK access is not an implementation blocker. Report provider, portable, Linux/PTY, browser/Electron and installed-device evidence separately. Keep M21 packaging paused throughout redesign; preserve worktree `6fd9`, branch `codex/milestone-21`, uncommitted source/notices work and original receipts. M27 validates existing desktop packaging against the redesign but does not resume M21 source-bundle/release work. After M27, return to the coordinator for M21 resumption with all remaining acceptance explicit; no additional numbered milestone is authorized.
+
+### M22 — Native transport, capabilities and central tool registry
+
+- Replace text-only provider contracts with complete native assistant/tool-call/tool-result messages. Support ordinary replies, tool-only replies, text plus tools, multiple calls, streaming argument fragments, matching call IDs, usage and sanitized request tracing. Correctly handle tool-call finish reasons, refusals, truncation, duplicate/conflicting IDs, unknown names, invalid/bounded arguments and cancellation. Execute no partial stream and no call from prose.
+- Define each tool once: name, description, argument/result schema, roles, modes, effect/risk, inspection and handler. Publish provider schemas and validate execution from that definition. Retain permission checks at execution, not just tool advertisement. Propose concrete exported interfaces early; no new dependency without review.
+- Connect existing workspace/control tools to the native loop in one functional delivery. Remove legacy envelopes, advisor normalization, JSON/prose/fence extraction, format-repair prompts and retries, including connection-test assumptions. Provide minimal correct native role instructions; M23 owns their deeper redesign. Migrate the isolated install reviewer to a dedicated native decision tool with its curated evidence and unchanged policy/freshness/fallback protections.
+- Persist native call/results and pending execution intent. Preserve complete call/result groups during compaction; restart/cancellation/steering cannot replay uncertain operations or supply orphaned results. Serialize execution even when several calls are returned. No parallel coders or concurrently mutating batches.
+- Upgrade catalog/connection diagnostics with explicit unknown capabilities and harmless in-memory tool/result round trips. Test ordinary, native and streaming behavior independently, capture sanitized capability/request evidence. Never assume plain IDs or suffixes work; document provider catalog inconsistencies. No JSON/streaming toggles in ordinary settings, no Responses dependency, no legacy fallback.
+- Require a fresh protocol/profile format for the prototype; old-profile conversion is out of scope. Detect incompatible state without erasing user data. New-chat model snapshots remain supported. Coder default is a documented Gemini3.5 Flash tool-capable candidate; exact architect/critic3.5 Pro IDs and3.8 Flash selection remain configurable, unverified live here.
+- Own scoped `shared/types.ts`, provider/protocol replacement/registry, runtime/tools/context/scheduler/store/config/diagnostics/install-review wiring, affected UI contracts only as necessary, tests and relevant API/setup/architecture docs plus `docs/reports/milestone-22.md`. Do not edit M21 packaging/workflows/source bundles, goals/skills UI, coordinator STATUS or dispatch records. Existing privileged CI can validate changed review integration in disposable Linux; no local provisioning.
+- Acceptance: typecheck/full tests/build and focused native streaming/tool-round-trip/role/approval/stale-write/compaction/restart/steering/secret tests pass; applicable Linux CI passes. Demonstrate a synthetic architect -> coder -> tools -> critic -> architect flow. No production references to the removed parser or hidden compatibility mode. Live STARK acceptance remains separately pending.
+
+### M23 — Role prompts and native orchestration
+
+- Move role prompts into versioned modules. Give the architect ownership of requirements, plans, scoped delegation, review cadence and routine decisions; distinguish user updates from task/phase/goal completion. Coders implement verifiable assignments and critics inspect actual evidence with explicit verdict tools.
+- Remove repetitive schema instructions from prompts; keep tool descriptions focused and role/mode exposure minimal. Fresh project guidance, user steering and authoritative runtime controls remain distinct. Critic/install-review models cannot gain execution authority.
+- Maintain `planStep`/plan-version associations, bounded repair/review cycles and truthful progress. Evaluate long plans, early completion, missing files, failures, scope drift, manual edits and unchanged discovery loops with meaningful fixtures; no fabricated claim that live-model behavior passed.
+- Own prompts/native orchestration/context, focused tools/tests/docs and its report. No `/goal` persistence or skills authoring yet. Deliver typecheck/tests/build and applicable Linux evidence.
+
+### M24 — Durable goals and completion gates
+
+- `/goal` records an explicit objective and acceptance criteria. Runtime states cover running, waiting for approval, waiting for user, paused, blocked and completed. Native end-of-turn is not goal completion; schedule the next useful turn when required work remains and controls permit it.
+- Bind goal/plan revisions, reviewed evidence and explicit completion requests. Scope cannot be quietly reduced to hide unfinished requirements. Preserve `/plan` execution authorization, `/btw`, cancellation, approval/version checks, budgets and uncertain-operation protection. Budget/failure pauses have precise reasons; avoid automatic unbounded retry loops.
+- Store goal state across restarts and show a compact goal/phase indicator with details in the collapsible panel. Restore state without replay or silently resuming side effects on app launch; continuation while the backend remains running is supported, app-closed background services are out of scope.
+- Own goal schema/store/runtime/API/UI/commands/context/tests/docs/report. Test an eight-phase goal, early stop after phase two, blocking/approval, pause/resume, edits/steering, revisions, crash and completion evidence.
+
+### M25 — Project instructions and precise workspace tools
+
+- Architect reads, drafts and maintains bounded `AGENTS.md` guidance: project structure, commands, conventions and durable decisions. Goals/live task status stay in the database. Preserve user-written guidance with version-checked edits and normal approval rules; planning can draft but cannot write without execution authorization.
+- Support deterministic scoped instruction loading with documented priority, bounds and link safety, refreshed before affected operations. Repository text cannot grant permissions or alter native message roles.
+- Add useful version-checked patches, line-range reads, paginated search, explicit rename/delete, and structured start/status/cancel/output for long commands as justified by audited tool gaps. Use the registry; preserve dirty buffers, diff approvals, private output and shell lifecycle. Each new mutation gets meaningful boundary tests.
+- Own scoped instructions/tools/runtime/UI/API/tests/docs/report. No arbitrary host filesystem capabilities or parallel write execution.
+
+### M26 — Reusable skills
+
+- Project `.abyssus/skills/<name>/SKILL.md` and personal application-home skills describe reusable workflows, not new execution authority. Discover bounded metadata, load full text only when relevant, and record the revisions used by active work.
+- Skills panel and native tools create/edit/save/invoke skills, including "turn this task into a skill". Apply existing write/approval rules; explicit personal promotion has a clear destination. Validate names/paths/frontmatter/size and reject unsafe links. Skill text cannot grant approval, install handlers or override runtime controls.
+- Own skills storage/catalog/loading/tools/UI/API/context/tests/docs/report. Test drafting/saving, explicit invocation, revisions, restart/compaction, malformed paths/metadata and instruction/permission conflicts.
+
+### M27 — Integrated evaluation and redesigned desktop validation
+
+- Verify the complete native workflow with goals, project guidance, skills, editor conflicts, reviews, package policies, steering and restart. Audit removal of obsolete parsing and prompt-format machinery, schema consistency and failure presentation.
+- Commit a runnable bounded work-side diagnostic and sanitized output/report format; verify exact IDs, native round trips and streaming at work when the user can run it. No secret polling or live acceptance claim from mocks. Account for rate/credit headers, key locking and retired models without arbitrary returned links becoming trusted navigation.
+- Validate existing Electron packaging/build/lifecycle against the redesigned source in disposable environments and retain all native/manual release gates. M21 packaging correction and final publication remain paused until this delivery; do not borrow its unreviewed edits, publish artifacts as accepted or silently waive gates.
+- Own integration/evaluation/diagnostic tests, scoped CI corrections, acceptance/setup docs and report. Coordinator decides final integration and later M21 resumption. No M28 authorized.
+
+Each delivery reports SHA, changed interfaces, meaningful tests, exact CI/artifacts where applicable and explicit limits. The user authorizes commits/pushes and coordinator/child messages throughout this sequence. Do not commit private provider documentation, credentials, runtime databases, project contents or generated artifacts.
+
 ## Planned M16–M21 desktop sequence (2026-10-13)
 
 User approved implementation of this plan with "boom get started!" on 2026-10-13: Electron packaging, Docker-free Linux process sandboxing, and a privileged system-install helper provisioned during setup. System-install policy is separate from workspace approvals: Ask every time (default), Auto-approve, or AI review. This authorization supersedes the older executable-packaging and discussion-only holds. Start M16 and resume the existing 15-minute heartbeat; current dispatch is recorded in STATUS. Detailed architecture, platform assumptions and boundaries are in root [EXE.md](../EXE.md).
