@@ -9,6 +9,7 @@ import { boundedProcess, firstLine, observeCleanupFailure } from './process.js';
 import { descriptorSchema, failureSchema, loopbackAddress } from './backend-wire.js';
 import { parseDistributions, startSchema } from './policy.js';
 import { signBackendRequest, verifyBackendProof } from '../server/lifecycle.js';
+import { waitForReadiness } from './readiness.js';
 import type { BackendIdentity } from '../shared/types.js';
 import type { DesktopStatus, Environment } from './contracts.js';
 import type { BackendTarget } from './proxy.js';
@@ -73,9 +74,14 @@ export class DesktopController {
       const frame=await response,failure=failureSchema.safeParse(frame);
       if(failure.success){this.state.checks=failure.data.checks;throw new Error(failure.data.error);}
       const descriptor=descriptorSchema.parse(frame),address=loopbackAddress(descriptor.address);
-      const request=signBackendRequest(key,'readiness',descriptor.identity.instanceId);
-      const proof=await fetch(address+'/api/backend/readiness',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request),redirect:'error',signal:AbortSignal.timeout(5000)}).then(r=>r.json());
-      if(!verifyBackendProof(key,'readiness',request,proof)||proof.identity.profileId!==descriptor.identity.profileId||proof.identity.state!=='ready'||this.child!==child)throw new Error('Backend readiness identity mismatch');
+      const readiness=new AbortController();
+      const unavailable=()=>readiness.abort(new Error('Owned backend exited or failed before authenticated readiness.'));
+      child.once('exit',unavailable);child.once('error',unavailable);this.failureWaiters.add(unavailable);
+      try {
+        if(this.child!==child||child.exitCode!==null||child.signalCode!==null||this.cleanupFailed)unavailable();
+        await waitForReadiness(address,key,descriptor.identity,readiness.signal);
+        if(this.child!==child||child.exitCode!==null||child.signalCode!==null||this.cleanupFailed)throw new Error('Owned backend exited or failed before authenticated readiness.');
+      }finally{child.off('exit',unavailable);child.off('error',unavailable);this.failureWaiters.delete(unavailable);}
       this.identity=descriptor.identity;this.key=key;this.active={address,token,sessionId:`${descriptor.identity.profileId}/${descriptor.identity.instanceId}`};
       this.state={...this.state,phase:'ready',sessionId:`${descriptor.identity.profileId}/${descriptor.identity.instanceId}`,checks:descriptor.checks,message:'Connected to the selected Linux profile.'};this.changed();
       return this.state;
