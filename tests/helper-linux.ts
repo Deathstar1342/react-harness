@@ -30,8 +30,8 @@ async function wire(value:unknown):Promise<Record<string,unknown>>{
     socket.once('error',reject);
   });
 }
-async function fixture(mode:string){
-  const child=spawn('sudo',['/usr/bin/python3','-I','-S','/root/abyssus-helper-ci.py',mode]);
+async function fixture(mode:string,...args:string[]){
+  const child=spawn('sudo',['/usr/bin/python3','-I','-S','/root/abyssus-helper-ci.py',mode,...args]);
   let output='';child.stdout.on('data',chunk=>{output+=chunk.toString();});
   child.stderr.pipe(process.stderr);
   for(let i=0;i<200&&!output.includes('\n');i++){if(child.exitCode!==null)throw new Error('fixture exited');await delay(10);}
@@ -120,10 +120,10 @@ console.log('PASS repair rotates authority while preserving target/audit/outcome
 const interruption=await client.prepare({requestId:randomUUID(),targetId:hello.target.id,manager:'apt',packages:[{name:'cowsay'}]});
 assert.equal(interruption.state,'prepared');
 const interruptedDecision=decision(interruption);await client.authorize(interruptedDecision);
-const observer=await fixture('interrupt');
+const observer=await fixture('interrupt',interruption.requestId);
 await assert.rejects(client.execute(interruptedDecision),/HELPER_REPLY_UNCERTAIN/);
 if(observer.child.exitCode===null)await once(observer.child,'close');
-assert.match(observer.output(),/INTERRUPTED_REAL_DPKG/);
+assert.match(observer.output(),/INTERRUPTED_REAL_DPKG_AFTER_DURABLE_RUNNING/);
 admin('repair');client=await connect();
 assert.equal((await client.status(interruption.requestId)).state,'uncertain');
 await assert.rejects(client.execute(interruptedDecision),/RECOVERY_REQUIRED|INVALID_STATE|DECISION_EXPIRED/);

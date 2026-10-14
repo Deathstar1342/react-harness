@@ -35,6 +35,7 @@ Root-private SQLite records preparation/authorization/running state before packa
 | `ec0dc4a`, [38505663694](https://github.com/Deathstar1342/react-harness/actions/runs/38505663694) | Preview rejected a transient auxiliary mirror-list symlink. Exclude partial/auxfiles subtrees from authoritative fingerprints; they are not active signed package indexes. |
 | `a11b2ca`, [38505921330](https://github.com/Deathstar1342/react-harness/actions/runs/38505921330) | Actual apt installation passed, then the writable `/usr/share` parent regression failed after narrower runtime imports stopped traversing that parent indirectly. Added explicit trusted common package-data-parent validation; did not remove the negative assertion. |
 | Initial portable adapter tests | Test-only sys.modules restoration created two Rejected class identities; imported core before patching modules. All 18 focused tests then passed. No production policy relaxation. |
+| `e85c68c`, [38506418092](https://github.com/Deathstar1342/react-harness/actions/runs/38506418092) | Interruption assertion found failed rather than uncertain: the probe could kill a read-only dpkg preflight before the running marker. Probe now requires the exact request's durable running state AND dpkg `--unpack`/`--configure` argv before stopping/killing it. No production uncertainty assertion was relaxed; earlier interruption passes are superseded by the stronger final gate. |
 
 ## Environment and acceptance limits
 
