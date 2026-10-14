@@ -45,7 +45,16 @@ describe('Windows packaged bootstrap data isolation',()=>{
   it('accepts only a bounded complete location record and rejects malformed/truncated/extra fields',()=>{
     expect(parseLocation(Buffer.from('[desktop]\r\npath=D:\\saved\r\n'))).toBe('D:\\saved');
     expect(parseLocation(Buffer.concat([Buffer.from([255,254]),Buffer.from('[desktop]\r\npath=D:\\saved\r\n','utf16le')]))).toBe('D:\\saved');
-    for(const bytes of [Buffer.from('[desktop]\npath=D:\\saved\nextra=yes'),Buffer.from('[desktop]\npath='),Buffer.alloc(2049),Buffer.from([255,254,65]),Buffer.from([255])])expect(()=>parseLocation(bytes)).toThrow();
+    expect(parseLocation(Buffer.concat([Buffer.from([255,254]),Buffer.from('\r\n[desktop]\r\npath=D:\\saved\r\n','utf16le')]))).toBe('D:\\saved');
+    for(const bytes of [Buffer.from('\n\n[desktop]\npath=D:\\saved'),Buffer.from('[desktop]\npath=D:\\saved\nextra=yes'),Buffer.from('[desktop]\npath='),Buffer.alloc(2049),Buffer.from([255,254,65]),Buffer.from([255])])expect(()=>parseLocation(bytes)).toThrow();
+  });
+  it.skipIf(process.platform!=='win32')('reads the actual Windows INI API output used by NSIS without relaxing extra-field rejection',()=>{
+    const root=mkdtempSync(path.join(tmpdir(),'abyssus-ini-')),file=path.join(root,'location.ini');
+    try {
+      const code=`Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class IniWriter { [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern bool WritePrivateProfileString(string section,string key,string value,string file); }'; [IO.File]::WriteAllBytes($env:ABYSSUS_INI_FIXTURE,[byte[]](255,254)); if(-not [IniWriter]::WritePrivateProfileString('desktop','path','D:\\saved',$env:ABYSSUS_INI_FIXTURE)){exit 1}`;
+      const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',code],{env:{...process.env,ABYSSUS_INI_FIXTURE:file},windowsHide:true});
+      expect(result.status).toBe(0);expect(parseLocation(readFileSync(file))).toBe('D:\\saved');
+    }finally{rmSync(root,{recursive:true,force:true});}
   });
   it.each(['C:\\','\\\\server\\share','\\\\?\\C:\\data','C:\\a\\..\\data','C:\\data:stream','C:\\bad.\\data','relative'])('rejects unsafe location %s',value=>{expect(()=>validateLocation(value,'C:\\Windows')).toThrow();});
   it.skipIf(process.platform!=='win32')('probes an existing separate folder; refuses missing and overlapping folders',()=>{

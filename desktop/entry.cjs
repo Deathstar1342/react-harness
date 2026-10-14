@@ -11,7 +11,7 @@ function start() {
       bootstrap.verifyPackage();
       if (process.platform === 'win32') bootstrap.validateLocation(app.getPath('userData'), require('node:path').dirname(process.execPath));
     }
-  } catch (error) { dialog.showErrorBox('abysSUS setup needs attention', error.message); app.exit(1); return; }
+  } catch (error) { console.error('abysSUS setup needs attention:', error.message); dialog.showErrorBox('abysSUS setup needs attention', error.message); app.exit(1); return; }
   void import('./main.js').catch(error => {
   console.error('abysSUS desktop startup failed:', error instanceof Error ? error.message : 'Unknown error');
   require('electron').app.exit(1);

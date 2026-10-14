@@ -12,6 +12,8 @@ function Install-Candidate {
   if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
 }
 Install-Candidate
+node tests/installed-package-preflight.cjs (Join-Path $install 'abysSUS.exe') $data
+if ($LASTEXITCODE -ne 0) { throw 'Installed on-disk bootstrap verification failed' }
 $env:ABYSSUS_PACKAGE_TEST_HOME = $data
 $env:ABYSSUS_TEST_INSTALLER = $setup
 node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') create
@@ -29,6 +31,8 @@ if (Test-Path -LiteralPath (Join-Path $install 'abysSUS.exe')) { throw 'Applicat
 if ((Get-Content -LiteralPath (Join-Path $data 'preserve.txt') -Raw) -ne 'package-preservation-fixture') { throw 'Desktop data lost' }
 if ((Get-ItemProperty 'HKCU:\Software\abysSUS\Storage').DataFolder -ne $data) { throw 'Saved location lost' }
 Install-Candidate
+node tests/installed-package-preflight.cjs (Join-Path $install 'abysSUS.exe') $data
+if ($LASTEXITCODE -ne 0) { throw 'Reinstalled on-disk bootstrap verification failed' }
 node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') verify
 if ($LASTEXITCODE -ne 0) { throw 'Reinstalled executable check failed' }
 node tests/packaged-crash.ts (Join-Path $install 'abysSUS.exe')

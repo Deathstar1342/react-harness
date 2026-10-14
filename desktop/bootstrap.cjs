@@ -23,7 +23,8 @@ function parseLocation(bytes) {
   const unicode=bytes[0]===255&&bytes[1]===254;
   if(unicode&&bytes.length%2!==0)throw new Error('Invalid desktop location encoding.');
   const text=new TextDecoder(unicode?'utf-16le':'utf-8',{fatal:true}).decode(unicode?bytes.subarray(2):bytes);
-  const match=text.match(/^\[desktop\]\r?\npath=([^\r\n]+)\r?\n?$/);
+  // WritePrivateProfileString adds one initial blank line to a BOM-only file.
+  const match=text.match(/^(?:\r?\n)?\[desktop\]\r?\npath=([^\r\n]+)\r?\n?$/);
   if(!match)throw new Error('Invalid desktop location file. Repair the installation.');
   return match[1];
 }
