@@ -1,6 +1,8 @@
 # M25 scoped instructions, precise files and owned processes
 
-Status: implementation candidate; frozen-source validation and independent coordinator acceptance pending. Isolated c4d0, branch codex/milestone-25, kickoff 95db885e1440e46106db4b4ef707c522444cba59. Kickoff differs from reviewed M24 integration 5b0f49c7a977260b112e9c665c947d7e2441930e only in coordinator documentation. No other worktree, main branch, dependency, helper authority or packaging workflow changed. M21 remains paused.
+Status: frozen-source validation complete; ready for independent coordinator integration review. Isolated c4d0, branch codex/milestone-25, kickoff 95db885e1440e46106db4b4ef707c522444cba59. Kickoff differs from reviewed M24 integration 5b0f49c7a977260b112e9c665c947d7e2441930e only in coordinator documentation. No other worktree, main branch, dependency, helper authority or packaging workflow changed. M21 remains paused.
+
+Implementation commit: 2982a3572e2018d90241f89921f4e6db86287aff. Validated source commit: **5f562cc7fa72976828e6293e7efb702c92bb4280**, tree **6f19253ab4765745340a60d672ead96b1feb2ded**. The successor changes only two assertions in the Linux-only removal regression to await the API's rejected promises. Product code, browser/desktop build inputs and remaining tests are identical. This final report is the only change after that validated source.
 
 ## Implemented contracts
 
@@ -27,5 +29,24 @@ Receipts are outside Git at D:/CodexData/.codex/visualizations/2026/10/14/01a13c
 - Earlier complete suite: 792 passed, 25 failed, 43 platform skips. Failures are retained. Expanded native schemas required larger test-only context budgets; compaction/protected-message assertions remain. Mock directory/file and inspection/result contracts were corrected; malformed approval fixtures now have valid native arguments; async quarantine expectations and UI wording reflect the new contracts. Product regressions in missing-root recovery and invalid requested paths were fixed; original regression scenarios passed.
 - Earlier browser-first.log failed because the fixture lacked restore capability. browser-second.log caught the real Monaco teardown error, corrected in product code without suppressing pageerror. Initial restricted npm/filesystem failures and intermediate focused failures remain in receipts or ignored test-results cache.
 
-The final complete suite, source SHA, rebuild, browser/Electron reruns and every applicable Validate/Desktop/helper CI run/job/step outcome will be recorded in the report-only handoff. Focused checks are diagnostic rather than a substitute for that full suite. Live STARK, untouched-device/WSL installation and human acceptance remain deferred; no credentials were supplied and no such success is claimed.
+## Frozen validation
+
+| Check | Result and receipt |
+| --- | --- |
+| Windows full portable suite | 823 passed, zero failures, 43 platform/fixture skips; full-tests-second.json. This is the implementation at 2982a35; the successor only changes a Linux-skipped test. |
+| Typecheck | Passed for the implementation and the exact 5f562cc successor; typecheck-final.log and typecheck-followup.log. |
+| Web + desktop build | Passed, existing Vite chunk-size advisory only; build-final.log. No generated artifacts committed. |
+| Actual Chrome | M25 process/approval/Stop/two-path Undo and retained M24 goal flow passed on frozen product source with pageerror collection; browser-frozen-2982a35.log and goal-browser-frozen-2982a35.log. Model and command fixture inputs are synthetic; HTTP, SQLite, files and rendering are real. |
+| Actual Windows Electron | Passed isolated render, navigation/network denial, restart, crash and profile recovery; desktop-frozen-2982a35.log. No WSL distribution launch. |
+| Linux Validate | [38654468748](https://github.com/Deathstar1342/react-harness/actions/runs/38654468748), job 116160838535: **859 passed, zero failures, seven skips**, 60 suites passed/one skipped. All ten real namespace/PTY process cases passed. Typecheck, build and required disabled-namespace fail-closed step passed. |
+| Desktop Windows + Ubuntu | [38654468854](https://github.com/Deathstar1342/react-harness/actions/runs/38654468854), jobs 116160839959 and 116160839542: all applicable steps passed. Ubuntu staged Node/SQLite/PTY, namespace bridge, authenticated backend/controller and actual Electron/editor recovery checks passed. Opposite-platform steps skipped by design. |
+| Privileged helper Ubuntu | [38654468957](https://github.com/Deathstar1342/react-harness/actions/runs/38654468957), job 116160839417: 20 Python tests and all applicable real helper/service/install/repair/removal and OS-auth steps passed. Failure-only diagnostics skipped because the job succeeded. |
+
+All three required workflow runs are for exact source 5f562cc. Every job and step was inspected; final job JSON and complete logs are retained as ci-5f562cc-* receipts. Linux evidence comes from disposable GitHub runners, not provisioning or acceptance on the user's Windows/WSL installation. Existing automatic Installer candidates runs are outside this milestone acceptance and do not resume M21 or authorize release.
+
+Original source [Validate 38654209027](https://github.com/Deathstar1342/react-harness/actions/runs/38654209027) failed with 858 passed/one failed/seven skipped and an unhandled rejection caused by a test using synchronous toThrow on the now-async removeScope promise. The API correctly refused the mutation. Both active/background refusal assertions now await rejects; the full successor Linux run passes. Original logs and job steps are retained as ci-2982a35-validate-failed.log and ci-2982a35-38654209027-jobs.json. The original build/unsupported-namespace steps were skipped after that test failure and are not counted as success. Original Desktop/helper success receipts are also retained.
+
+Images were inspected for visible running/Stop/interrupted states and paired move/undone diffs; m25-process-running.png, m25-process-stopped.png, m25-move-preview.png and m25-move-undone.png remain alongside copied frozen Electron/goal screenshots. Receipt hashes are stored externally. No credentials, environment files, local databases, project content or generated build output were staged.
+
+Live STARK, untouched-device/WSL installation and human acceptance remain deferred; no credentials were supplied and no such success is claimed. Generic process uncertainty reconciliation, atomic rename/full metadata preservation and repository-wide instruction discovery are deliberate limits, not completed capabilities. Coordinator owns independent review, main integration and successor dispatch. This task does not merge main, start M26 or resume M21.
 
