@@ -10,6 +10,7 @@ import { descriptorSchema, failureSchema, loopbackAddress } from './backend-wire
 import { parseDistributions, startSchema } from './policy.js';
 import { signBackendRequest, verifyBackendProof } from '../server/lifecycle.js';
 import { waitForReadiness } from './readiness.js';
+import { helperReadinessSchema,type HelperReadiness } from './helper-preflight.js';
 import type { BackendIdentity } from '../shared/types.js';
 import type { DesktopStatus, Environment } from './contracts.js';
 import type { BackendTarget } from './proxy.js';
@@ -58,6 +59,16 @@ export class DesktopController {
       this.state.message=deliberate?'Backend stopped after local cleanup.':'Backend exited. Keep this profile selected and explicitly reopen it to inspect recovery; no actions will be replayed.';this.changed();
     });
     }
+  private async helperPreflight():Promise<HelperReadiness> {
+    try {
+      const command=this.command(this.state.selection!.environment,'helper-entry.js',['preflight']);
+      const output=await boundedProcess(command.file,command.args,{cwd:command.cwd,timeout:5000,env:{...process.env,NODE_OPTIONS:'',NODE_PATH:'',ELECTRON_RUN_AS_NODE:''}});
+      return helperReadinessSchema.parse(JSON.parse(output));
+    }catch{
+      const blocked={canStart:false,message:'Optional helper prerequisites could not be checked. Ask an administrator to inspect the staged helper and OS authentication agent. You can continue to chats.'};
+      return {setup:{...blocked},repair:{...blocked},uninstall:{...blocked}};
+    }
+  }
   async start(raw:unknown) {
     if(this.busy||this.child)throw new Error('An owned backend is still starting, running or draining. Finish its shutdown first.');
     const input=startSchema.parse(raw);this.busy=true;
@@ -82,8 +93,10 @@ export class DesktopController {
         await waitForReadiness(address,key,descriptor.identity,readiness.signal);
         if(this.child!==child||child.exitCode!==null||child.signalCode!==null||this.cleanupFailed)throw new Error('Owned backend exited or failed before authenticated readiness.');
       }finally{child.off('exit',unavailable);child.off('error',unavailable);this.failureWaiters.delete(unavailable);}
+      const helperReadiness=await this.helperPreflight();
+      if(this.child!==child||child.exitCode!==null||child.signalCode!==null||this.cleanupFailed)throw new Error('Owned backend exited or failed before authenticated readiness.');
       this.identity=descriptor.identity;this.key=key;this.active={address,token,sessionId:`${descriptor.identity.profileId}/${descriptor.identity.instanceId}`};
-      this.state={...this.state,phase:'ready',sessionId:`${descriptor.identity.profileId}/${descriptor.identity.instanceId}`,checks:descriptor.checks,message:'Connected to the selected Linux profile.'};this.changed();
+      this.state={...this.state,phase:'ready',sessionId:`${descriptor.identity.profileId}/${descriptor.identity.instanceId}`,checks:descriptor.checks,helperReadiness,message:'Connected to the selected Linux profile.'};this.changed();
       return this.state;
     }catch(error){this.state.phase='failed';this.state.message=error instanceof Error?error.message:'Desktop launch failed';this.changed();throw error;}
     finally{this.busy=false;}
@@ -109,6 +122,15 @@ export class DesktopController {
   }
   async helper(action:'setup'|'repair'|'uninstall') {
     if(this.busy||this.state.phase!=='ready'||!this.state.selection)throw new Error('Open the selected profile before helper setup.');
+    if(!['setup','repair','uninstall'].includes(action))throw new Error('Unsupported helper operation');
+    const owner=this.child;
+    // A failed read-only prerequisite check must not stop a working backend.
+    this.busy=true;
+    try{this.state.helperReadiness=await this.helperPreflight();this.changed();}
+    finally{this.busy=false;}
+    if(this.state.phase!=='ready'||!owner||this.child!==owner||this.cleanupFailed)throw new Error('Backend changed while checking helper prerequisites. Reopen setup to inspect recovery.');
+    const readiness=this.state.helperReadiness[action];
+    if(!readiness.canStart){this.state.message=readiness.message;this.changed();return this.state;}
     // Drain current API/tools/install calls before changing helper authority.
     await this.stop();
     this.busy=true;

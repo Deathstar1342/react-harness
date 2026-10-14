@@ -11,6 +11,7 @@ export interface DesktopStatus {
   transitioning?:boolean;
   checks?:{ name:string; ok:boolean; message:string }[];
   helper?:{available:boolean; target?:string};
+  helperReadiness?:import('./helper-preflight.js').HelperReadiness;
 }
 export interface DesktopBridge {
   status():Promise<DesktopStatus>;

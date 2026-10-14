@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
@@ -10,6 +10,7 @@ import { desktopOrigin, environmentSchema, isDesktopURL, linuxPath, pickerPath, 
 import { desktopResponse } from './proxy.js';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 app.setName('abysSUS');
+nativeTheme.themeSource='dark';
 app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}}]);
 let window:BrowserWindow|undefined,quitting=false,closing=false;
@@ -58,7 +59,7 @@ else {
   };
   const createWindow=()=>{
     documents.documentChanged();
-    window=new BrowserWindow({width:1350,height:880,minWidth:740,minHeight:520,title:'abysSUS',backgroundColor:'#171717',show:false,
+    window=new BrowserWindow({width:1350,height:880,minWidth:740,minHeight:520,title:'abysSUS',backgroundColor:'#171717',show:false,autoHideMenuBar:process.platform==='win32',
       webPreferences:{partition:'abyssus-desktop',preload:path.join(appRoot,'desktop/preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false,nodeIntegrationInWorker:false,webviewTag:false,webSecurity:true,allowRunningInsecureContent:false,devTools:false}});
     window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
     window.webContents.on('will-navigate',event=>event.preventDefault());
@@ -129,7 +130,7 @@ else {
     return await controller.helper(action);
     }finally{thaw?.();documents.end(ticket);}
   });
-  Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'abysSUS',submenu:[{label:'Quit',click:()=>void closeApp()}]}]));
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'abysSUS',submenu:[{label:'Quit',accelerator:'CmdOrCtrl+Q',click:()=>void closeApp()}]}]));
   app.on('before-quit',event=>{if(!quitting){event.preventDefault();void closeApp();}});
   app.on('window-all-closed',()=>{if(quitting)app.quit();});
   createWindow();

@@ -30,6 +30,11 @@ try {
   assert.equal(await page.evaluate(()=>typeof (globalThis as Record<string,unknown>).process),'undefined');
   const prefs=await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];return (w.webContents as unknown as {getLastWebPreferences:()=>Record<string,unknown>}).getLastWebPreferences();});
   assert.equal(prefs.sandbox,true);assert.equal(prefs.contextIsolation,true);assert.equal(prefs.nodeIntegration,false);
+  const chrome=await app.evaluate(({BrowserWindow,nativeTheme,Menu})=>{
+    const w=BrowserWindow.getAllWindows()[0];return {theme:nativeTheme.themeSource,dark:nativeTheme.shouldUseDarkColors,menu:w.isMenuBarVisible(),autoHide:w.isMenuBarAutoHide(),closable:w.isClosable(),minimizable:w.isMinimizable(),maximizable:w.isMaximizable(),quit:Menu.getApplicationMenu()?.items[0].submenu?.items.find(item=>item.label==='Quit')?.accelerator};
+  });
+  assert.equal(chrome.theme,'dark');assert.equal(chrome.dark,true);assert.equal(chrome.quit,'CmdOrCtrl+Q');
+  if(process.platform==='win32'){assert.equal(chrome.menu,false);assert.equal(chrome.autoHide,true);assert(chrome.closable&&chrome.minimizable&&chrome.maximizable);}
   const status=await page.evaluate(()=>window.abyssusDesktop!.status());
   assert(!JSON.stringify(status).includes('token'));assert(!status.distributions.some(name=>/podman/i.test(name)));
   await page.evaluate(()=>{window.open('https://example.com');});
@@ -61,6 +66,14 @@ try {
       const ready=await page.evaluate(()=>window.abyssusDesktop!.status());
       console.log('CHECK connected backend readiness');
       assert.equal(ready.phase,'ready');assert(ready.checks?.slice(0,5).every(c=>c.ok));
+      if(!ready.helperReadiness?.setup.canStart){
+        await expect(page.getByRole('button',{name:'Enable helper',exact:true})).toBeDisabled();
+        await expect(page.getByRole('button',{name:'Continue to chats'})).toBeEnabled();
+        const unavailable=await page.evaluate(()=>window.abyssusDesktop!.helper('setup'));
+        assert.equal(unavailable.phase,'ready');assert.equal(unavailable.sessionId,ready.sessionId);
+        assert.equal(await page.evaluate(()=>fetch('/api/projects').then(r=>r.status)),200);
+        console.log('PASS unavailable optional helper preserves real connected backend/session and API');
+      }
       await page.getByRole('button',{name:'Continue to chats'}).click();
       const ids=await page.evaluate(async(project)=>{
         const send=async(url:string,body:unknown)=>{const r=await fetch('/api'+url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json();};

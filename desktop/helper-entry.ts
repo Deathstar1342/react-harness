@@ -1,13 +1,9 @@
 import { lstat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { PackageHelperClient } from '../server/package-helper.js';
-const launcher='/usr/lib/abyssus-helper/launcher';
+import { helperLauncher as launcher,helperPreflight,trustedHelper } from './helper-preflight.js';
+export { trustedHelper } from './helper-preflight.js';
 const absent=async(file:string)=>{try{await lstat(file);return false;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return true;throw e;}};
-export async function trustedHelper() {
-  for(const p of ['/','/usr','/usr/lib','/usr/lib/abyssus-helper',launcher,'/usr/bin','/usr/bin/pkexec']) {
-    const s=await lstat(p);if(s.isSymbolicLink()||s.uid!==0||(s.mode&0o022)!==0)throw new Error('Untrusted helper staging');
-  }
-}
 export async function helperState() {
   const hello=await (await PackageHelperClient.connect()).hello();
   return {available:true,target:`${hello.target.distribution} ${hello.target.release} (${hello.target.id})`};
@@ -41,7 +37,7 @@ export async function helperOperation(action:'setup'|'repair'|'uninstall') {
 if(process.argv[1]?.endsWith('helper-entry.js')) {
   const action=process.argv[2];
   try {
-    const result=action==='status'?await helperState():await helperOperation(action as 'setup'|'repair'|'uninstall');
+    const result=action==='preflight'?await helperPreflight():action==='status'?await helperState():await helperOperation(action as 'setup'|'repair'|'uninstall');
     process.stdout.write(JSON.stringify(result)+'\n');
   }catch{process.stdout.write(JSON.stringify({available:false,error:'Helper unavailable or OS operation was cancelled/failed. Trusted staging, systemd and an OS authentication agent are required.'})+'\n');process.exitCode=1;}
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { DesktopStatus } from '../desktop/contracts';
 import { App } from './App';
+import { OptionalSystemInstalls } from './OptionalSystemInstalls';
 import { errorText, post, request } from './api';
 import logo from './assets/abyssus-logo.png';
 
@@ -46,9 +47,7 @@ export function DesktopRoot() {
         <button className="button primary" disabled={busy||!environment||status?.phase==='starting'||status?.phase==='stopping'}>{busy?'Opening…':'Open profile'}</button>
       </form>}
       {status?.checks&&<ul>{status.checks.map(check=><li key={check.name}><strong>{check.name}: {check.ok?'available':'needs attention'}</strong>{!check.ok&&<p>{check.message}</p>}</li>)}</ul>}
-      {status?.phase==='ready'&&<><h2>Optional system installs</h2><p>Setup requires an administrator-staged helper and an OS authentication agent in this Linux environment. You can continue without enabling system installs.</p>
-        <div className="dialog-actions">{(['setup','repair','uninstall'] as const).map(action=><button key={action} className="button" disabled={busy} onClick={()=>void run(async()=>setStatus(await bridge.helper(action)))}>{action==='setup'?'Enable helper':action==='repair'?'Repair helper':'Remove helper'}</button>)}</div>
-        {status.helper?.target&&<p>Verified target: {status.helper.target}</p>}<button className="button primary" onClick={()=>setShowSetup(false)}>Continue to chats</button></>}
+      {status?.phase==='ready'&&<OptionalSystemInstalls status={status} busy={busy} run={action=>void run(async()=>setStatus(await bridge.helper(action)))} continueToChats={()=>setShowSetup(false)}/>}
       {error&&<p className="inline-error" role="alert">{error}</p>}
     </main></div>}
   </>;
