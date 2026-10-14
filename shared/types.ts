@@ -25,7 +25,7 @@ export interface AgentResponse { version: 1; type: 'message' | 'action' | 'final
 export interface ModelMessage { role: 'system' | 'user' | 'assistant'; content: string }
 export interface ModelUsage { inputTokens: number; outputTokens: number }
 export interface CompletionResult { text: string; usage?: ModelUsage; finishReason?: string }
-export interface ModelProvider { complete(input: { model: string; messages: ModelMessage[]; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]> }
+export interface ModelProvider { complete(input: { model: string; messages: ModelMessage[]; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number; noRetry?: boolean }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]> }
 export interface FileEntry { path: string; name: string; type: 'file' | 'directory'; size?: number }
 export interface FileSnapshot { path: string; content: string; hash: string | null }
 export type FileChangeStatus = 'recording' | 'confirmed' | 'rejected' | 'unknown' | 'undoing' | 'undone';
@@ -54,7 +54,7 @@ export interface ToolService {
   removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T | Promise<T>;
   dispose(): Promise<void>;
 }
-export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string }
+export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string; install?: InstallRecord }
 export interface RunEvent { id: number; chatId: string; type: string; data: unknown; createdAt: string }
 export interface CommandEvent {
   commandId: string; agentId: string; sessionId: string; role: AgentRole; action: Action;
@@ -84,4 +84,17 @@ export interface PackageHelperRecord {
   state:'prepared'|'noop'|'authorized'|'running'|'succeeded'|'failed'|'uncertain';
   createdAt:number;updatedAt:number;expiresAt:number;code:string;decision?:PackageHelperDecision;
   reconciliation?:{matches:boolean;healthy:boolean;packages:{name:string;expectedVersion:string;installedVersion:string|null}[]};
+}
+export type InstallPolicy = 'ask' | 'auto' | 'ai';
+export interface InstallSettings { policy: InstallPolicy; reviewerModel: string; revision: number; target?: PackageHelperTarget }
+export interface InstallSettingsView extends InstallSettings { available: boolean; message: string; scope: 'current-profile-local-linux-target' }
+export type InstallState = 'preparing' | 'reviewing' | 'pending' | 'approved' | 'authorizing' | 'dispatching' | 'succeeded' | 'failed' | 'noop' | 'rejected' | 'stale' | 'uncertain';
+/** Public evidence only. Helper authorization nonce/descriptor never belong here. */
+export interface InstallRecord {
+  id: string; chatId: string; projectId: string; frameId: string; role: AgentRole; generation: number; modeVersion: number;
+  recommendation: { packages: {name:string;version?:string}[]; reason: string };
+  settings: InstallSettings; state: InstallState; createdAt: number; updatedAt: number;
+  preview?: PackageHelperPreview; previewDigest?: string; expiresAt?: number;
+  decision?: { source: 'human'|'auto'|'ai'; outcome: 'approve'|'reject'|'ask'; reason: string; at: number };
+  code: string; recoveryRequired: boolean; reconciliation?: PackageHelperRecord['reconciliation'];
 }

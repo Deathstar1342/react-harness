@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ApprovalMode, ChatDetail, ConnectionReport, Preferences } from '../shared/types';
 import { errorText, id, request } from './api';
 import { approvalNames, getPreferences, saveChatApproval, savePreferences, testConnection } from './settings';
+import { InstallSettingsControls } from './InstallControls';
 
 export function ConnectionResults({ report }: { report: ConnectionReport }) {
   return <div className="connection-results" role="status">
@@ -90,6 +91,7 @@ export function SettingsControls({ chatId, onPreferences, providerRevision = 0 }
       </label>
       <p className="field-help">Balanced asks before elevated actions. Review asks before every change. Full workspace autonomy allows changes without individual approval.</p>
     </section>
+    <InstallSettingsControls />
     <section className="settings-section">
       <h3>Debug mode</h3>
       <button type="button" className="button" role="switch" aria-checked={preferences?.debugMode ?? false} disabled={saving || !preferences}

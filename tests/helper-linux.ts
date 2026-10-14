@@ -9,6 +9,7 @@ import { connect as socketConnect } from 'node:net';
 import { once } from 'node:events';
 import { LinuxSandbox } from '../server/tools/sandbox.js';
 import type { PackageHelperRecord } from '../shared/types.js';
+import { installPolicyIntegration } from './install-linux.js';
 
 assert.equal(process.env.GITHUB_ACTIONS,'true','Disposable GitHub runner required');
 assert.equal(process.platform,'linux');assert.notEqual(process.getuid!(),0);
@@ -56,6 +57,7 @@ const sandbox=new LinuxSandbox();
 const confined=await sandbox.launch(project,['/usr/bin/bash','--noprofile','--norc','-c','test -f source.txt && test ! -e /etc/abyssus-helper/client.json && test ! -e /var/lib/abyssus-helper/audit.sqlite && test ! -e /run/abyssus-helper/control.sock && test ! -e /usr/lib/abyssus-helper/launcher && printf M18_CONFINED']);
 try{assert.equal(execFileSync(confined.file,confined.args,{env:confined.env,cwd:project,encoding:'utf8'}),'M18_CONFINED');}finally{await confined.close();}
 console.log('PASS live helper credentials/socket/audit/code absent inside actual agent namespace');
+await installPolicyIntegration(project);
 // Credential read and socket connection both fail for a different local UID.
 assert.throws(()=>sudo('-u','nobody','/usr/bin/cat','/etc/abyssus-helper/client.json'));
 assert.throws(()=>sudo('-u','nobody','/usr/bin/python3','-I','-S','-c',"import socket;s=socket.socket(socket.AF_UNIX);s.connect('/run/abyssus-helper/control.sock')"));

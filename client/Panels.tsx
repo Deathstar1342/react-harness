@@ -1,4 +1,5 @@
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { InstallPreview } from './InstallControls';
 import {
   Check,
   ChevronDown,
@@ -57,8 +58,15 @@ export function ApprovalCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [invalid, setInvalid] = useState(false);
+  const [now,setNow]=useState(Date.now());
+  // Approval.install is the reviewed snapshot, not the live operation outcome.
+  // A completed human decision must not expire with its old preview timestamp.
+  const unresolved = approval.status === 'pending' || approval.status === 'stale';
+  const unresolvedInstall = unresolved && !!approval.install && ['pending','stale'].includes(approval.install.state);
+  useEffect(()=>{if(!unresolvedInstall)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[unresolvedInstall]);
+  const expired=unresolvedInstall && !!approval.install?.expiresAt && now>=approval.install.expiresAt;
   const inspection = approval.inspection;
-  const pending = approval.status === "pending" && !invalid;
+  const pending = approval.status === "pending" && !invalid && !expired && (!approval.install || unresolvedInstall);
   const decision = async (value: "approve" | "deny") => {
     if (busy || !pending) return;
     setBusy(true);
@@ -89,15 +97,23 @@ export function ApprovalCard({
           <ShieldCheck size={17} />
           {pending
             ? "Your approval is needed"
-            : `Approval ${invalid ? "stale" : approval.status}`}
+            : `Approval ${expired ? "expired" : invalid && unresolved ? "stale" : approval.status}`}
         </span>
         <span className="badge">
           {inspection.risk} · {inspection.effect}
         </span>
       </div>
       <p>{inspection.description}</p>
+      {approval.install?.preview && <>
+        <InstallPreview preview={approval.install.preview}/>
+        <p>{unresolvedInstall ? 'Preview expires ' : 'Reviewed preview deadline: '}{new Date(approval.install.expiresAt!).toLocaleTimeString()}.{unresolvedInstall && ' A new preview requires a new decision.'}</p>
+        {approval.install.decision?.outcome==='ask'&&<p>{approval.install.decision.reason}</p>}
+        {unresolvedInstall && (expired||invalid||approval.status==='stale')&&<button className="button small" disabled={busy} onClick={()=>{
+          setBusy(true);setError('');void post(`/system-installs/${id(approval.id)}/refresh`,{}).then(refresh).catch(e=>setError(errorText(e))).finally(()=>setBusy(false));
+        }}>Request a new preview</button>}
+      </>}
       {inspection.path && <code className="file-path">{inspection.path}</code>}
-      {inspection.effect === "execute" && (
+      {inspection.effect === "execute" && !approval.install && (
         <p className="muted">
           This command may modify files. Its resulting changes cannot be
           predicted from the command alone.
