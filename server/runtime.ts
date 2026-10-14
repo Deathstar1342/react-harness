@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
-import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef } from '../shared/types.js';
+import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef } from '../shared/types.js';
 import type { Config } from './config.js';
 import { Store } from './store.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
@@ -12,6 +12,7 @@ import { assignmentMessage, checkpointFeedback, reviewMessage, taskState, type A
 import { assignmentBlockers, recordAssignmentEvidence, refreshAssignmentEvidence, type AssignmentEvidence } from './assignment-evidence.js';
 import { promptIdentity } from './prompts.js';
 import { snapshotScope, unknownScope, type ScopeSnapshot, type VerificationSnapshot } from './verification-scope.js';
+import { acceptances, activeGoalEvidence, addGoalUncertainty, bindGoal, createGoal, goalBlockers, goalInput, goalOf, goalRevisionInput, goalStatus, inheritedGoalEvidence, invalidateGoal, parseGoalCommand, recordGoalEvidence, refreshGoalResolutions, saveGoal, unresolvedGoalEvents, type GoalInput } from './goals.js';
 
 interface PendingAction { verification?: VerificationSnapshot; callId?: string; id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
 export interface Frame { acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
@@ -43,6 +44,7 @@ export class Runtime {
   private runs = new Map<string, RunState>();
   private projectEdits = new Map<string,'undo'|'removal'>();
   private decisions = new Map<string, number>();
+  private closePromise?: Promise<void>;
 
   private assertAvailable(chatId: string) {
     const projectId = this.store.chat(chatId).projectId;
@@ -156,23 +158,31 @@ export class Runtime {
     this.commitSubmission(chatId, content);
   }
 
-  private commitSubmission(chatId: string, content: string, receipt?: {planId: string; planVersion: number; modeVersion: number}) {
+  async setGoal(chatId: string, input: GoalInput, revision?: {expectedRevision:number;reason:string}) {
+    const parsed=goalInput.parse(input);
+    if(revision)goalRevisionInput.parse({...parsed,...revision});
+    this.commitSubmission(chatId,`/goal ${parsed.objective}\n${parsed.acceptanceCriteria.map((text,index)=>`- ${parsed.observationCriteria?.includes(index)?'[observation] ':''}${text}`).join('\n')}`,undefined,{input:parsed,revision});
+    return goalOf(this.store,chatId)!;
+  }
+
+  private commitSubmission(chatId: string, content: string, receipt?: {planId: string; planVersion: number; modeVersion: number}, goalRequest?:{input:GoalInput;revision?:{expectedRevision:number;reason:string}}) {
     // Load before changing durable mode. Never expose speculative permissions to
     // a loop which may already hold this cached object across a provider await.
     const previous = this.load(chatId);
     const next = this.store.transaction(() => {
       if (receipt) this.store.setState(`build:${chatId}`, receipt);
-      return this.prepareSubmission(chatId, content, previous);
+      return this.prepareSubmission(chatId, content, previous,goalRequest);
     });
     if (previous?.frames.length) {
       // prepareSubmission preserves frame identities held by the active loop.
       Object.assign(previous, next);
       this.runs.set(chatId, previous);
     } else this.runs.set(chatId, next);
-    this.launch(chatId);
+    const goal=goalOf(this.store,chatId);
+    if(!goal || goal.status==='completed' || goal.status==='running' || next.planOnly && goal.status==='waiting_for_user')this.launch(chatId);
   }
 
-  private prepareSubmission(chatId: string, content: string, previous: RunState | null): RunState {
+  private prepareSubmission(chatId: string, content: string, previous: RunState | null, goalRequest?:{input:GoalInput;revision?:{expectedRevision:number;reason:string}}): RunState {
     this.assertAvailable(chatId);
 
     const chat = this.store.chat(chatId);
@@ -191,6 +201,16 @@ export class Runtime {
     if (mode !== chat.mode) this.store.updateChat(chatId, {mode, modeVersion: (chat.modeVersion ?? 0) + 1});
     this.installs?.invalidate(chatId,'USER_STEERING');
     const humanMessage = this.store.message(chatId, 'user', text);
+    const requested=goalRequest?.input??parseGoalCommand(text);
+    if(requested)createGoal(this.store,chatId,requested,humanMessage.id,goalRequest?.revision);
+    else {
+      invalidateGoal(this.store,chatId,'Human guidance changed. Fresh assignments must verify the retained requirements.');
+      const goal=goalOf(this.store,chatId);
+      if(goal && goal.status!=='completed') {
+        if(mode==='plan')goalStatus(this.store,chatId,'waiting_for_user','Planning only. Start building explicitly to authorize execution.');
+        else if(building || goal.status==='waiting_for_user' || goal.status==='waiting_for_approval')goalStatus(this.store,chatId,'running','Human guidance received; continuing within existing budgets.');
+      }
+    }
 
     if (chat.title === 'New chat') {
       this.store.updateChat(chatId, {
@@ -266,15 +286,17 @@ export class Runtime {
       .then(() => this.loop(chatId, controller.signal))
       .catch(error => {
         if (controller.signal.aborted) return;
-
+        this.store.transaction(()=>{
         for (const frame of this.load(chatId)?.frames ?? []) this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'error', 'Run stopped with an error; inspect recorded evidence.');
         this.store.updateChat(chatId, { status: 'error' });
+        goalStatus(this.store,chatId,'blocked',error instanceof Error?error.message:'Run failed; inspect evidence before explicit continuation.');
         const message = this.store.message(
           chatId,
           'system',
           error instanceof Error ? error.message : 'Run failed',
         );
         this.store.event(chatId, 'error', { message: message.content, messageId: message.id });
+        });
       })
       .finally(() => {
         this.active.delete(chatId);
@@ -298,16 +320,17 @@ export class Runtime {
       if (chat.id === excludeChatId) continue;
 
       const state = this.load(chat.id);
-      if (!state?.frames.length) continue;
-
-      state.steering.push(
+      if (!state?.frames.length) {this.store.transaction(()=>invalidateGoal(this.store,chat.id,`Workspace ${source} change: ${filename}. Fresh review is required.`));continue;}
+      this.commitRunTransition(chat.id,state,draft=>{
+      invalidateGoal(this.store,chat.id,`Workspace ${source} change: ${filename}. Fresh review is required.`);
+      draft.steering.push(
         `Workspace change notification: ${JSON.stringify({ path: filename, source })}. Re-read this file before editing. Preserve manual changes unless the requested feature requires changing them.`,
       );
 
-      state.generation++;
+      draft.generation++;
       this.installs?.invalidate(chat.id,'WORKSPACE_CHANGED');
       this.store.invalidateApprovals(chat.id);
-      this.save(chat.id, state);
+      });
 
       // A paused task stays paused; active tasks consume this at the next safe boundary.
       if (
@@ -343,8 +366,19 @@ export class Runtime {
       const state = this.load(chatId);
       if (!state?.frames.length) return;
 
-      state.steps = 0;
-      this.save(chatId, state);
+      this.store.transaction(()=>refreshGoalResolutions(this.store,chatId));
+      const goal=goalOf(this.store,chatId);
+      if(goal && (unresolvedGoalEvents(this.store,chatId,goal).length || goal.uncertaintyOverflow))throw Object.assign(new Error('Goal has unresolved uncertain effects. Resume cannot replay or reconcile them; inspect recorded evidence.'),{statusCode:409});
+      if(goal?.evidenceOverflow)throw Object.assign(new Error('Goal verification exceeded its bounded ledger; automatic continuation cannot establish acceptance.'),{statusCode:409});
+      this.commitRunTransition(chatId,state,draft=>{
+        draft.steps=0;
+        for(const frame of draft.frames)if(frame.acceptanceEvidence)frame.acceptanceEvidence=activeGoalEvidence(this.store,chatId,frame.acceptanceEvidence);
+        if(goal && goal.status!=='completed') {
+          goal.budget.turns=0;goal.budget.transitions=0;goal.budget.unchangedTurns=0;
+          goal.status=draft.planOnly?'waiting_for_user':'running';goal.reason=draft.planOnly?'Planning only; Start building is required.':'Explicit human resume; continuation budget renewed.';
+          saveGoal(this.store,chatId,goal);
+        }
+      });
       this.launch(chatId);
 
       return;
@@ -353,14 +387,16 @@ export class Runtime {
     const running = this.active.get(chatId);
     this.installs?.invalidate(chatId,'USER_CANCELLED');
 
+    this.store.transaction(()=>{
     this.store.updateChat(chatId, {
       status: action === 'pause' ? 'paused' : 'interrupted',
     });
+    goalStatus(this.store,chatId,'paused',action==='pause'?'Paused by the user. Explicit resume is required.':'Interrupted by the user. Inspect recorded effects before explicit resume.');
 
     for (const frame of this.load(chatId)?.frames ?? []) this.store.progress(chatId, frame.planStep, frame.id, 'blocked', action, 'Work stopped; completion has not been accepted.');
-    running?.controller.abort(new Error(`Task ${action} requested`));
-
     this.store.invalidateApprovals(chatId);
+    });
+    running?.controller.abort(new Error(`Task ${action} requested`));
     await running?.promise;
     const state=this.load(chatId);
     if(state)this.commitRunTransition(chatId,state,draft=>{for(const frame of draft.frames)this.cancelQueued(chatId,frame,'Cancelled before dispatch; no effect started.');});
@@ -527,9 +563,7 @@ export class Runtime {
       );
     } catch (error) {
       this.discardPrepared(chatId, state);
-      delete state.instructionsHash;
-      state.generation++;
-      this.save(chatId, state);
+      this.commitRunTransition(chatId,state,draft=>{delete draft.instructionsHash;draft.generation++;invalidateGoal(this.store,chatId,'Project instructions could not be refreshed. Fresh review is required.');});
       throw error;
     }
 
@@ -546,10 +580,11 @@ export class Runtime {
       const previouslyLoaded = state.instructionsHash !== undefined;
 
       this.discardPrepared(chatId, state);
-      state.instructionsHash = instructions.hash;
-      state.generation++;
-
+      this.commitRunTransition(chatId,state,draft=>{
+      draft.instructionsHash = instructions.hash;
+      draft.generation++;
       if (previouslyLoaded) {
+        invalidateGoal(this.store,chatId,'Project instructions changed; fresh assignments must review retained scope.');
         this.store.message(
           chatId,
           'system',
@@ -557,7 +592,7 @@ export class Runtime {
         );
       }
 
-      this.save(chatId, state);
+      });
     }
 
     return instructions;
@@ -567,7 +602,12 @@ export class Runtime {
     const state = this.load(chatId);
     if (!state?.frames.length) return;
 
-    this.store.updateChat(chatId, { status: 'running' });
+    const initialGoal=goalOf(this.store,chatId);
+    if(initialGoal && initialGoal.status!=='completed' && !state.planOnly && ['paused','blocked','waiting_for_user'].includes(initialGoal.status))return;
+    this.store.transaction(()=>{
+      this.store.updateChat(chatId, { status: 'running' });
+      if(!state.planOnly)goalStatus(this.store,chatId,'running','Continuing authorized goal work.');
+    });
 
     while (state.frames.length && !signal.aborted) {
       const unsettled = state.frames.at(-1)!;
@@ -590,7 +630,25 @@ export class Runtime {
         continue;
       }
 
-      if (++state.steps > 100) {
+      const activeGoal=goalOf(this.store,chatId);
+      if(activeGoal && activeGoal.status!=='completed') {
+        let stopped=false;
+        this.commitRunTransition(chatId,state,()=>{
+          activeGoal.budget.transitions++;
+          const exhausted=activeGoal.budget.transitions>activeGoal.budget.maxTransitions || !frame.queuedCalls?.length && activeGoal.budget.turns>=activeGoal.budget.maxTurns;
+          const stalled=!frame.queuedCalls?.length && activeGoal.budget.unchangedTurns>=activeGoal.budget.maxUnchangedTurns;
+          const uncertain=unresolvedGoalEvents(this.store,chatId,activeGoal).length>0 || activeGoal.uncertaintyOverflow;
+          if(exhausted || stalled || uncertain || activeGoal.evidenceOverflow) {
+            activeGoal.status=uncertain || activeGoal.evidenceOverflow?'blocked':'paused';
+            activeGoal.reason=activeGoal.evidenceOverflow?'Goal verification exceeded its bounded ledger. Acceptance remains unverified; inspect retained evidence.':uncertain?'An effect is uncertain. Automatic continuation and goal completion are blocked; inspect recorded evidence.':exhausted?'Goal continuation budget reached. Review progress and explicitly resume.':'Sixteen model turns without newly accepted required scope. Review progress and explicitly resume or steer.';
+            this.store.updateChat(chatId,{status:'paused'});stopped=true;
+          }
+          saveGoal(this.store,chatId,activeGoal);
+        });
+        if(stopped)return;
+      } else if (state.steps + 1 > 100) {
+        this.commitRunTransition(chatId,state,draft=>{
+        draft.steps++;
         for (const unfinished of state.frames) this.store.progress(chatId, unfinished.planStep, unfinished.id, 'blocked', 'budget', 'Task reached its safety budget; resume is required.');
         this.store.updateChat(chatId, { status: 'paused' });
         this.store.message(
@@ -598,15 +656,16 @@ export class Runtime {
           'system',
           'The task reached its 100-step safety budget. Review progress and resume to continue.',
         );
-        this.save(chatId, state);
+        });
         return;
       }
+      this.commitRunTransition(chatId,state,draft=>{draft.steps++;});
 
       const generation = state.generation;
       if (!frame.queuedCalls?.length) {
       let messages: ModelMessage[] = [
         { role: 'system', content: `${this.hooks.instructions(frame.role)}\n\n${projectInstructionsPolicy}` },
-        taskState(this.store.project(this.store.chat(chatId).projectId).path, state, frame, this.store.plan(chatId), this.store.messages(chatId).filter(message=>message.role==='user' && state.humanMessageIds?.includes(message.id))),
+        taskState(this.store.project(this.store.chat(chatId).projectId).path, state, frame, this.store.plan(chatId), this.store.messages(chatId).filter(message=>message.role==='user' && state.humanMessageIds?.includes(message.id)),goalOf(this.store,chatId),this.store.chat(chatId).modeVersion),
         instructions.message,
         ...frame.messages,
       ];
@@ -627,6 +686,7 @@ export class Runtime {
       if(preparedFrame && JSON.stringify(preparedFrame.messages)!==JSON.stringify(frame.messages))this.commitRunTransition(chatId,state,draft=>{draft.frames.find(item=>item.id===frame.id)!.messages=preparedFrame!.messages;});
       this.save(chatId,state);
       const input = {model:this.store.chatModels(chatId)[frame.role],messages,tools:publishedTools(frame.role,state.planOnly?'plan':'execute'),signal,maxTokens:this.config.maxOutputTokens,onDelta:(text:string)=>this.store.event(chatId,'delta',{role:frame.role,text})};
+      this.commitRunTransition(chatId,state,()=>{const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
       this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...promptIdentity(messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
       const completion = this.hooks.complete ? await this.hooks.complete(frame.role,input) : await this.provider.complete(input);
       signal.throwIfAborted();
@@ -657,9 +717,14 @@ export class Runtime {
         if(completion.text)this.store.message(chatId,next.role,completion.text,{agentId:next.id});
         if(!calls.length) {
           next.proseTurns=(next.proseTurns??0)+1;
-          if(next.role==='architect') {this.store.updateChat(chatId,{status:'idle'});waitForHuman=true;}
+          if(next.role==='architect') {
+            const goal=goalOf(this.store,chatId);
+            if(goal && goal.status!=='completed' && !draft.planOnly)next.messages.push({role:'user',content:'The goal remains unfinished. Continue the next useful authorized action against protected criteria and plan scope, or request_goal_completion with current reviewed evidence. Use ask_user only for a concrete missing human input.'});
+            else {this.store.updateChat(chatId,{status:'idle'});waitForHuman=true;}
+          }
           else if(next.proseTurns>=3) {
             this.store.updateChat(chatId,{status:'paused'});waitForHuman=true;
+            goalStatus(this.store,chatId,'paused',`${next.role} stopped after three text-only turns without the required native completion or verdict. Explicit continuation is required.`);
             this.store.message(chatId,'system',`${next.role} stopped after three text-only turns without a required native completion or verdict. Work remains unaccepted; review the task and resume or steer it.`);
             this.store.progress(chatId,next.planStep,next.id,'blocked','no_progress','Internal agent did not provide a native completion or verdict.');
           } else next.messages.push({role:'user',content:next.role==='critic'?'Continue the review using observed evidence; submit review_result when ready. Text is not a recorded verdict.':'Continue the assigned work using native tools, or submit_completion with observed evidence and limitations when ready. A status update does not complete the assignment.'});
@@ -685,11 +750,15 @@ export class Runtime {
         if(definition.kind==='control' && action.name!=='recommend_packages') {
           let reviewedScope:ScopeSnapshot|undefined;
           const parent=state.frames.at(-2);
-          if(action.name==='review_result' && frame.reviewKind==='completion' && parent?.role==='coder' && parent.id===frame.reviewDelegationId && parent.acceptanceEvidence?.checks.length) {
+          if(action.name==='review_result' && frame.reviewKind==='completion' && parent?.role==='coder' && parent.id===frame.reviewDelegationId && (parent.acceptanceEvidence?.checks.length || parent.assignment?.goal)) {
             const boundGeneration=state.generation, boundMode=this.store.chat(chatId).modeVersion, assignment=JSON.stringify(parent.assignment);
             reviewedScope=await snapshotScope(this.tools,this.store.project(this.store.chat(chatId).projectId).path,parent.assignment?.paths);
             signal.throwIfAborted();await this.refreshInstructions(chatId,state,signal);
             if(state.generation!==boundGeneration || state.frames.at(-1)!==frame || frame.queuedCalls?.[0]?.id!==call.id || this.store.chat(chatId).modeVersion!==boundMode || JSON.stringify(parent.assignment)!==assignment)continue;
+          }
+          if(action.name==='request_goal_completion') {
+            await this.completeGoal(chatId,state,frame,call,action,signal);
+            continue;
           }
           const outcome=await definition.handler({workspace:this.tools,context:this.toolContext(chatId,frame,signal),control:async request=>this.controlAction(chatId,state,frame,call,request,reviewedScope)},action);
           if(outcome.data==='pause')return;
@@ -868,6 +937,7 @@ export class Runtime {
           next.pending!.approvalId=pending.id;
           this.store.progress(chatId,frame.planStep,frame.id,'blocked','awaiting_approval','Waiting for approval of the exact Linux system install preview.');
           this.store.updateChat(chatId,{status:'awaiting_approval'});
+          goalStatus(this.store,chatId,'waiting_for_approval','Waiting for approval of the exact Linux system install preview.');
         });
         return false;
       }
@@ -910,6 +980,7 @@ export class Runtime {
           transition(()=>{
             this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'awaiting_approval', 'Waiting for explicit approval of the proposed action.');
             this.store.updateChat(chatId, { status: 'awaiting_approval' });
+            goalStatus(this.store,chatId,'waiting_for_approval','Waiting for explicit approval of the proposed action.');
           });
           return false;
         }
@@ -1185,6 +1256,11 @@ export class Runtime {
 
         frame.evidenceEventIds = [...(frame.evidenceEventIds ?? []), toolEvent.id].slice(-100);
         recordAssignmentEvidence(frame, pending.action, result, toolEvent.id, pending.verification);
+        recordGoalEvidence(this.store,chatId,frame);
+        // Install recommendations can originate from the architect as well.
+        if(pending.action.name==='recommend_packages' && ((result.data as {uncertain?:boolean;recoveryRequired?:boolean;state?:string}|undefined)?.uncertain || (result.data as {recoveryRequired?:boolean}|undefined)?.recoveryRequired || (result.data as {state?:string}|undefined)?.state==='uncertain')) {
+          const goal=goalOf(this.store,chatId);if(goal){addGoalUncertainty(this.store,chatId,goal,[toolEvent.id]);saveGoal(this.store,chatId,goal);}
+        }
         this.store.progress(chatId, frame.planStep, frame.id, result.ok && !signal.aborted ? 'in_progress' : 'blocked', signal.aborted ? 'stopped' : result.ok ? 'working' : 'failed', outcome, toolEvent.id);
 
         if (result.ok && pending.action.name === 'write_file') {
@@ -1244,6 +1320,59 @@ export class Runtime {
     state.frames.push(critic);
   }
 
+  private observationEvidence(chatId:string,frame:Pick<Frame,'id'|'evidenceEventIds'|'assignment'>,reviewer?:Frame) {
+    const ids=[...(frame.evidenceEventIds??[]),...(reviewer?.evidenceEventIds??[])];
+    if(!ids.length || frame.assignment?.evidenceKind!=='observation')return false;
+    const events=this.store.db.prepare("SELECT id,data FROM events WHERE chat_id=? AND type='tool' AND json_extract(data,'$.agentId')=?").all(chatId,frame.id).map(row=>({id:Number(row.id),data:JSON.parse(String(row.data)) as {action?:Action;result?:ToolResult}}));
+    return events.length>0 && events.every(({data:event})=>!!event.action && readTools.has(event.action.name) && (!event.result || event.result.ok)) &&
+      events.some(event=>ids.includes(event.id) && event.data.result?.ok===true);
+  }
+
+  private async completeGoal(chatId:string,state:RunState,frame:Frame,call:NativeToolCall,action:Action,signal:AbortSignal) {
+    const goal=goalOf(this.store,chatId),plan=this.store.plan(chatId),modeVersion=this.store.chat(chatId).modeVersion;
+    if(!goal || goal.status!=='running' || state.planOnly || action.args.goalId!==goal.id || action.args.goalRevision!==goal.revision || action.args.planId!==plan.id || action.args.planVersion!==plan.version || action.args.modeVersion!==modeVersion)throw new Error('Completion request has stale goal, plan or mode revisions, or goal execution is not running.');
+    const blockers=goalBlockers(this.store,chatId,goal,plan);
+    if(blockers.length)throw new Error(`Goal completion rejected: ${blockers.join('\n')}`);
+    const ids=action.args.reviewEventIds as number[];
+    if(new Set(ids).size!==ids.length || ids.length!==goal.reviews.length || goal.reviews.some(review=>!ids.includes(review.eventId)))throw new Error('Completion must reference exactly the current recorded accepted review IDs.');
+    const generation=state.generation,goalGeneration=goal.generation;
+    const bound=()=> {
+      signal.throwIfAborted();
+      const current=goalOf(this.store,chatId),currentPlan=this.store.plan(chatId);
+      if(state.generation!==generation || state.frames.at(-1)!==frame || frame.queuedCalls?.[0]?.id!==call.id || state.steering.length || state.planOnly || current?.id!==goal.id || current.revision!==goal.revision || current.generation!==goalGeneration || current.status!=='running' || currentPlan.id!==plan.id || currentPlan.version!==plan.version || this.store.chat(chatId).modeVersion!==modeVersion)throw new Error('Goal completion changed during evidence checks; request current bindings again.');
+    };
+    const records=acceptances(this.store,chatId),deadline=Date.now()+5000;
+    for(const review of goal.reviews) {
+      bound();
+      const record=records.find(item=>item.reviewEventId===review.eventId && item.goalId===goal.id && item.revision===goal.revision && item.generation===goalGeneration && item.frame.id===review.delegationId);
+      if(!record)throw new Error('Goal review has no matching private original assignment/evidence binding.');
+      const evidence=inheritedGoalEvidence(this.store,chatId,record.frame);
+      const checkFrame={...record.frame,messages:[],role:'coder',repairs:0,acceptanceEvidence:evidence} as Frame;
+      if(record.frame.assignment?.evidenceKind==='observation') {
+        if(!this.observationEvidence(chatId,record.frame) || assignmentBlockers(checkFrame).length)throw new Error('Observation assignment contains effects or unresolved verification; it cannot waive workspace evidence.');
+        continue;
+      }
+      if(Date.now()>deadline)throw new Error('Goal freshness checks exceeded the five-second aggregate bound. Use smaller explicit scopes.');
+      const snapshot=await snapshotScope(this.tools,this.store.project(this.store.chat(chatId).projectId).path,record.frame.assignment?.paths);
+      bound();
+      if(Date.now()>deadline || snapshot.status!=='observed' || snapshot.digest!==record.scope.digest)throw new Error('Accepted goal evidence is stale or scope is unknown. Reinspect and review the affected required work.');
+      refreshAssignmentEvidence(checkFrame,snapshot);
+      if(assignmentBlockers(checkFrame).length)throw new Error('Recorded assignment verification no longer supports goal completion.');
+    }
+    await this.refreshInstructions(chatId,state,signal);bound();
+    this.commitRunTransition(chatId,state,draft=>{
+      bound();
+      const current=goalOf(this.store,chatId)!;
+      if(goalBlockers(this.store,chatId,current,this.store.plan(chatId)).length)throw new Error('Goal requirements changed before completion commit.');
+      const next=draft.frames.find(item=>item.id===frame.id)!;
+      this.resolveCall(chatId,next,call.id,{ok:true,output:'Goal completed against recorded scoped evidence and accepted reviews. This is not proof of unobserved requirements or external effects.'});
+      const event=this.store.event(chatId,'goal_completed',{goalId:current.id,goalRevision:current.revision,planId:plan.id,planVersion:plan.version,modeVersion,reviewEventIds:ids});
+      current.status='completed';current.reason='All protected requirements have current reviewed observed evidence. Unobserved scope and external races are not proven.';
+      current.completion={eventId:event.id,planId:plan.id!,planVersion:plan.version!,reviewEventIds:ids};saveGoal(this.store,chatId,current);
+      draft.frames.pop();this.store.updateChat(chatId,{status:'idle'});
+    });
+  }
+
   private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot):ToolResult {
     let paused=false;
     this.commitRunTransition(chatId,state,draft=>{
@@ -1255,7 +1384,7 @@ export class Runtime {
           resolve('Waiting for user information.');
           this.store.message(chatId,'architect',String(action.args.question));
           this.store.progress(chatId,frame.planStep,frame.id,'blocked','awaiting_user',String(action.args.question).slice(0,2000));
-          this.store.updateChat(chatId,{status:'paused'});paused=true;break;
+          this.store.updateChat(chatId,{status:'paused'});goalStatus(this.store,chatId,'waiting_for_user',String(action.args.question));paused=true;break;
         case 'set_plan': {
           const plan=this.store.revisePlan(chatId,{phases:action.args.phases as import('../shared/types.js').PlanPhase[]});
           resolve(`Plan saved at revision ${plan.version}. Runtime evidence controls completion.`,plan);break;
@@ -1263,11 +1392,16 @@ export class Runtime {
         case 'delegate': {
           const reference=action.args.planStep as PlanStepRef|undefined;
           if(reference&&!this.store.planStep(chatId,reference))throw new Error('Plan step is stale or missing; use the current plan identity and version');
+          const goalReference=action.args.goal as GoalRef|undefined;
+          const goal=bindGoal(this.store,chatId,goalReference);
+          if(goal && !reference)throw new Error('Goal assignments need an exact current plan step.');
+          if(goal && action.args.evidenceKind==='observation' && goalReference!.criterionIds.some(id=>goal.criteria.find(item=>item.id===id)?.evidenceKind!=='observation'))throw new Error('Only explicitly observational human criteria allow observation-only evidence; mixed assignments require workspace verification.');
           const objective=String(action.args.objective);
-          const assignment: Assignment = { objective, acceptanceCriteria: action.args.acceptanceCriteria as string[], paths: action.args.paths as string[]|undefined, planStep: reference };
+          const assignment: Assignment = { objective, acceptanceCriteria: action.args.acceptanceCriteria as string[], paths: action.args.paths as string[]|undefined, planStep: reference, goal:goal?goalReference:undefined, evidenceKind:action.args.evidenceKind as Assignment['evidenceKind'] };
           const humanIds=new Set(draft.humanMessageIds);
           const coder=this.frame('coder',[assignmentMessage(assignment,this.store.messages(chatId).filter(message=>message.role==='user' && humanIds.has(message.id)))],objective);
           coder.assignment=assignment;coder.planStep=reference;coder.scope=assignment.paths;coder.shellId='coder-primary';
+          if(goal)coder.acceptanceEvidence=inheritedGoalEvidence(this.store,chatId,coder);
           resolve('Coder delegated; result will follow independent review.',{delegationId:coder.id});
           draft.frames.push(coder);
           const event=this.store.event(chatId,'delegation',{objective,delegationId:coder.id,planStep:reference});
@@ -1284,7 +1418,7 @@ export class Runtime {
             const parent=draft.frames.at(-2);
             if(parent?.role==='coder' && parent.id===frame.reviewDelegationId)refreshAssignmentEvidence(parent,reviewedScope);
           }
-          this.finishReviewInternal(chatId,draft,action.args.verdict==='pass',action.args.findings as string[]);break;
+          this.finishReviewInternal(chatId,draft,action.args.verdict==='pass',action.args.findings as string[],reviewedScope);break;
         case 'submit_completion': {
           const summary=String(action.args.summary);
           if(!frame.messages.at(-1)?.content)this.store.message(chatId,frame.role,summary,{agentId:frame.id});
@@ -1294,6 +1428,8 @@ export class Runtime {
             this.store.progress(chatId,frame.planStep,frame.id,'in_progress','reviewing','Coder reported completion; independent review is pending.');
             const critic=this.frame('critic',[reviewMessage('completion',frame,'Review this completed coder task before accepting it.')],frame.objective);
             critic.assignment=frame.assignment;critic.reviewKind='completion';critic.reviewDelegationId=frame.id;draft.frames.push(critic);
+          } else if(goalOf(this.store,chatId)?.status !== 'completed' && goalOf(this.store,chatId) && !draft.planOnly) {
+            frame.messages.push({role:'user',content:'Frame completion does not complete this durable goal. Continue remaining required scope, or use request_goal_completion with current goal/plan/mode revisions and recorded accepted reviews.'});
           } else draft.frames.pop();
           break;
         }
@@ -1303,7 +1439,7 @@ export class Runtime {
     return {ok:true,output:'Control transition committed.',...(paused?{data:'pause'}:{})};
   }
 
-  private finishReviewInternal(chatId: string, state: RunState, passed: boolean, findings: string[]) {
+  private finishReviewInternal(chatId: string, state: RunState, passed: boolean, findings: string[],reviewedScope?:ScopeSnapshot) {
     const reviewer = state.frames.pop();
     const parent = state.frames.at(-1);
 
@@ -1323,7 +1459,13 @@ export class Runtime {
     }
 
     if (parent?.role === 'coder') {
+      recordGoalEvidence(this.store,chatId,parent);
       const blockers = assignmentBlockers(parent);
+      const goal=goalOf(this.store,chatId), binding=parent.assignment?.goal;
+      const goalBound=!!goal && goal.status!=='completed' && binding?.goalId===goal.id && binding.goalRevision===goal.revision && !!parent.planStep;
+      const observation=parent.assignment?.evidenceKind==='observation' && this.observationEvidence(chatId,parent,reviewer);
+      if(parent.assignment?.evidenceKind==='observation' && !observation)blockers.push('Observation-only acceptance is disqualified by missing/failed read evidence or an attempted effect. Request a workspace assignment if current source verification is needed.');
+      if(binding && (!goalBound || !observation && reviewedScope?.status!=='observed'))blockers.push('Goal assignment binding or observed workspace scope is missing/stale.');
       // The critic's raw verdict remains in its review event. Runtime acceptance
       // cannot turn recorded failures/uncertainty into successful verification.
       const matching = reviewer?.reviewDelegationId === parent.id && parent.final !== undefined && !state.planOnly;
@@ -1332,6 +1474,17 @@ export class Runtime {
       const assessment = [...blockers, ...(!observed ? ['No recorded tool evidence supports assignment acceptance.'] : []), ...findings];
       if (matching) {
         this.store.progress(chatId, parent.planStep, parent.id, accepted && observed ? 'done' : 'blocked', accepted && observed ? 'accepted' : passed ? 'missing_evidence' : 'changes_requested', !observed && passed ? 'Review passed without recorded tool evidence; step completion remains unverified.' : assessment.join('\n').slice(0,2000) || (accepted ? 'Coder completion accepted by independent critic.' : 'Review requires changes.'), reviewEvent.id);
+      }
+      if(accepted && goalBound && parent.planStep && binding && goal) {
+        const previous=goal.reviews.find(review=>review.planStep.phaseId===parent.planStep!.phaseId && review.planStep.stepId===parent.planStep!.stepId);
+        goal.reviews=goal.reviews.filter(review=>review!==previous);
+        goal.reviews.push({eventId:reviewEvent.id,delegationId:parent.id,criterionIds:binding.criterionIds,planStep:parent.planStep,evidenceEventIds:[...(parent.evidenceEventIds??[]),...(reviewer?.evidenceEventIds??[])]});
+        if(!previous)goal.budget.unchangedTurns=0;
+        const records=acceptances(this.store,chatId).filter(record=>record.generation===goal.generation && record.reviewEventId!==previous?.eventId);
+        // Archive only bounded original assignment/evidence, not transcripts.
+        records.push({reviewEventId:reviewEvent.id,goalId:goal.id,revision:goal.revision,generation:goal.generation,frame:{id:parent.id,assignment:parent.assignment,planStep:parent.planStep,evidenceEventIds:parent.evidenceEventIds},scope:observation?unknownScope('Historical read-only observation; no source freshness claim.'):reviewedScope!});
+        this.store.setState(`goal-evidence:${chatId}`,records);
+        saveGoal(this.store,chatId,goal);
       }
       if ((!passed || blockers.length > 0) && parent.repairs++ < 2 && !parent.acceptanceEvidence?.uncertainEventIds.length && !parent.acceptanceEvidence?.overflow) {
         delete parent.final;
@@ -1386,7 +1539,9 @@ export class Runtime {
     return {id:next};
   }
 
-  async close() {
+  close():Promise<void> {return this.closePromise??=this.closeInternal();}
+
+  private async closeInternal() {
     this.installs?.beginClose();
     for (const item of this.active.values()) {
       item.controller.abort();
@@ -1395,6 +1550,13 @@ export class Runtime {
     await Promise.all(
       [...this.active.values()].map(item => item.promise),
     );
+    this.store.transaction(()=>{for(const chat of this.store.chats()) {
+      const goal=goalOf(this.store,chat.id);
+      if(goal?.status==='running' || goal?.status==='waiting_for_approval') {
+        goalStatus(this.store,chat.id,'paused','Backend closed. Explicit resume is required; no launch execution is authorized.');
+        this.store.updateChat(chat.id,{status:'paused'});
+      }
+    }});
     await this.installs?.close();
   }
 }

@@ -6,6 +6,7 @@ import { Store } from './store.js';
 import { PackageHelperClient, PackageHelperError, helperCanonical, helperProtocol } from './package-helper.js';
 import { checkedRecord, targetSchema } from './install-validation.js';
 import { packageRecommendation, reviewInstall } from './install-review.js';
+import type { InstallRecoveryReceipt } from './goals.js';
 
 export type InstallHelper = Pick<PackageHelperClient,'hello'|'prepare'|'authorize'|'execute'|'status'|'reconcile'>;
 const key = 'system-installs:v1';
@@ -191,7 +192,14 @@ export class InstallService {
       const {client,target}=await this.discover();
       if(helperCanonical(target)!==helperCanonical(item.settings.target))throw conflict('Original Linux target is unavailable; retain its recovery history');
       const record=checkedRecord(await this.track(reconcile?client.reconcile(id):client.status(id)),item);
-      this.acceptOutcome(item,record,reconcile);
+      this.store.transaction(()=>{
+        const current=this.store.install(id);
+        if(current.updatedAt!==item.updatedAt || current.state!==item.state || current.previewDigest!==item.previewDigest || helperCanonical(current.settings.target)!==helperCanonical(item.settings.target) || helperCanonical(this.settings().target)!==helperCanonical(target) || helperCanonical(current.recommendation)!==helperCanonical(item.recommendation))throw conflict('Install recovery binding changed before persistence');
+        this.acceptOutcome(item,record,reconcile);
+        const event=this.store.event(item.chatId,'install_reconciliation',{installId:id,method:reconcile?'reconcile':'status',state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true});
+        const receipt:InstallRecoveryReceipt={installId:id,chatId:item.chatId,targetKey:helperCanonical(target),previewDigest:record.previewDigest,method:reconcile?'reconcile':'status',eventId:event.id,state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true};
+        this.store.setState(`install-reconciliation:${id}`,receipt);
+      });
       return this.store.install(id);
     } catch { throw conflict('Helper outcome is unavailable; original recovery gate is retained'); }
     finally {this.recovering.delete(id);}
