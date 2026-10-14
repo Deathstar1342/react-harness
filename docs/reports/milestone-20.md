@@ -1,6 +1,26 @@
 # Milestone 20 — Electron application and guided setup
 
-Implementation candidate on isolated `codex/milestone-20`, base `a22d25ddc8814a8f804022680e3cf0056c2b0f66`. **M20 acceptance remains incomplete** pending the explicit platform/manual gates below. Tested source/test/procedure SHA: **`b70aa676b7fee9d90bc74b143739b80235fdf8e5`**; subsequent delivery commits update only this report. No main integration, M21 installer/release work, earlier worktree or `init_test` changes. Coordinator approved dependency/security contracts, provider endpoint extension and trusted staging boundary.
+Implementation candidate on isolated `codex/milestone-20`, base `a22d25ddc8814a8f804022680e3cf0056c2b0f66`. **M20 acceptance remains incomplete** pending the explicit platform/manual gates below. The initial tested candidate **`b70aa676b7fee9d90bc74b143739b80235fdf8e5`** and its evidence remain preserved. Independent-review corrections are described separately below. No main integration, M21 installer/release work, earlier worktree or `init_test` changes. Coordinator approved dependency/security contracts, provider endpoint extension, trusted staging boundary and these bounded lifecycle/editor corrections.
+
+## Independent review corrections
+
+Coordinator reproduced two defects in the initial candidate despite its green checks: an acknowledged shutdown could wait forever after backend cleanup failed, and edits during awaited startup/cleanup could be lost on window replacement/close. The earlier green candidate is not evidence that these cases worked.
+
+`BackendLifecycle.onFailure` now emits an instance-bound, bounded private stdout notice through the owned backend process. Controller observes it independently of HTTP listener availability, marks failure and rejects the close wait while retaining the exact child/ownership. Repeated close checks remain actionable and do not reset a cached failed lifecycle to `stopping`. Legitimate drain has no arbitrary completion timeout or kill. Tests use real Fastify/HMAC lifecycle with a synthetic owned child stream: failure after acknowledgement, failure after HTTP listener closure, repeated failed close, continued drain and eventual actual exit notification. Existing uncertainty/drain regressions remain intact.
+
+Main now owns document epochs, edit revisions and serialized transition tickets. The preload acknowledges pausing document input before startup/cleanup; editor changes publish dirty state synchronously, not only through later React effects. Native confirmation and final replacement/close each revalidate the original document/edit revision. The public status keeps the old committed session and selection while a newly prepared backend is inaccessible to the old document. A late edit vetoes replacement, preserves the old editor, and drains the quarantined backend without discarding failed ownership. Exact current main-frame sender identity rejects stale same-origin frames. Private `transitioning` status and freeze acknowledgements are additive desktop-only contracts; public lifecycle proofs and API routes are unchanged.
+
+Local checks after these changes: typecheck, desktop build and real Windows shell/crash/restart passed; full Windows suite **614 passed / 33 skipped**. Linux test-harness failures remain preserved: [38518634381](https://github.com/Deathstar1342/react-harness/actions/runs/38518634381) rejected dynamic import in Playwright's evaluated VM; [38518824015](https://github.com/Deathstar1342/react-harness/actions/runs/38518824015) passed delayed-close preservation but timed out in the new start fixture; diagnostic [38519305436](https://github.com/Deathstar1342/react-harness/actions/runs/38519305436) exposed `Resulting promise was garbage collected` in the Inspector evaluation before startup assertions. Delay barriers now live in normal module scope exclusively in `tests/desktop-electron-entry.cjs`, coordinated by fixed markers in the disposable test home. The launcher is not shipped. No test bypass was added to production IPC or startup.
+
+Corrected source candidate: **`aa655b7a00b3ebb21874aff0a16d8f75a97b8fb4`**. Production corrections are `c6e3c935ad59f436dc502740d3cc0e71c8ee961e` and `5d072eb12eddb50c13fd50aadc54dad84e199280`; subsequent commits refine test fixtures and documentation.
+
+| Corrected gate | Exact evidence | Result |
+| --- | --- | --- |
+| Linux full validation | [38520016203](https://github.com/Deathstar1342/react-harness/actions/runs/38520016203) | Typecheck/build, **643 passed / 4 skipped**, including real Linux PTY/sandbox checks |
+| Windows and Ubuntu real Electron | [38520016285](https://github.com/Deathstar1342/react-harness/actions/runs/38520016285) | Both matrix jobs passed, including the new Linux delayed-start and delayed-close regressions |
+| Actual privileged helper | [38520016342](https://github.com/Deathstar1342/react-harness/actions/runs/38520016342) | Existing real service/install/repair/removal gates and M20 data-only staging plus actual pkexec adapter passed |
+
+The real Linux desktop test held successful startup before main committed it, crossed the actual React status-poll interval, and verified the same Monaco element remained attached, the old public session stayed published, the document was inert, and the API returned 503. A late dirty notification then rejected replacement, drained the prepared backend, preserved the old document, and thawed input. A separate delayed-cleanup check injected a late edit after actual backend shutdown and verified the window stayed open and a subsequent explicit close succeeded. Existing same-profile and two-profile restart, controller migration, renderer recovery, authentication, SSE, editor/save and synthetic provider checks all passed again. These automated scenarios supplement the lifecycle tests; they do not replace the manual platform gates below.
 
 ## Current implementation and review contract
 
@@ -20,9 +40,9 @@ Provider settings add an optional public `baseUrl` and bounded HTTP(S) patch fie
 
 Helper first-time staging uses an administrator-installed **data-only .deb scaffold**, with no maintainer scripts. M21 owns final packages, signing and release. Missing root-owned helper code is an actionable prerequisite. The desktop adapter invokes only root-owned M18 launcher operations through `pkexec`, after native confirmation, with no password/command IPC. Signed hello/installation identity checks follow setup/repair; removal checks expected code/credential/unit/socket absence. Audit, installed packages and user data remain. A missing graphical OS authentication agent (including WSL environments without one) is reported; the application never installs/reconfigures it.
 
-## Verification and retained failed evidence
+## Initial candidate verification and retained failed evidence
 
-All three workflows passed on the exact source SHA above:
+All three workflows below passed on the initial `b70aa67` source SHA:
 
 | Gate | Exact evidence | Result |
 | --- | --- | --- |
