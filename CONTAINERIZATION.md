@@ -1,5 +1,7 @@
 # Containerization: deferred design notes
 
+Update (2026-10-13): the selected desktop planning direction is Electron with Linux process sandboxing and a setup-installed package helper, without Docker or SSHFS. See [EXE.md](EXE.md) and M16–M21 in [milestones](docs/milestones.md). The alternatives below remain historical/deferred; they are not the selected import or execution model.
+
 Status: **On hold at the user's request, 2026-10-13.** This document preserves the discussion; it does not authorize implementation, add a milestone, or change current import behavior. The approved M13–M15 sequence continues separately. Desktop packaging is also deferred; see [EXE.md](EXE.md).
 
 ## Goals and current baseline

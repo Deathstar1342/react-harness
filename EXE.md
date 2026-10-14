@@ -1,16 +1,51 @@
-# Desktop executable packaging: deferred design notes
+# Desktop application and sandboxing plan
 
-Status: **On hold at the user's request, 2026-10-13.** Record of proposed approaches, not an approved implementation milestone or a claim that installers exist. The approved M13–M15 sequence continues. Container deployment is also on hold; see [CONTAINERIZATION.md](CONTAINERIZATION.md).
+Status: **Milestone plan requested, 2026-10-13; implementation not dispatched.** User selected Electron, Docker-free process sandboxing and a privileged package-install helper provisioned during setup. System installs have separate Ask every time / Auto-approve / AI review policies. [M16–M21](docs/milestones.md#planned-m16m21-desktop-sequence-2026-10-13) defines the sequential implementation and review gates. Existing M12–M15 is delivered; check-ins remain paused while planning. Container deployment stays deferred; see [CONTAINERIZATION.md](CONTAINERIZATION.md).
+
+## Selected direction
+
+```text
+Electron window (existing React UI)
+  -> trusted non-root backend (chats, provider key, approval policy)
+       -> sandboxed Linux PTY / Python / test processes
+          selected project + private dependencies/cache; no app secrets
+       -> authenticated package-install helper (elevated)
+          one exact authorized package transaction in selected Linux environment
+```
+
+The privileged helper is installed with OS authorization during guided setup. Ordinary agent shells never gain its identity, token, socket or root privileges. The reviewer model can return a recommendation; the backend validates it against policy, and the helper independently validates its narrow request. Package-manager scripts belonging to approved packages can run with system privileges, so approved system installation is a deliberate exception to sandbox confinement, not a promise of harmless package contents.
+
+The first release planning baseline is Windows x64 Electron with a selected Ubuntu/Debian WSL2 backend plus native Linux x64 on a supported Ubuntu/Debian release. Start with `apt`; future package managers use explicit adapters. Native Windows command execution/host installers, macOS, ARM and SSHFS are outside this sequence. Exact supported versions are frozen from release evidence. The setup UI must distinguish Windows installation from the Linux/WSL environment modified by a package request.
+
+Bubblewrap is the proposed Linux process-boundary implementation. No Docker daemon, image-per-project lifecycle or project copying is planned. It still uses Linux namespace mechanisms, and policy configuration determines isolation. Sandbox support must be verified on target WSL/distributions; failure must never silently fall back to unrestricted host execution. Existing file-tool guards remain useful, but today's ordinary PTY is not already a sandbox.
+
+Expose only selected project paths and private writable caches/home/temp; mount necessary system tools read-only. Keep app data/keys, personal files, privileged sockets, WSL interoperability and other project paths outside the boundary. Network access for dependencies needs its own constrained policy, especially to prevent access to the local backend/helper. Project-local venv/node_modules avoids global installs but is not a substitute for the OS boundary. No shell-string filtering or environment-variable convention counts as isolation proof.
+
+## System-install policy
+
+Settings places **System installs** directly below workspace approval controls. It is independent, including when workspace mode is Approve all:
+
+| Setting | Decision path |
+| --- | --- |
+| Ask every time (default) | Human reviews concrete target, packages/dependencies, impact and reason |
+| Auto-approve | Backend automatically approves only supported requests passing deterministic helper policy |
+| AI review | Fresh bounded STARK call evaluates curated evidence; valid approve/reject/ask decision, otherwise ask the user |
+
+The separate install-reviewer model is selectable and initially defaults to the critic model. Snapshot its ID with policy/target/preview for each request; never silently re-review or execute a stale request after settings change. Package requests remain advisor-style structured recommendations, compatible with ordinary Chat Completions. The reviewer receives neither tools nor administrator credentials. Planning mode cannot install packages under any of these policies.
+
+The helper accepts structured package identities and validated versions for a specific target, not executable paths, shell text or arbitrary package-manager flags. Repository changes, downloaded scripts, removals, downgrades and whole-system upgrades require separately scoped future actions. Preview and authorization must account for dependency changes; installed state, actual outcome and uncertainty are recorded. A used/expired/stale authorization cannot be replayed. Package-manager interruption may leave partial system changes and must be reconciled explicitly.
+
+Setup requests normal OS authentication to register a root-owned, narrow helper and authorized application principal. Passwords never pass through model/UI state or ordinary logs. Declining/cancelling setup disables system installs while retaining ordinary safe functionality. Upgrades and uninstall must verify helper identity, permissions and protocol compatibility; the agent never receives unrestricted passwordless sudo. Root helper code and every runtime/library it loads must be protected from normal-user and project writes.
 
 ## Desired experience
 
 Download/install the application, launch it normally, select a project with a native folder picker, configure STARK in Settings, and chat. Users should not need to open a terminal and run `npm install` or `npm start` for ordinary use. Preserve the existing dark, chat-centered interface.
 
-Windows uses an application executable and installer. Linux also has native executables and desktop launchers; candidate distributions include a `.deb` package or AppImage. Exact package formats, CPU architectures and supported distributions remain undecided and require target-device testing.
+Windows uses an application executable and installer. The first Linux distribution format is a `.deb` package with a desktop launcher. x64 is the initial architecture; exact supported OS/distribution versions require target-device testing. AppImage and additional architectures are deferred.
 
 ## Candidate architecture: Electron launcher and existing application
 
-Electron is the leading proposal because the existing UI is React and the backend is Node/TypeScript. Reuse the product interface and server logic rather than rewriting them for a native toolkit. This choice is tentative; no Electron dependency or wrapper has been introduced.
+Electron is the selected planning direction because the existing UI is React and the backend is Node/TypeScript. Reuse the product interface and server logic rather than rewriting them for a native toolkit. No Electron dependency or wrapper has been introduced yet.
 
 The desktop shell would own native folder selection, opening the application window, backend health/readiness, start/stop coordination, and any approved host-side import helper. The UI should appear when ready and show a useful startup failure if its backend cannot start.
 
@@ -20,17 +55,17 @@ Keep privileged filesystem/process operations in a narrow host interface. Use an
 
 | Mode | Desktop responsibilities | Remaining work |
 | --- | --- | --- |
-| Packaged local backend | Launch bundled compatible backend/runtime and show UI | Native dependency builds, lifecycle, platform shell support |
-| WSL backend on Windows | Launch/connect to a supported WSL backend | Distribution selection, path conversion, setup and lifecycle |
-| Container backend | Detect Docker, start application containers and show UI | Mounts, persistent state, Docker availability and selected import design |
+| Native Linux backend | Launch bundled compatible backend/runtime and show UI | Native dependency builds, sandbox/helper setup, lifecycle |
+| WSL backend on Windows | Launch/connect to selected supported WSL2 backend | Distribution selection, path conversion, authenticated transport and lifecycle |
+| Container backend (deferred) | Not part of M16–M21 | Earlier alternatives retained only in CONTAINERIZATION.md |
 
 Containerization and executable packaging are separate choices. A desktop application need not require Docker. If the container approach is chosen, the executable can primarily be a launcher and host integration layer.
 
-Do not assume Electron's embedded Node version satisfies the backend contract. The application requires Node 24+ and `node:sqlite`; PTYs use the optional `node-pty` dependency. Decide whether to ship a separate Node backend process, package compatible native modules for Electron, or use the WSL/container backend. Validate exact runtime/ABI compatibility. A packaged React window alone is not a working backend distribution.
+Do not assume Electron's embedded Node version satisfies the backend contract. The application requires Node 24+ and `node:sqlite`; PTYs use the optional `node-pty` dependency. Plan a separate compatible packaged backend runtime with native modules built for that runtime/platform; WSL uses Linux artifacts. Validate exact runtime/ABI compatibility. A packaged React window alone is not a working backend distribution.
 
 The current supported backend direction is Linux/WSL. A native Windows executable does not automatically make shell commands, PTYs or project toolchains Windows-compatible. Choose and label the execution environment explicitly.
 
-## Docker prerequisite versus bundling
+## Earlier Docker discussion (not selected)
 
 The user said work users can install Docker. The discussed preference was to treat it as an explicit prerequisite if the container mode is selected, with a friendly detection/setup screen and official installation links.
 
@@ -51,15 +86,16 @@ Installation files, application state and project folders must be separate. Use 
 - An update must not interrupt an executing file mutation or shell command silently. Shutdown/recovery must retain uncertain outcomes rather than claiming success or replaying actions.
 - Uninstall should preserve user projects and saved data by default; any data removal needs a distinct explicit choice and exact scope.
 
-## Proposed work if resumed
+## Milestone sequence
 
-1. Decide target OS/runtime, installer formats and whether Docker is required.
-2. Implement and test stable data-location migration before distributing an installer.
-3. Prototype a launcher with backend start/health/shutdown and native folder selection using disposable state.
-4. Integrate the selected direct-import or managed-copy flow; do not silently change current project semantics.
-5. Produce repeatable platform builds, define signing/update policy, and test installation, upgrade and uninstall on clean target machines.
+1. **M16:** Stable app data, legacy migration and backend ownership/lifecycle.
+2. **M17:** Sandboxed Linux execution and project-local dependencies.
+3. **M18:** Structured, authenticated privileged package helper and setup entrypoints.
+4. **M19:** Independent system-install policies, Settings, AI reviewer and install history.
+5. **M20:** Electron shell, native imports, guided setup and helper provisioning.
+6. **M21:** Windows/Linux installers, upgrades/uninstall and clean-machine acceptance.
 
-This is a future investigation sequence, not additional approved numbered milestones. No executable generation, packaging dependency, installer, Docker setup or update service is authorized by this document.
+This is the requested milestone plan, not a report of implementation. No worker is dispatched and no helper/system component is installed during planning. Detailed path ownership, contracts, dependency order, acceptance and coordinator handoff are in docs/milestones.md. Native folder imports continue editing originals in place; managed copies remain a deferred alternative.
 
 ## Acceptance evidence needed
 
@@ -69,6 +105,9 @@ Keep automated build success separate from installed-device, browser/native inte
 
 ## References
 
+- [Electron security and IPC guidance](https://www.electronjs.org/docs/latest/tutorial/security)
+- [Bubblewrap policy and limitations](https://github.com/containers/bubblewrap)
+- [WSL systemd support](https://learn.microsoft.com/en-us/windows/wsl/systemd)
 - [Electron distribution overview](https://www.electronjs.org/docs/latest/tutorial/distribution-overview)
 - [Electron Forge distribution](https://www.electronjs.org/docs/latest/tutorial/forge-overview)
 - [Docker Desktop installation on Windows](https://docs.docker.com/desktop/setup/install/windows-install/)

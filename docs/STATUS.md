@@ -1,5 +1,12 @@
 # Coordinator status
 
+## Desktop planning — 2026-10-13 (current)
+
+- User requested milestones for Electron, Docker-free Linux sandboxing and a narrow privileged system-install helper provisioned during setup. Separate Ask every time / Auto-approve / AI review policy appears below workspace approvals. See root `EXE.md` and planned M16–M21 in `docs/milestones.md`.
+- Planning baseline is main `57b2099`, preserving the user's `44adaf1` prompt changes and restored planStep guidance. M16 durable app home; M17 sandbox; M18 helper; M19 install policies/reviewer; M20 Electron/setup; M21 installers/release. Proposed first release: Windows x64 with Ubuntu/Debian WSL2 backend and native Linux x64; apt first, explicit future adapters.
+- **Planning only: no child dispatched, heartbeat remains PAUSED, no dependencies or helper installed.** On implementation start use sequential `Milestone x` chats in isolated codex/ worktrees, independent coordinator review, integration/tests, GitHub-main publication and applicable exact CI before each successor. Resume 15-minute monitoring then; pause for genuine user assistance or final delivery.
+- This supersedes the earlier executable-packaging hold for planning only. Docker/SSHFS, native Windows host command/package execution, macOS/ARM and unrelated work remain deferred. Do not alter the completed M12–M15 records or claim sandbox/helper/desktop functionality already exists.
+
 ## Active sequence — 2026-10-13 (supersedes historical status below)
 
 - **M12–M15 delivered on GitHub main.** M15 merge `aad4134168e4abdfeac4d9884e07f248130210b5`, published integration `141d8f4a4bba664bc40f1f608baf213fb35acf94`; exact Linux CI passed: https://github.com/Deathstar1342/react-harness/actions/runs/38375035736 . All child chats are idle; preserve their worktrees. Earlier preparation/review notes below are historical and superseded by this delivery.
