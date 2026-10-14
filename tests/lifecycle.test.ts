@@ -128,4 +128,3 @@ it('retains actual ownership during a hanging or failed close',async()=>{
   await original();release();await closing;
   const lock=new ProfileOwnership(t.home);lock.close();
 });
-
