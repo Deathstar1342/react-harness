@@ -40,7 +40,7 @@ def trusted_file(p):
     for parent in p.parents:
         s = parent.lstat()
         if not stat.S_ISDIR(s.st_mode) or s.st_uid != 0 or s.st_mode & 0o022:
-            raise RuntimeError('Untrusted package hierarchy')
+            raise RuntimeError('Untrusted package hierarchy: ' + str(parent))
 
 def lock(p, mode):
     fd = os.open(p, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, mode)

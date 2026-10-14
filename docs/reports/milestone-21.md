@@ -30,6 +30,7 @@ See [release procedure](../release.md) for contracts and [setup guide](../instal
 - Broad `git add -A` was rejected by automatic approval review because generated artifacts might be staged. Only explicit reviewed source/test/docs/workflow paths were staged afterward. No artifacts or credentials were committed.
 - A local builder cache inside this ESM repository caused the downloaded CommonJS icon helper to inherit `type: module`; relocating only that cache outside the repository on D: restored the branded unsigned build.
 - The first explicit addon assertion used dynamic import inside Playwright's ephemeral evaluation context, which has no dynamic-import callback. The corrected test uses Node's built-in module accessor; the actual packaged Windows process now passes the exact runtime/addon export assertion, second-instance focus and restart. The disposable NSIS uninstall fixture runs a temporary copy, matching NSIS's normal temporary-uninstaller behavior while permitting synchronous exit checks.
+- Source `00b7a754ef7131d6b456b309438e88061d4103a6`, package [38549170398](https://github.com/Deathstar1342/react-harness/actions/runs/38549170398), failed backend configuration at the new trusted-hierarchy guard. The generic diagnostic lacked the parent path; the follow-up names it and records root ownership/modes. Disposable CI normalizes the hosted `/opt` tool-install root as well as `/usr/share`; production checks remain strict. This run is not package acceptance.
 
 ## Remaining delivery/release gates
 
