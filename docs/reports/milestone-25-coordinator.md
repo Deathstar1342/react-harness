@@ -1,6 +1,6 @@
 # M25 independent coordinator review
 
-Checkpoint: 2026-10-14. Validated source `5f562cc7fa72976828e6293e7efb702c92bb4280`, source tree `6f19253ab4765745340a60d672ead96b1feb2ded`, isolated `c4d0` / `codex/milestone-25`, from kickoff `95db885e1440e46106db4b4ef707c522444cba59`. Final report-only handoff `678c768ca055af56808f09402740df9d6420b134` is independently accepted and published as GitHub main `7c0f98f8e8effab39b77e89f433a0a17f81cab15`. Implementation/tests match validated source; only reports/coordinator documentation differ. Integration typecheck and 62 focused mutation/process checks (two platform skips) passed. Exact-main CI remains pending at this checkpoint; M26 is not released yet. M21 stays paused.
+Checkpoint: 2026-10-14. Validated source `5f562cc7fa72976828e6293e7efb702c92bb4280`, source tree `6f19253ab4765745340a60d672ead96b1feb2ded`, isolated `c4d0` / `codex/milestone-25`, from kickoff `95db885e1440e46106db4b4ef707c522444cba59`. Final report-only handoff `678c768ca055af56808f09402740df9d6420b134` is independently accepted and published as GitHub main `7c0f98f8e8effab39b77e89f433a0a17f81cab15`. Implementation/tests match validated source; only reports/coordinator documentation differ. Integration typecheck and 62 focused mutation/process checks (two platform skips) passed. Every applicable exact-main CI job/step is independently verified green; M25 is delivered and M26 may start. M21 stays paused.
 
 ## Reviewed contracts and corrections
 
@@ -33,7 +33,7 @@ Original candidate `2982a35` Validate `38654209027` failed an obsolete synchrono
 
 ## Limits and next gate
 
-Exact-main CI is active at `7c0f98f`: Validate `38655125169`, Desktop `38655125085`, helper `38655125190`. Every required job/step must pass before M26 dispatch. Automatic installer `38655125599` does not resume M21 or establish release acceptance.
+Every applicable exact-main job/step passed at `7c0f98f`: [Validate 38655125169](https://github.com/Deathstar1342/react-harness/actions/runs/38655125169), job `116162950519`; [Desktop 38655125085](https://github.com/Deathstar1342/react-harness/actions/runs/38655125085), Windows `116162950622` and Ubuntu `116162950836`; [helper 38655125190](https://github.com/Deathstar1342/react-harness/actions/runs/38655125190), job `116162950471`. Required full suite/build, namespace fail-closed, real Linux backend/Electron and disposable helper/OS-auth steps succeeded. Skips are only opposite-platform/failure diagnostics. Exact-main receipts are retained. Automatic installer `38655125599` does not resume M21 or establish release acceptance.
 
 Known-scope guidance and observed-prefix search do not prove whole-repository discovery. Moves/undo do not prove external race freedom or arbitrary metadata preservation. Process starts/exit codes are not JUnit verification; interrupted/uncertain effects cannot be cleared by model verdicts. The deliberate 64-handle retention limit has no evidence eviction or generic process reconciliation. Existing bounded goal evidence/provenance and independent system-install policies remain authoritative.
 
