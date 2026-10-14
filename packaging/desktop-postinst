@@ -1,4 +1,5 @@
 #!/bin/sh
 set -eu
+test "$1" = configure || exit 0
 /usr/bin/python3 -I /usr/lib/abyssus/maintenance.py finish desktop
 update-desktop-database -q || true

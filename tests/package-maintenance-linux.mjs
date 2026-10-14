@@ -24,8 +24,26 @@ try{refused('/usr/bin/dpkg','--configure','react-harness');assert(existsSync(mar
 finally{sudo('/usr/bin/mv',backup,file);}
 sudo('/usr/bin/dpkg','--configure','react-harness');assert(!existsSync(marker));
 console.log('PASS unpack interruption blocks launch; failed postinst retains marker; exact repair configures safely');
+const desktopReceipt='/opt/abysSUS/package-integrity.json';
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','backend');
+sudo('/usr/bin/mv',desktopReceipt,desktopReceipt+'.ci-preserved');
+try{refused('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','backend');assert(existsSync(marker+'/backend'));}
+finally{sudo('/usr/bin/mv',desktopReceipt+'.ci-preserved',desktopReceipt);}
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','backend');
+console.log('PASS missing installed desktop receipt fails closed and retains maintenance marker');
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','backend');
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','desktop');
+sudo('/var/lib/dpkg/info/react-harness.postinst','abort-remove');
+sudo('/var/lib/dpkg/info/react-harness.postrm','abort-install');
+assert(existsSync(marker+'/desktop'));assert(existsSync(marker+'/backend'));
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','desktop');
+assert(!existsSync(marker+'/desktop'));assert(existsSync(marker+'/backend'));
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','backend');
+assert(!existsSync(marker));
+console.log('PASS abort callbacks preserve markers; configured completion clears only its own package');
 sudo('/usr/bin/dpkg','--install','build/bundled/abyssus-helper-staging.deb');
 refused('/usr/bin/dpkg','--remove','abyssus-backend');
+console.log('Backend state after refused dependency removal:',sudo('/usr/bin/dpkg-query','-W','-f=${Status}','abyssus-backend').toString());
 assert(existsSync('/usr/lib/abyssus-helper/launcher'));
 sudo('/usr/bin/dpkg','--remove','abyssus-helper-staging');assert(!existsSync(marker));
 console.log('PASS optional helper staging dependency protects backend and explicit removal preserves runtime');

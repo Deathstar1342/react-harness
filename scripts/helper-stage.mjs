@@ -24,8 +24,12 @@ if(process.argv.includes('--release')) {
   const guard=await readFile(root+'packaging/maintenance.py','utf8');
   await mkdir(stage+'/usr/share/abyssus',{recursive:true});
   await writeFile(stage+'/usr/share/abyssus/helper-manifest.json',JSON.stringify(await manifest(code)));
-  for(const [name,operation] of [['preinst','begin'],['prerm','begin'],['postinst','finish']])await writeFile(stage+'/DEBIAN/'+name,guard.replace('sys.argv[1]',JSON.stringify(operation)).replace('sys.argv[2]',"'helper'"),{mode:0o755});
-  await writeFile(stage+'/DEBIAN/postrm','#!/bin/sh\nset -eu\ncase "$1" in remove|purge) exec /usr/bin/python3 -I /usr/lib/abyssus/maintenance.py finish helper;; esac\n',{mode:0o755});
+  for(const [name,operation] of [['preinst','begin'],['prerm','begin'],['postinst','finish']]){
+    let script=guard.replace('sys.argv[1]',JSON.stringify(operation)).replace('sys.argv[2]',"'helper'");
+    if(name==='postinst')script=script.replace("if __name__ == '__main__':", "if __name__ == '__main__' and len(sys.argv) > 1 and sys.argv[1] == 'configure':");
+    await writeFile(stage+'/DEBIAN/'+name,script,{mode:0o755});
+  }
+  await writeFile(stage+'/DEBIAN/postrm','#!/bin/sh\nset -eu\ncase "$1" in remove|purge) exec /usr/bin/python3 -I /usr/lib/abyssus/maintenance.py removed helper;; esac\n',{mode:0o755});
 }
 execFileSync('/usr/bin/dpkg-deb',['--root-owner-group','--build',stage,root+'build/abyssus-helper-staging.deb'],{stdio:'inherit',env:{...process.env,SOURCE_DATE_EPOCH:'1791849600'}});
 console.log('Data-only helper staging scaffold built. Installation requires explicit OS administrator authorization.');

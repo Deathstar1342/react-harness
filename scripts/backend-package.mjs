@@ -14,7 +14,11 @@ await writeFile(stage+'/opt/abyssus/app/release.json',JSON.stringify({source:exe
 await mkdir(stage+'/usr/share/abyssus',{recursive:true});
 await writeFile(stage+'/usr/share/abyssus/backend-manifest.json',JSON.stringify(await manifest(stage+'/opt/abyssus')));
 const guard=await readFile(root+'/packaging/maintenance.py','utf8');
-for(const [name,operation] of [['preinst','begin'],['prerm','begin'],['postinst','finish']]){await writeFile(stage+'/DEBIAN/'+name,guard.replace('sys.argv[1]',JSON.stringify(operation)).replace('sys.argv[2]',"'backend'"),{mode:0o755});}
+for(const [name,operation] of [['preinst','begin'],['prerm','begin'],['postinst','finish']]){
+  let script=guard.replace('sys.argv[1]',JSON.stringify(operation)).replace('sys.argv[2]',"'backend'");
+  if(name==='postinst')script=script.replace("if __name__ == '__main__':", "if __name__ == '__main__' and len(sys.argv) > 1 and sys.argv[1] == 'configure':");
+  await writeFile(stage+'/DEBIAN/'+name,script,{mode:0o755});
+}
 await writeFile(stage+'/DEBIAN/control','Package: abyssus-backend\nVersion: 0.1.0\nArchitecture: amd64\nMaintainer: abysSUS contributors\nDepends: libc6 (>= 2.39), libstdc++6, python3, python3-venv, bash, bubblewrap, socat, git, util-linux\nDescription: abysSUS dedicated Node24 runtime and backend for Ubuntu24.04\n');
 await mkdir(root+'/build/bundled',{recursive:true});
 execFileSync('/usr/bin/dpkg-deb',['--root-owner-group','--build',stage,root+'/build/bundled/abyssus-backend_0.1.0_amd64.deb'],{stdio:'inherit',env:{...process.env,SOURCE_DATE_EPOCH:'1791849600'}});

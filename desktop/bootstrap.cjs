@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+let verifiedReceipt;
+let verifiedLocation;
 
 function within(a, b) { return a === b || a.startsWith(b + path.win32.sep); }
 function validateLocation(value, install, probeWrite = true) {
@@ -25,16 +27,31 @@ function parseLocation(bytes) {
   if(!match)throw new Error('Invalid desktop location file. Repair the installation.');
   return match[1];
 }
-function configure(app) {
-  if (!app.isPackaged) return;
-  const install = path.dirname(process.execPath), file = path.join(install, 'desktop-location.ini');
-  const integrity = JSON.parse(fs.readFileSync(path.join(install, 'package-integrity.json'), 'utf8'));
+function verifyPackage() {
+  const install = path.dirname(process.execPath);
+  const receiptFile=path.join(install,'package-integrity.json'),receiptStat=fs.lstatSync(receiptFile);
+  if(!receiptStat.isFile()||receiptStat.size>16*1024*1024)throw new Error('Invalid package receipt.');
+  const receipt = fs.readFileSync(receiptFile, 'utf8');
+  if(verifiedReceipt!==undefined&&receipt!==verifiedReceipt)throw new Error('Installation changed during startup. Close this launch and reopen after package maintenance completes.');
+  const integrity = JSON.parse(receipt);
   if (!integrity || typeof integrity !== 'object' || Array.isArray(integrity) || Object.keys(integrity).length > 50000) throw new Error('Invalid package receipt; reinstall the reviewed package.');
+  for(const required of ['resources/app/desktop/entry.cjs','resources/app/desktop/main.js','resources/app/desktop/package-lease.node'])if(!integrity[required])throw new Error('Incomplete package receipt.');
   for (const [relative, digest] of Object.entries(integrity)) {
     if (relative.includes('..') || path.isAbsolute(relative) || !/^[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid package receipt.');
     const payload = path.join(install, relative);
     if (fs.lstatSync(payload).isSymbolicLink() || crypto.createHash('sha256').update(fs.readFileSync(payload)).digest('hex') !== digest) throw new Error('Application files are incomplete or changed. Reinstall the matching reviewed package; saved data is preserved.');
   }
+  verifiedReceipt=receipt;
+  const file=path.join(install,'desktop-location.ini');
+  if(fs.existsSync(file)){const locationStat=fs.lstatSync(file);if(!locationStat.isFile()||locationStat.size>2048)throw new Error('Invalid desktop location file.');}
+  const location=fs.existsSync(file)?fs.readFileSync(file).toString('hex'):null;
+  if(verifiedLocation!==undefined&&location!==verifiedLocation)throw new Error('Saved desktop location changed during startup; reopen after setup completes.');
+  verifiedLocation=location;
+}
+function configure(app) {
+  if (!app.isPackaged) return;
+  verifyPackage();
+  const install=path.dirname(process.execPath),file=path.join(install,'desktop-location.ini');
   if (process.platform !== 'win32') return;
   let saved;
   if (fs.existsSync(file)) {
@@ -48,4 +65,4 @@ function configure(app) {
   app.setPath('sessionData', selected);
   app.setPath('cache', selected);
 }
-module.exports = { configure, validateLocation, parseLocation };
+module.exports = { configure, validateLocation, parseLocation, verifyPackage };

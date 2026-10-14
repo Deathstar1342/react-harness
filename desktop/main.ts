@@ -8,7 +8,6 @@ import { DocumentGuard } from './document-guard.js';
 import { DesktopController } from './controller.js';
 import { desktopOrigin, environmentSchema, isDesktopURL, linuxPath, pickerPath, validateSender } from './policy.js';
 import { desktopResponse } from './proxy.js';
-import { createRequire } from 'node:module';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 app.setName('abysSUS');
 nativeTheme.themeSource='dark';
@@ -23,10 +22,8 @@ let window:BrowserWindow|undefined,quitting=false,closing=false;
 const documents=new DocumentGuard();
 const controller=new DesktopController(app.isPackaged&&process.platform==='linux'?'/opt/abyssus/app':appRoot);
 const selectionSchema=z.object({environment:environmentSchema,home:linuxPath}).strict();
-if(!app.requestSingleInstanceLock())app.quit();
+if(!app.isPackaged&&!app.requestSingleInstanceLock())app.quit();
 else {
-  if(app.isPackaged&&!createRequire(import.meta.url)('./package-lease.node').held)throw new Error('Package maintenance exclusion is unavailable.');
-  if(app.isPackaged&&process.platform==='win32')createRequire(import.meta.url)('./bootstrap.cjs').validateLocation(app.getPath('userData'),path.dirname(process.execPath));
   app.on('second-instance',()=>{window?.show();window?.focus();});
   await app.whenReady();
   const partition=session.fromPartition('abyssus-desktop'); // in memory, one isolated application session

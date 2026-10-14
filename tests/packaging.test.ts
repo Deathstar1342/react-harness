@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,6 +10,38 @@ const require=createRequire(import.meta.url);
 const {validateLocation}=require('../desktop/bootstrap.cjs') as {validateLocation:(v:string,i:string)=>string};
 const {parseLocation}=require('../desktop/bootstrap.cjs') as {parseLocation:(v:Buffer)=>string};
 describe('Windows packaged bootstrap data isolation',()=>{
+  it.each(['receipt','location','payload'])('rejects a controlled maintenance/startup %s race before importing main',change=>{
+    const root=mkdtempSync(path.join(tmpdir(),'abyssus-startup-race-'));
+    try {
+      const files=['resources/app/desktop/entry.cjs','resources/app/desktop/main.js','resources/app/desktop/package-lease.node'];
+      const hashes:Record<string,string>={};
+      for(const name of files){mkdirSync(path.dirname(path.join(root,name)),{recursive:true});writeFileSync(path.join(root,name),'fixture');hashes[name]=createHash('sha256').update('fixture').digest('hex');}
+      const receipt=path.join(root,'package-integrity.json');writeFileSync(receipt,JSON.stringify(hashes));
+      const module={exports:{} as {configure:unknown}};
+      const fixtureProcess={platform:'linux',execPath:path.join(root,'abysSUS'),env:{}};
+      runInNewContext(readFileSync('desktop/bootstrap.cjs','utf8'),{require,module,process:fixtureProcess,TextDecoder});
+      let acquired=false,imported=false,exit:number|undefined,diagnostic='';
+      const app={isPackaged:true,requestSingleInstanceLock:()=>true,exit:(code:number)=>{exit=code;}};
+      runInNewContext(readFileSync('desktop/entry.cjs','utf8'),{
+        process:fixtureProcess,console,
+        require:(name:string)=>{
+          if(name==='electron')return {app,dialog:{showErrorBox:(_title:string,message:string)=>{diagnostic=message;}}};
+          if(name==='./bootstrap.cjs')return module.exports;
+          if(name==='./package-lease.node'){
+            // Deterministically finish maintenance between the initial snapshot and lease acquisition.
+            acquired=true;
+            if(change==='receipt')writeFileSync(receipt,JSON.stringify(hashes,null,2));
+            if(change==='location')writeFileSync(path.join(root,'desktop-location.ini'),'changed selection');
+            if(change==='payload')writeFileSync(path.join(root,files[1]),'changed main');
+            return {held:true};
+          }
+          return require(name);
+        },
+      },{importModuleDynamically:()=>{imported=true;throw new Error('Main must not import after a startup race');}});
+      expect(acquired).toBe(true);expect(exit).toBe(1);expect(imported).toBe(false);
+      expect(diagnostic).toMatch(/changed/);
+    }finally{rmSync(root,{recursive:true,force:true});}
+  });
   it('accepts only a bounded complete location record and rejects malformed/truncated/extra fields',()=>{
     expect(parseLocation(Buffer.from('[desktop]\r\npath=D:\\saved\r\n'))).toBe('D:\\saved');
     expect(parseLocation(Buffer.concat([Buffer.from([255,254]),Buffer.from('[desktop]\r\npath=D:\\saved\r\n','utf16le')]))).toBe('D:\\saved');
