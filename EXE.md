@@ -1,6 +1,6 @@
 # Desktop application and sandboxing plan
 
-Status: **Milestone plan requested, 2026-10-13; implementation not dispatched.** User selected Electron, Docker-free process sandboxing and a privileged package-install helper provisioned during setup. System installs have separate Ask every time / Auto-approve / AI review policies. [M16–M21](docs/milestones.md#planned-m16m21-desktop-sequence-2026-10-13) defines the sequential implementation and review gates. Existing M12–M15 is delivered; check-ins remain paused while planning. Container deployment stays deferred; see [CONTAINERIZATION.md](CONTAINERIZATION.md).
+Status: **Implementation authorized, 2026-10-13; starting M16.** User selected Electron, Docker-free process sandboxing and a privileged package-install helper provisioned during setup. System installs have separate Ask every time / Auto-approve / AI review policies. [M16–M21](docs/milestones.md#planned-m16m21-desktop-sequence-2026-10-13) defines the sequential implementation and review gates; [STATUS](docs/STATUS.md) records current delivery and dispatch. Existing M12–M15 is delivered; resume 15-minute check-ins for the desktop sequence. The capabilities below remain planned until their milestones pass review. Container deployment stays deferred; see [CONTAINERIZATION.md](CONTAINERIZATION.md).
 
 ## Selected direction
 

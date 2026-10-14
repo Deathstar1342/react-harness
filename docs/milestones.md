@@ -2,7 +2,7 @@
 
 ## Planned M16–M21 desktop sequence (2026-10-13)
 
-User requested milestone planning for Electron packaging, Docker-free Linux process sandboxing, and a privileged system-install helper provisioned during setup. System-install policy is separate from workspace approvals: Ask every time (default), Auto-approve, or AI review. This section supersedes the older executable-packaging hold for planning purposes. **Implementation is not dispatched; the previous discussion-only boundary remains in effect.** The existing heartbeat stays paused until implementation starts. Detailed architecture, platform assumptions and boundaries are in root [EXE.md](../EXE.md).
+User approved implementation of this plan with "boom get started!" on 2026-10-13: Electron packaging, Docker-free Linux process sandboxing, and a privileged system-install helper provisioned during setup. System-install policy is separate from workspace approvals: Ask every time (default), Auto-approve, or AI review. This authorization supersedes the older executable-packaging and discussion-only holds. Start M16 and resume the existing 15-minute heartbeat; current dispatch is recorded in STATUS. Detailed architecture, platform assumptions and boundaries are in root [EXE.md](../EXE.md).
 
 Planning baseline: GitHub main `57b2099`, including the user's latest advisor prompt edits and restored `planStep` guidance. Preserve those changes and all M12–M15 protections. No Docker/SSHFS, native Windows agent shells, parallel coders or unrelated redesign in this sequence.
 
