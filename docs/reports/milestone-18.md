@@ -3,7 +3,8 @@
 Delivery branch: `codex/milestone-18`, isolated worktree `c7f7`.
 Base: `0e2315c0f803f2f41c7ef765cf59a9ecaa973728` (M17 delivered plus coordinator delivery documentation).
 Coordinator: `01a0dc0a-8866-7182-acd2-da997779962d`.
-Source candidate and exact final CI: pending completion; this report is not a delivery claim.
+Implementation/test candidate: `c01bd8e84306dbf720481408c2514af15594d5d5`.
+This report is finalized in a later documentation-only delivery commit; its SHA is sent in the coordinator handoff. Independent coordinator review/integration and main publication remain separate.
 
 ## Scope and contracts
 
@@ -15,11 +16,12 @@ The trusted client exposes hello/prepare/authorize/execute/status/reconcile. Sha
 
 Root-private SQLite records preparation/authorization/running state before package effects. Restart invalidates pending authorized decisions and preserves running uncertainty. Lost replies are never retried. Reconciliation records actual package state separately and cannot rewrite uncertainty as success. Repair rotates credentials and preserves target/audit; uninstall removes authority and leaves installed packages and durable audit/identity intact. Unhealthy or unreconciled uncertainty blocks further installs.
 
-## Validation in progress
+## Validation
 
-- Windows Node 24.16: typecheck passed; full Vitest suite **527 passed / 33 platform or optional skips**; production build passed with the inherited large-chunk warning. Follow-up helper-specific changes require the final candidate verification recorded below.
-- Portable Python state/adapter suite: **18 tests passed**. These are policy/durability checks, not root-install evidence.
-- Real service startup, root-owned ACL descriptor, non-root TS HMAC client, unauthorized local UID denial, replay/expiry/forgery checks, private import sentinel denial, actual namespace exclusion with a live helper, and dpkg frontend-lock conflict have executed successfully in disposable Ubuntu CI. The complete privileged transaction/recovery workflow is still being finalized; no completed Linux delivery claim yet.
+- Windows Node 24.16: typecheck passed; full Vitest suite **527 passed / 33 platform or optional skips** (final full run 2026-10-13 23:29 EDT, 28.80 seconds); production build passed with the inherited large-chunk warning. Later changes affect privileged Linux code/tests and documentation only; fresh exact Linux checks below cover them. Final TS typecheck also passed after the fixture correction.
+- Portable Python state/adapter suite: **20 tests passed**. These are policy/durability checks, not root-install evidence. Includes new-install `marked_upgrade` semantics, dependency mutation/removal/downgrade/reinstall/essential refusal, unknown provenance/impact, local/credentialed artifacts, stale target/plan, request replay, pre-effect persistence failure, post-effect final save failure, failure of the uncertain fallback save, and explicit recovery gating.
+- Exact source GitHub checks **both passed**, verified against full SHA `c01bd8e84306dbf720481408c2514af15594d5d5`: ordinary [Validate](https://github.com/Deathstar1342/react-harness/actions/runs/38507053337), **556 tests passed / 4 skips**, typecheck/build and required unsupported-userns check; and [privileged helper validation](https://github.com/Deathstar1342/react-harness/actions/runs/38507053348), **20 Python tests plus every required real privileged integration assertion**. No required helper gate was skipped. The complete helper run finished 2026-10-13 23:36 EDT.
+- Required real helper CI uses the non-root TypeScript client and root-owned staged service. Coverage: actual signed preview and `hello` installation; no-op and forbidden existing-version change; HMAC forgery/expiry/replay, wrong local UID and option injection; real frontend/dpkg lock conflict; stale privileged configuration; writable metadata ancestors and non-exempt `/etc/apt/partial`; helper/config/common-data-parent/apt-module/native-library/loader-preload tampering; hostile cwd/environment; private import sentinel denial; actual M17 namespace with a live helper; repair/key rotation/identity and audit preservation; interrupted actual dpkg `--unpack`/`--configure` after durable running; restart/repair no replay; separate reconciliation; uninstall preserving packages/audit. The strengthened interruption gate supersedes earlier weaker passes.
 
 ## Preserved failed evidence
 
@@ -43,4 +45,8 @@ Privileged tests run only in disposable GitHub Ubuntu 24.04 x86_64 VMs with expl
 
 No helper/packages/kernel/service policy were provisioned on the developer workstation; Podman WSL was untouched. No live-provider credentials or STARK acceptance. Debian/WSL/distribution matrix, Electron authorization UX and release signing/packaging remain later target-device gates. Root administrator/OS/package trust and same-user unsandboxed host processes remain explicit assumptions; this is not protection against an already malicious root, arbitrary concurrent administrative replacement, or shared-kernel/resource exhaustion.
 
-The inherited npm audit reports five vulnerabilities (two low, one high, two critical); no unrelated dependency changes were made. Generated binaries, build output, databases, credentials and project contents are excluded from commits. Coordinator owns independent final review, integration and main publication.
+The service processes one request at a time and holds a lifetime global lock. Serial dispatch is required for explicit reconciliation of a durable abandoned `running` row after audit-write failure; introducing concurrent handlers would require a new active-operation guard. A healthy observation made before a failed final save is cleared on entry to uncertainty. A failed uncertainty save leaves durable running as a recovery block even in the current process. Only explicit post-uncertainty reconciliation can clear that gate; it never changes original uncertainty to success.
+
+Metadata admission checks expected roots and every ancestor before resolution, reads/fingerprints again afterward, and excludes only exact apt lists staging locations. `/usr/share` is explicitly a trusted common package-data parent, not an unrelated scan added only to satisfy tests. Root administrator mutation during operation remains outside the guarantee. Helper service systemd startup itself performs no package transaction. The backend adapter credentials use a private non-serializable field and are never included in DTOs or shell environments.
+
+The inherited npm audit reports five vulnerabilities (two low, one high, two critical); no unrelated dependency changes were made. Generated binaries, build output, databases, credentials and project contents are excluded from commits. Coordinator owns independent final review, integration and main publication. No user-assistance blocker; child idles after the final handoff and does not start M19.
