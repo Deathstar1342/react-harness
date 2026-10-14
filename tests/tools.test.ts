@@ -136,6 +136,8 @@ describe('read-only Git and environment', () => {
   it.skipIf(process.platform === 'linux')('reports PTY unavailable honestly on unsupported hosts', async () => {
     const result = await tools.execute(context, { name: 'run_shell', args: { command: 'echo no-fake-success' } });
     expect(result.ok).toBe(false); expect(result.output).toMatch(/Linux\/WSL/);
+    git('init');const status=await tools.execute(context,{name:'git_status',args:{}});
+    expect(status.ok).toBe(false);expect(status.data).toMatchObject({code:'SANDBOX_UNAVAILABLE'});
   });
 });
 

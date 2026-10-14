@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -53,4 +53,23 @@ it('quarantines uncertain cleanup, prevents mutation/reuse and rejects backend t
   expect(()=>tools.resetSandbox(parent)).toThrow('uncertain');
   await expect(tools.execute({projectRoot:parent,chatId:'chat',agentId:'coder'},{name:'run_shell',args:{command:'touch impossible'}})).rejects.toThrow('uncertain');
   await expect(tools.dispose()).rejects.toThrow('timeout');expect(attempts).toBe(2);
+});
+it('refuses reset while another project HTTP request is awaiting work',async()=>{
+  const t=await fixture();let release!:()=>void,entered!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});
+  const original=t.tools.read.bind(t.tools),spy=vi.spyOn(t.tools,'read').mockImplementation(async(...args)=>{entered();await gate;return original(...args);});
+  const pending=t.app.inject({method:'GET',url:`/api/projects/${t.project.id}/file?path=source.txt`});void pending.then(()=>{});await ready;
+  expect((await t.app.inject({method:'POST',url:`/api/projects/${t.project.id}/sandbox/reset`,payload:{}})).statusCode).toBe(409);
+  release();await pending;spy.mockRestore();
+  expect((await t.app.inject({method:'POST',url:`/api/projects/${t.project.id}/sandbox/reset`,payload:{}})).statusCode).toBe(200);
+});
+it('gates new requests during reset and rejects an unavailable reset hook',async()=>{
+  const t=await fixture();let release!:()=>void,entered!:()=>void;
+  const gate=new Promise<void>(r=>{release=r;}),ready=new Promise<void>(r=>{entered=r;});
+  const original=t.tools.resetSandbox.bind(t.tools),spy=vi.spyOn(t.tools,'resetSandbox').mockImplementation(async root=>{entered();await gate;await original(root);});
+  const url=`/api/projects/${t.project.id}/sandbox/reset`,pending=t.app.inject({method:'POST',url,payload:{}});void pending.then(()=>{});await ready;
+  expect((await t.app.inject({method:'POST',url:`/api/projects/${t.project.id}/chats`,payload:{}})).statusCode).toBe(409);
+  expect((await t.app.inject({method:'PATCH',url:'/api/workspace',payload:{workspaceRoot:t.parent}})).statusCode).toBe(409);
+  release();expect((await pending).statusCode).toBe(200);spy.mockRestore();
+  Object.defineProperty(t.tools,'resetSandbox',{value:undefined});expect((await t.app.inject({method:'POST',url,payload:{}})).statusCode).toBe(503);
 });

@@ -1,5 +1,13 @@
 # Integration contract
 
+## M17 sandbox contracts
+
+- ToolService remains compatible through optional trusted `configureSandbox({home,protectedPaths,projects})` and `resetSandbox(root):Promise<void>`. These are backend lifecycle interfaces, never model actions or browser-supplied policy. `createApp` supplies effective M16 configuration and live registered-project paths.
+- `removeScope<T>` may now return `Promise<T>`. It synchronously rejects active work/dirty buffers/background jobs, gates the scope while awaiting teardown, rechecks leases, then invokes the callback synchronously. Disk removal also rechecks the current unexpired token and canonical identity after draining, before marking removal started. Failed teardown retains sessions, quarantines the scope, prevents reset/deletion/new work and makes backend shutdown reject so profile ownership is retained.
+- POST `/api/projects/:id/sandbox/reset`, strict `{}` -> `{ok:true}` only after teardown and private-storage removal. Existing local-origin, JSON, registered-project, runtime-exclusion, dirty-buffer, pending/background and removal-error gates apply. Unsupported trusted service returns 503. No model action, source/dependency deletion or approval change. `node_modules` and `.venv` remain in the project; only private home/cache/temp/policy storage is cleared.
+- Command failures include actionable `SANDBOX_UNAVAILABLE`, `SANDBOX_UNSAFE_PROJECT`, `SANDBOX_UNSAFE_STORAGE` or `SANDBOX_CLEANUP_FAILED` ToolResult codes. Windows, root execution, missing prerequisites and disabled namespaces never fall back to host execution. Existing PTY cwd/session/queue/cancellation, output/JUnit and stale-file semantics remain. A changed protected layout discards shell state and requires an explicit resubmission; no automatic replay.
+- Fixed Git reads now require Linux sandbox support. Arbitrary shell `.git` access is masked; shell commit/branch operations on the imported repository are intentionally unavailable. New empty repositories are initialized through a fixed file layout without a host subprocess. Network policy and concurrent-host-edit limits are in `architecture.md`.
+
 Types in shared/types.ts are the integration boundary. All JSON API failures return `{ error: string }`. IDs are opaque strings. Times are ISO strings. Project paths are backend filesystem paths (Linux paths when running in WSL). API routes use /api. Vite proxies that prefix in development; production serves the built UI from the same origin.
 
 ## HTTP interface (coordinator implements)

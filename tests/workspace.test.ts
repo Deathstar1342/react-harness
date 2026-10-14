@@ -33,6 +33,9 @@ describe('workspace settings and folder explorer API',()=>{
     for(const project of projects) {
       expect(path.dirname(project.path)).toBe(await realpath(config.workspaceRoot));
       expect((await stat(path.join(project.path,'.git'))).isDirectory()).toBe(true);
+      if(process.platform==='linux'){
+        const tools=new WorkspaceTools();try{const result=await tools.execute({projectRoot:project.path,chatId:'init-check',agentId:'reader'},{name:'git_status',args:{}});expect(result.ok,result.output).toBe(true);}finally{await tools.dispose();}
+      }
     }
   });
   it('persists a chosen workspace across restart without moving existing projects',async()=>{

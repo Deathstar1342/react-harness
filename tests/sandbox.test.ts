@@ -21,7 +21,7 @@ async function fixture(){
 describe('registry destination authority',()=>{
   it('rejects ambiguous authorities, raw IPs and unauthorized targets',()=>{
     expect(registryAuthority('registry.npmjs.org:443')).toBe('registry.npmjs.org');
-    for(const value of ['localhost:443','127.0.0.1:443','registry.npmjs.org:0443','registry.npmjs.org.:443','REGISTRY.NPMJS.ORG:443','user@registry.npmjs.org:443','registry.npmjs.org:443/path','registry.npmjs.org:443#x','registry.npmjs.org:443\r\n','pypi.org:80','example.org:443','[::ffff:127.0.0.1]:443'])expect(()=>registryAuthority(value)).toThrow();
+    for(const value of ['localhost:443','127.0.0.1:443','registry.npmjs.org:0443','registry.npmjs.org.:443','REGISTRY.NPMJS.ORG:443','user@registry.npmjs.org:443','registry.npmjs.org:443/path','registry.npmjs.org:443#x','registry.npmjs.org:443\r\n','registry.npmjs.org:443\n','pypi.org:80','example.org:443','[::ffff:127.0.0.1]:443'])expect(()=>registryAuthority(value)).toThrow();
   });
   it('denies non-global and translation/tunneling address forms',()=>{
     for(const value of ['0.0.0.0','10.0.0.1','100.64.0.1','127.1.2.3','169.254.169.254','172.16.1.1','192.168.1.1','192.0.0.1','192.0.2.1','198.18.0.1','198.51.100.2','203.0.113.1','224.0.0.1','255.255.255.255','127.1','0x7f000001','::','::1','::ffff:8.8.8.8','::ffff:808:808','64:ff9b::808:808','2002:808:808::','2001::1','2001:db8::1','fc00::1','fe80::1','ff02::1','3fff::1'])expect(publicAddress(value),value).toBe(false);
@@ -39,6 +39,7 @@ describe('registry destination authority',()=>{
     const request=(payload:string)=>new Promise<string>((resolve,reject)=>{const client=net.connect(proxy.socket,()=>client.end(payload));let data='';client.on('data',chunk=>data+=chunk);client.on('error',reject);client.on('close',()=>resolve(data));});
     for(const target of ['127.0.0.1:443','192.168.0.1:443','169.254.169.254:443','example.com:443'])expect(await request(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`)).toContain('403');
     expect(await request('GET http://127.0.0.1/ HTTP/1.1\r\nHost: localhost\r\n\r\n')).toContain('403');
+    for(const headers of ['Host: registry.npmjs.org:443\r\nHost: registry.npmjs.org:443','Host: registry.npmjs.org:443\r\nContent-Length: 1','Host: registry.npmjs.org:443\r\nUpgrade: websocket'])expect(await request(`CONNECT registry.npmjs.org:443 HTTP/1.1\r\n${headers}\r\n\r\n`)).not.toContain('200 Connection Established');
     const pending=net.connect(proxy.socket);await new Promise<void>(resolve=>pending.once('connect',resolve));
     const ended=new Promise<void>(resolve=>pending.once('close',()=>resolve()));await proxy.close();await ended;
   });
@@ -81,6 +82,7 @@ describe.skipIf(process.platform!=='linux')('real Linux sandbox security',()=>{
   it('denies outside files, secrets, sockets, process and interop access, while writing the project',async()=>{
     const {root,parent,home,run}=await execution();await writeFile(path.join(parent,'outside'),'OUTSIDE');await writeFile(path.join(home,'backend.json'),'DESCRIPTOR');
     await writeFile(path.join(root,'.env'),'SECRET');await mkdir(path.join(root,'nested'));await writeFile(path.join(root,'nested','.npmrc'),'TOKEN');
+    await mkdir(path.join(root,'.git'));await writeFile(path.join(root,'.git','credential-history'),'GIT_SECRET');
     const result=await run(`python3 - <<'PY'
 import os, pathlib, socket
 root=pathlib.Path(${JSON.stringify(root)})
@@ -88,6 +90,15 @@ for p in [${JSON.stringify(path.join(parent,'outside'))},${JSON.stringify(path.j
  assert not pathlib.Path(p).exists(), p
 assert (root/'.env').read_bytes()==b''
 assert (root/'nested/.npmrc').read_bytes()==b''
+assert list((root/'.git').iterdir())==[]
+try: os.kill(${process.pid},0)
+except ProcessLookupError: pass
+else: raise AssertionError('host PID visible')
+assert not pathlib.Path('/proc/1/root'+${JSON.stringify(path.join(parent,'outside'))}).exists()
+os.symlink(${JSON.stringify(path.join(parent,'outside'))},root/'agent-link')
+try: (root/'agent-link').read_text()
+except OSError: pass
+else: raise AssertionError('symlink escape')
 for p in [root/'.env',root/'nested/.npmrc']:
  try: p.write_text('escape')
  except OSError: pass
@@ -143,7 +154,7 @@ PY`);
   it('kills setsid/double-fork descendants on cancellation and revokes bridge tunnels',async()=>{
     const {tools,context,root}=await execution();const controller=new AbortController();
     let ready=false;const descendants:number[]=[],sockets:string[]=[];
-    const code=`import os,time,pathlib\nif os.fork()==0:\n os.setsid()\n if os.fork()==0:\n  pathlib.Path('child-ready').write_text('yes')\n  time.sleep(2)\n  pathlib.Path('escaped-after-cancel').write_text('bad')\n  os._exit(0)\n os._exit(0)\nwhile not pathlib.Path('child-ready').exists(): time.sleep(.01)\nprint('READY',flush=True)\ntime.sleep(30)`;
+    const code=`import os,time,pathlib,socket\ntunnel=socket.create_connection(('127.0.0.1',18080),5)\ntunnel.sendall(b'CONNECT registry.npmjs.org:443 HTTP/1.1\\r\\nHost: registry.npmjs.org:443\\r\\n\\r\\n')\nassert b'200 Connection Established' in tunnel.recv(4096)\nif os.fork()==0:\n os.setsid()\n if os.fork()==0:\n  pathlib.Path('child-ready').write_text('yes')\n  time.sleep(2)\n  pathlib.Path('escaped-after-cancel').write_text('bad')\n  os._exit(0)\n os._exit(0)\nwhile not pathlib.Path('child-ready').exists(): time.sleep(.01)\nprint('READY',flush=True)\ntime.sleep(30)`;
     const result=await tools.execute({...context,signal:controller.signal,onOutput:text=>{if(text.includes('READY')){
       ready=true;
       for(const pid of readdirSync('/proc').filter(p=>/^\d+$/.test(p))){
@@ -158,6 +169,22 @@ PY`);
   });
   it('cannot create nested user namespaces or recover host execution',async()=>{
     const {run}=await execution();const result=await run('printf NAMESPACE_READY; unshare -Ur /usr/bin/true');expect(result.output).toContain('NAMESPACE_READY');expect(result.ok).toBe(false);
+  });
+  it('normalizes an ordinary broker cleanup error and denies queued and other-agent execution',async()=>{
+    const {tools,context,run,root}=await execution();expect((await run('printf INITIAL_READY')).ok).toBe(true);
+    // Inject an I/O failure after real broker teardown, without weakening launch.
+    const pool=(tools as any).shells,session=[...pool.sessions.values()][0] as any,close=session.launch.close;
+    session.launch.close=async()=>{await close();throw new Error('ordinary filesystem failure');};
+    const controller=new AbortController();let ready=false;
+    const running=tools.execute({...context,signal:controller.signal,onOutput:text=>{if(text.includes('CANCEL_READY')){ready=true;controller.abort();}}},{name:'run_shell',args:{command:'printf CANCEL_READY; sleep 30'}});
+    const queued=tools.execute(context,{name:'run_shell',args:{command:'touch queued-must-not-run'}});
+    const failed=await running;expect(ready).toBe(true);expect(failed.data).toMatchObject({code:'SANDBOX_CLEANUP_FAILED'});
+    expect((await queued).data).toMatchObject({code:'SANDBOX_CLEANUP_FAILED'});
+    const other=await tools.execute({...context,agentId:'other'},{name:'run_shell',args:{command:'touch other-must-not-run'}});expect(other.data).toMatchObject({code:'SANDBOX_CLEANUP_FAILED'});
+    expect(existsSync(path.join(root,'queued-must-not-run'))).toBe(false);expect(existsSync(path.join(root,'other-must-not-run'))).toBe(false);
+    await expect(tools.dispose()).rejects.toMatchObject({code:'SANDBOX_CLEANUP_FAILED'});
+    // Expected quarantined shutdown was asserted above; real resources are gone.
+    cleanup.pop();
   });
   it('rejects internal protected symlinks before any project code executes',async()=>{
     const {root,run}=await execution();await writeFile(path.join(root,'internal'),'secret');await symlink('internal',path.join(root,'.env'));

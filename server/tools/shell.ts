@@ -146,7 +146,7 @@ class PersistentShell {
       // Broker completion is part of backend/profile ownership release.
       await this.revoke;
       for (const listener of this.disposables) listener.dispose();
-    })();
+    })().catch(()=>{throw new ToolError('Sandbox resource cleanup failed or termination was not confirmed; retain backend ownership.','SANDBOX_CLEANUP_FAILED');});
   }
 }
 export class ShellPool {
@@ -167,6 +167,7 @@ export class ShellPool {
     queue.count++;
     const generation = queue.generation;
     const result = queue.tail.then(async () => {
+      if(this.quarantined.has(key(root)))throw new ToolError('Sandbox cleanup is uncertain; queued work is prohibited.','SANDBOX_CLEANUP_FAILED');
       if (this.disposed || context.signal?.aborted) return { output: '', cancelled: true, error: 'Cancelled before execution.' };
       if (generation !== queue.generation) return { output: '', error: 'A prior command lost shell state; queued command was not executed. Submit again explicitly.', shellReset: true };
       let session = this.sessions.get(id);

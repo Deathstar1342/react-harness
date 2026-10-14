@@ -33,7 +33,7 @@ export async function createApp(options: AppOptions) {
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
   const changes = new Changes(store,tools,runtime);
-  const locations = new WorkspaceLocations(store,config.workspaceRoot);
+  const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root));
   const settings = new Settings(store,config.approvalMode);
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
@@ -45,6 +45,7 @@ export async function createApp(options: AppOptions) {
   const chatStreams = new Map<string,Map<ServerResponse,()=>void>>();
   const removedProjects = new Set<string>();
   const requests = new Map<string,string>();
+  const resetting=new Set<string>();
   const removal = new Removal(store,runtime,tools,config,locations,(projectId,chatIds,wholeProject)=>{
     for (const chatId of chatIds) for (const [stream,cleanup] of chatStreams.get(chatId) ?? []) {
       cleanup();
@@ -121,7 +122,7 @@ export async function createApp(options: AppOptions) {
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';
     if (request.method==='DELETE' || route.endsWith('/deletion-preview') || route.endsWith('/events')) return;
-    if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { requests.set(request.id,'*');return; }
+    if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { if(resetting.size)throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});requests.set(request.id,'*');return; }
     const params=request.params as {id?:string};
     if (!params?.id) return;
     let projectId:string|undefined;
@@ -129,14 +130,15 @@ export async function createApp(options: AppOptions) {
     else if (route.startsWith('/api/chats/:id')) projectId=store.chat(params.id).projectId;
     else if (route.startsWith('/api/approvals/:id')) projectId=store.chat(store.getApproval(params.id).chatId).projectId;
     if (projectId) {
+      if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
       requests.set(request.id,projectId);
     }
   });
   app.addHook('onResponse',async request=>{requests.delete(request.id);});
   app.addHook('onError',async request=>{requests.delete(request.id);});
-  const assertNoRequests=(projectId:string)=>{
-    if ([...requests.values()].some(id=>id==='*' || id===projectId)) throw Object.assign(new Error('A project request is still pending; wait before removal'),{statusCode:409});
+  const assertNoRequests=(projectId:string,exceptRequest?:string)=>{
+    if ([...requests].some(([requestId,id])=>requestId!==exceptRequest && (id==='*' || id===projectId))) throw Object.assign(new Error('A project request is still pending; wait before removal or reset'),{statusCode:409});
   };
   app.post('/api/projects/:id/deletion-preview',async request=>{
     z.object({}).strict().parse(request.body);return removal.preview(paramId(request.params));
@@ -196,8 +198,13 @@ export async function createApp(options: AppOptions) {
   app.post('/api/projects/:id/sandbox/reset',async request=>{
     z.object({}).strict().parse(request.body);
     const id=paramId(request.params),project=store.project(id);
+    assertNoRequests(id,request.id);
     if(!tools.resetSandbox)throw Object.assign(new Error('Sandbox reset is unavailable for this tool service'),{statusCode:503});
-    return runtime.exclusiveRemoval(id,async()=>{await tools.resetSandbox!(project.path);return {ok:true};});
+    return runtime.exclusiveRemoval(id,async()=>{
+      resetting.add(id);
+      try{await tools.resetSandbox!(project.path);return {ok:true};}
+      finally{resetting.delete(id);}
+    });
   });
   app.post('/api/projects/:id/chats',async(request,reply)=> {
     const body = z.object({title:z.string().trim().min(1).max(200).optional(),approvalMode:approvalMode.optional()}).strict().parse(request.body);

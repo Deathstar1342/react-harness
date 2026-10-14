@@ -25,7 +25,7 @@ export function publicAddress(address: string): boolean {
 }
 export function registryAuthority(authority: string): string {
   const match=/^([a-z0-9.-]+):443$/.exec(authority);
-  if (!match || !registryHosts.has(match[1])) throw new Error('Only registry.npmjs.org, pypi.org and files.pythonhosted.org on port 443 are allowed');
+  if (!match || match[0]!==authority || !registryHosts.has(match[1])) throw new Error('Only registry.npmjs.org, pypi.org and files.pythonhosted.org on port 443 are allowed');
   return match[1];
 }
 export async function resolveRegistry(host: string, resolver: typeof lookup = lookup): Promise<string> {
