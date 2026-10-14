@@ -1,6 +1,6 @@
 # M24 independent coordinator review
 
-Checkpoint: 2026-10-14. Tested source `635c2337e9b23fd6e9844bc80b58782d1e7942e3`, isolated `1356` / `codex/milestone-24`, from kickoff `17e7143ca1404ad6e7fde65729ac9119cf042460`. Clean report-only handoff `2e35247944659811e9b12b8933586ea08e518597` is reviewed and published as main `5b0f49c7a977260b112e9c665c947d7e2441930e`. Implementation matches tested source; only documentation differs. Integration typecheck and 66 goal/helper/context checks passed. Exact-main acceptance remains pending. M21 remains paused.
+Checkpoint: 2026-10-14. Tested source `635c2337e9b23fd6e9844bc80b58782d1e7942e3`, isolated `1356` / `codex/milestone-24`, from kickoff `17e7143ca1404ad6e7fde65729ac9119cf042460`. Clean report-only handoff `2e35247944659811e9b12b8933586ea08e518597` is reviewed and published as main `5b0f49c7a977260b112e9c665c947d7e2441930e`. Implementation matches tested source; only documentation differs. Integration typecheck and 66 goal/helper/context checks passed. Every applicable exact-main CI step is independently verified green; M24 implementation is delivered and the M25 dependency is released. M21 remains paused.
 
 ## Reviewed behavior and corrections
 
@@ -27,7 +27,7 @@ Coordinator receipts are outside Git at physical `D:/CodexData/.codex/visualizat
 
 ## Limits and next gate
 
-Exact-main [Validate 38649083356](https://github.com/Deathstar1342/react-harness/actions/runs/38649083356), [Desktop 38649081836](https://github.com/Deathstar1342/react-harness/actions/runs/38649081836) and [helper 38649081839](https://github.com/Deathstar1342/react-harness/actions/runs/38649081839) are awaiting every applicable job/step verification. M25 waits for that acceptance; the M24 child is idle.
+Every applicable exact-main job/step independently passed: [Validate 38649083356](https://github.com/Deathstar1342/react-harness/actions/runs/38649083356), job `116143141394`; [Desktop 38649081836](https://github.com/Deathstar1342/react-harness/actions/runs/38649081836), Windows job `116143137171` and Ubuntu job `116143137560`; [helper 38649081839](https://github.com/Deathstar1342/react-harness/actions/runs/38649081839), job `116143136563`. Required Linux/Electron/helper acceptance is green; expected platform/failure-diagnostic skips are distinct. M25 may start from reviewed published main. M24 is idle; preserve its branch/worktree and receipts.
 
 Observed scope/review provenance is not semantic proof of arbitrary natural-language goals, outside-scope dependencies, filtered files, shell environment, report authenticity or filesystem race freedom. Explicit observation criteria mean historical read evidence. Final scoped freshness has a five-second aggregate bound. Long useful assignments can pause after 16 model turns without newly accepted required scope; explicit Resume renews quotas. Failed obligations after remapping can conservatively require original bindings. Overflow remains unverified rather than silently dropping evidence.
 
