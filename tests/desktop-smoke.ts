@@ -149,6 +149,7 @@ try {
       assert.equal(page.isClosed(),false);await page.evaluate(()=>window.abyssusDesktop!.dirty(false));
       console.log('PASS edit arriving during delayed cleanup vetoes destructive close and allows explicit retry');
       await close();
+      console.log('CHECK explicit close retry completed');
       app=await launch();const reopened=await app.firstWindow();
       await expect(reopened.getByLabel('Persistent profile home (Linux path)')).toHaveValue(profile);
       await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
@@ -184,7 +185,9 @@ try {
           await page.evaluate(home=>{
             (window as unknown as {m20Start?:Promise<string>}).m20Start=window.abyssusDesktop!.start({environment:{kind:'linux'},home,mode:'existing'}).then(()=> 'unexpected commit',e=>String(e));
           },profile);
-          await expect.poll(()=>app.evaluate(()=>Boolean((globalThis as unknown as {m20Prepared?:boolean}).m20Prepared))).toBe(true);
+          console.log('CHECK waiting for held prepared backend');
+          await expect.poll(()=>app.evaluate(()=>Boolean((globalThis as unknown as {m20Prepared?:boolean}).m20Prepared)),{timeout:30000}).toBe(true);
+          console.log('CHECK prepared backend held; verifying old editor/session');
           assert.equal(await page.evaluate(()=>document.documentElement.inert),true);
           assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,oldSession);
           assert.equal(await page.evaluate(()=>fetch('/api/projects').then(r=>r.status)),503);
@@ -192,6 +195,7 @@ try {
           // must not remount React and lose the original editor element/buffer.
           await page.waitForTimeout(2200);
           assert(await oldEditor!.evaluate(element=>element.isConnected));
+          console.log('CHECK polled editor retained; injecting late edit');
           await page.evaluate(()=>window.abyssusDesktop!.dirty(true));
           await app.evaluate(()=>{(globalThis as unknown as {m20Release:()=>void}).m20Release();});
           const rejected=await page.evaluate(()=>(window as unknown as {m20Start:Promise<string>}).m20Start);
@@ -225,8 +229,11 @@ try {
   app=await launch();await expect((await app.firstWindow()).getByRole('heading',{name:'Open your workspace'})).toBeVisible();
   console.log('PASS real application restart with isolated desktop profile');
   completed=true;
+} catch(error) {
+  console.error('SMOKE assertion failed before cleanup:',error);throw error;
 } finally {
   if(!completed)await app.windows()[0]?.screenshot({path:path.join(root,`test-results/electron-${process.platform}-failure.png`)}).catch(()=>{});
+  await app.evaluate(()=>{const probe=globalThis as unknown as {m20Release?:()=>void;m20StopRelease?:()=>void};probe.m20Release?.();probe.m20StopRelease?.();}).catch(()=>{});
   await close().catch(()=>{});
   clearTimeout(deadline);
   if(completed)rmSync(home,{recursive:true,force:true});
