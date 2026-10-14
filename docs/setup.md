@@ -283,3 +283,7 @@ Unix home/config directories must be owned by the current user with mode 0700; c
 ## Optional privileged system installs (M18)
 
 System installs stay disabled until explicit administrator provisioning in the selected Linux/WSL environment. Backend launch does not provision/start the helper. M18 provides trusted backend interfaces and fixed administrator setup/repair/uninstall entrypoints; it does not add the later Settings or guided desktop setup. See [helper prerequisites, trusted staging and recovery](helper.md). Do not run the privileged CI probes on a workstation. No WSL service distro, kernel settings, helper or system packages were changed locally for M18.
+## Electron desktop and browser pairing (M20)
+
+The runnable desktop shell, dedicated runtime staging, guided profiles, native folder selection and optional trusted helper setup are documented in [desktop setup](desktop.md). M21 owns final installers/release acceptance. Ordinary `npm start` now displays a single-use five-minute pairing code; enter it in the browser before using API/SSE. Backend restart revokes paired sessions. Configure endpoint/key in Settings; changing endpoints requires explicit replacement or clear of an existing key. No live-provider probe runs merely from saving.
+

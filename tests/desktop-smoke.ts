@@ -8,6 +8,7 @@ mkdirSync(path.join(root,'test-results'),{recursive:true});
 const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home},timeout:30000});
 let app=await launch();
 let completed=false;
+const deadline=setTimeout(()=>{console.error('FAIL desktop smoke exceeded its two-minute bound');void app.evaluate(({app})=>app.exit(1)).finally(()=>process.exit(1));},120000);
 try {
   const page=await app.firstWindow();
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
@@ -40,6 +41,7 @@ try {
       await page.getByRole('button',{name:'Open profile',exact:true}).click();
       await expect(page.getByRole('heading',{name:'Optional system installs'})).toBeVisible({timeout:45000});
       const ready=await page.evaluate(()=>window.abyssusDesktop!.status());
+      console.log('CHECK connected backend readiness');
       assert.equal(ready.phase,'ready');assert(ready.checks?.slice(0,5).every(c=>c.ok));
       await page.getByRole('button',{name:'Continue to chats'}).click();
       const ids=await page.evaluate(async(project)=>{
@@ -47,8 +49,10 @@ try {
         const p=await send('/projects',{name:'Desktop smoke',path:project,mode:'import'});
         const c=await send(`/projects/${p.id}/chats`,{title:'Preserve desktop state'});return {project:p.id,chat:c.id};
       },project);
+      console.log('CHECK project/chat created; reading SSE');
       const streamed=await page.evaluate(async chat=>{const abort=new AbortController();const response=await fetch(`/api/chats/${chat}/events`,{signal:abort.signal});const reader=response.body!.getReader();const first=await reader.read();await reader.cancel();abort.abort();return new TextDecoder().decode(first.value);},ids.chat);
       assert(streamed.includes(': connected'));
+      console.log('CHECK SSE first chunk and cancellation completed');
       await app.evaluate(({dialog})=>{dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});});
       assert.equal(await page.evaluate(()=>window.abyssusDesktop!.pickDirectory()),null);
       await page.evaluate(()=>window.abyssusDesktop!.dirty(true));
@@ -61,6 +65,7 @@ try {
       await page.screenshot({path:path.join(root,'test-results/electron-linux-connected.png')});
       console.log('PASS real Linux staged Node/SQLite/PTY prerequisites, authenticated API+streaming SSE, unauthenticated denial, native-picker cancellation adapter and dirty setup guard');
       await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());
+      console.log('CHECK waiting deliberate backend shutdown');
       await new Promise<void>(resolve=>{const child=app.process();if(child.exitCode!==null)resolve();else child.once('exit',()=>resolve());});
       app=await launch();const reopened=await app.firstWindow();
       await expect(reopened.getByLabel('Persistent profile home (Linux path)')).toHaveValue(profile);
@@ -80,6 +85,7 @@ try {
   console.log('PASS real application restart with isolated desktop profile');
   completed=true;
 } finally {
+  clearTimeout(deadline);
   await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close().catch(()=>{});
   if(completed)rmSync(home,{recursive:true,force:true});
   else console.log('Failed disposable desktop profile retained at '+home);

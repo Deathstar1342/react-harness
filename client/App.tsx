@@ -820,7 +820,7 @@ export function App() {
               {error ||
                 (loading
                   ? "Connecting to the backend…"
-                  : "Connect your provider to start chatting. Set STARK_BASE_URL on the backend and restart for URL changes. Add the API key in Settings.")}
+                  : "Connect your provider to start chatting. Set the STARK API endpoint and key in Settings.")}
             </span>
             <button className="text-button" onClick={() => void initialize()}>
               Retry

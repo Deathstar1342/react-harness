@@ -11,7 +11,7 @@ export interface Config {
   limits: PublicSettings['limits']; contextLimits: Record<AgentRole, number>; maxOutputTokens: number;
 }
 export function normalizeProviderEndpoint(input:string):string {
-  if(input.length>2048||input!==input.trim()||/[\x00-\x20\x7f\u2028\u2029]/.test(input))throw new Error('STARK_BASE_URL must be a bounded single-line URL without whitespace');
+  if(input.length>2048||input!==input.trim()||/[\x00-\x20\x7f\u2028\u2029\\?#]/.test(input))throw new Error('STARK_BASE_URL must be a bounded single-line URL without whitespace, query or fragment');
   if(!input)return '';
   const url=new URL(input);
   if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('STARK_BASE_URL must be HTTP(S) without credentials, query or fragment');

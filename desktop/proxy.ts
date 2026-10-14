@@ -21,11 +21,19 @@ export async function desktopResponse(request:Request,root:string,target?:Backen
     const headers:Record<string,string>={authorization:`Bearer ${target.token}`};
     if(body)headers['content-type']='application/json';
     const last=request.headers.get('last-event-id');if(last&&/^\d{1,16}$/.test(last))headers['last-event-id']=last;
-    const response=await fetch(target.address+url.pathname+url.search,{method:request.method,headers,body,redirect:'error',signal:request.signal});
+    const abort=new AbortController();const cancel=()=>abort.abort();request.signal.addEventListener('abort',cancel,{once:true});
+    const response=await fetch(target.address+url.pathname+url.search,{method:request.method,headers,body,redirect:'error',signal:abort.signal});
     const type=response.headers.get('content-type')??'application/json';
     if(!type.startsWith('application/json')&&!type.startsWith('text/event-stream')){await response.body?.cancel();return new Response(null,{status:502});}
-    // Pass the stream through; Chromium abort cancels fetch and closes backend SSE.
-    return new Response(response.body,{status:response.status,headers:{...csp,'Content-Type':type}});
+    const reader=response.body?.getReader();
+    const cleanup=()=>request.signal.removeEventListener('abort',cancel);
+    const stream=reader?new ReadableStream<Uint8Array>({
+      async pull(controller){try{const item=await reader.read();if(item.done){cleanup();controller.close();}else controller.enqueue(item.value);}catch(error){cleanup();controller.error(error);}},
+      cancel(){abort.abort();cleanup();void reader.cancel().catch(()=>{});},
+    }):null;
+    // Explicit stream ownership closes the upstream request on renderer cancellation;
+    // never wait on a still-open SSE source's cancellation promise.
+    return new Response(stream,{status:response.status,headers:{...csp,'Content-Type':type}});
   }
   if(request.method!=='GET')return new Response(null,{status:405});
   try {

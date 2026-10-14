@@ -21,6 +21,9 @@ try {
   console.log('PASS actual pkexec fixed setup, signed hello and damaged-descriptor repair identity preservation');
   execFileSync('sudo',['rm','/etc/abyssus-helper/client.json']);
   assert.equal((await helperOperation('uninstall')).available,false);
-  assert(!existsSync('/usr/lib/abyssus-helper/launcher'));assert(!existsSync('/etc/abyssus-helper/client.json'));assert(existsSync('/var/lib/abyssus-helper/audit.sqlite'));
+  assert(!existsSync('/usr/lib/abyssus-helper/launcher'));assert(!existsSync('/etc/abyssus-helper/client.json'));
+  // The audit directory deliberately denies non-root traversal. Do not mistake
+  // existsSync's permission failure for absence or weaken its permissions.
+  execFileSync('sudo',['/usr/bin/test','-s','/var/lib/abyssus-helper/audit.sqlite']);
   console.log('PASS actual pkexec removal verifies absent authority and retained audit');
 }finally{execFileSync('sudo',['rm','-f',rule]);execFileSync('sudo',['systemctl','restart','polkit']);}

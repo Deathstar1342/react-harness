@@ -1,5 +1,8 @@
 name: Desktop validation
 on: [push, pull_request, workflow_dispatch]
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   electron:
     strategy:
@@ -22,9 +25,11 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           npm run desktop:stage-runtime
           build/runtime/bin/node tests/desktop-runtime-probe.mjs
+          build/runtime/bin/node tests/desktop-controller-linux.mjs
       - name: Real Linux Electron and dedicated backend
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run desktop:smoke
+        timeout-minutes: 4
       - name: Real Windows Electron (no WSL distribution launch)
         if: runner.os == 'Windows'
         run: npm run desktop:smoke
