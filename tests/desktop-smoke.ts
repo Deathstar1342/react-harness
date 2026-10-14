@@ -67,7 +67,9 @@ try {
       await page.getByRole('button',{name:'sample.json',exact:true}).click();
       const editor=page.locator('.monaco-editor textarea').first();await expect(editor).toBeVisible({timeout:15000});
       assert((await worker).url().startsWith('abyssus://app/'));
-      await editor.press('ControlOrMeta+A');await editor.press('Backspace');await editor.pressSequentially('{"saved":"real Electron"}');
+      console.log('PASS real packaged JSON language worker loaded');
+      await page.locator('.monaco-editor .view-lines').first().click();
+      await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText('{"saved":"real Electron"}');
       await expect(page.getByLabel('Unsaved changes')).toBeVisible();
       await page.getByRole('button',{name:'Save',exact:true}).click();
       await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.json'),'utf8'),'{"saved":"real Electron"}');
@@ -154,6 +156,7 @@ try {
   console.log('PASS real application restart with isolated desktop profile');
   completed=true;
 } finally {
+  if(!completed)await app.windows()[0]?.screenshot({path:path.join(root,`test-results/electron-${process.platform}-failure.png`)}).catch(()=>{});
   await close().catch(()=>{});
   clearTimeout(deadline);
   if(completed)rmSync(home,{recursive:true,force:true});
