@@ -1,12 +1,17 @@
 import { X } from 'lucide-react';
+import {useState} from 'react';
+import {post,id,errorText} from './api';
 import type { ChatDetail } from '../shared/types';
 import { commandLabel, consoleText, terminalHistory } from './terminal';
 
 export function TerminalPanel({detail,connected,onClose}: {detail:ChatDetail; connected:boolean; onClose:()=>void}) {
+  const [cancelling,setCancelling]=useState<string|null>(null),[error,setError]=useState('');
+  const cancel=async(processId:string)=>{setCancelling(processId);setError('');try{await post(`/chats/${id(detail.chat.id)}/processes/${id(processId)}/cancel`,{});}catch(error){setError(errorText(error));}finally{setCancelling(null);}};
   const history = terminalHistory(detail.events,detail.chat.id);
   return <section id="command-terminal" className="command-terminal" aria-label="Command output">
     <header><strong>Terminal</strong><span className="muted">Read-only command evidence</span><button className="icon-button" onClick={onClose} aria-label="Close terminal"><X size={15}/></button></header>
     <div className="command-scroll">
+      {error&&<p role="alert">{error}</p>}
       {!connected && <p role="status">Reconnecting. These are last recorded outcomes; command activity may have changed.</p>}
       {detail.eventsTruncated && <p role="status">Earlier history is omitted. Starts, output, or outcomes may be missing from this view.</p>}
       {!history.commands.length && !history.unassociated.length && <p className="muted">No command evidence in the available history. Commands appear here when an agent executes them.</p>}
@@ -21,6 +26,7 @@ export function TerminalPanel({detail,connected,onClose}: {detail:ChatDetail; co
           {!entry.hasStart && <p className="muted">Start event unavailable. Only retained evidence is shown.</p>}
           {!item && <p className="muted">No lifecycle outcome available; output alone does not establish success.</p>}
           {item?.status === 'running' && <p className="muted">No completion recorded.{['paused','interrupted'].includes(detail.chat.status) ? ' Stop was requested; awaiting command outcome.' : ''}</p>}
+          {item?.processId&&item.status==='running'&&<button className="button" disabled={!connected||!!cancelling} onClick={()=>void cancel(item.processId!)}>{cancelling===item.processId?'Stopping…':'Stop process'}</button>}
           {item?.message && <p>{consoleText(item.message)}</p>}
           {item?.shellReset && <p className="muted">Shell state was lost or recreated. Completed side effects were not rolled back.</p>}
           {entry.outputTruncated && <p role="status">Output truncated; only part of the command output is available.</p>}

@@ -19,9 +19,9 @@ function setup(responses: Array<CompletionResult | (()=>Promise<CompletionResult
   const executed: Action[] = [];
   let current = 'old';
   const tools: ToolService = {
-    inspect:async(_ctx,request)=>({effect:request.name === 'read_file' ? 'read' : 'write',risk:'routine',description:'Change label',before:current,after:'new',diff:`${current}->new`}),
-    execute:async(_ctx,request)=>{executed.push(request);return {ok:true,output:'changed'};},
-    read:async(_root,path)=>path === 'AGENTS.md' ? {path,content:'',hash:null} : {path:'label.txt',content:current,hash:hash(current)},list:async()=>[],
+    inspect:async(_ctx,request)=>({effect:request.name === 'read_file' ? 'read' : 'write',risk:'routine',description:'Change label',before:current,after:'new',diff:`${current}->new`,...(request.name==='write_file'?{changes:[{before:{path:String(request.args.path),content:request.args.baseHash===null?'':current,hash:request.args.baseHash===null?null:hash(current)},after:{path:String(request.args.path),content:'new',hash:hash('new')}}]}:{})}),
+    execute:async(_ctx,request)=>{executed.push(request);current='new';return {ok:true,output:'changed',data:{path:String(request.args.path),hash:hash(current)}};},
+    read:async(_root,path)=>path === 'AGENTS.md' ? {path,content:'',hash:null} : {path:'label.txt',content:current,hash:hash(current)},list:async(_root,path)=>{if(path)throw Object.assign(new Error('Fixture file is not a directory'),{code:'ENOTDIR'});return [];},
     save:async()=>({path:'label.txt',content:'',hash:''}),setDirty:()=>{},dispose:async()=>{},
   };
   const provider: ModelProvider = { models:async()=>['test'],complete:async()=> {

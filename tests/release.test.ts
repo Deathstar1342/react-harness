@@ -140,7 +140,7 @@ describe('M6 independent release integration', () => {
 describe('M6 recovery and context follow-up', () => {
   it('keeps historical approved diffs out of authoritative context capacity', async () => {
     const t = await fixture([final('Small follow-up answered')]);
-    t.config.contextLimits.architect = 24000;
+    t.config.contextLimits.architect = 34000;
     t.config.maxOutputTokens = 256;
     // Legitimately completed approvals remain in audit history. Their large diffs
     // must not become noncompactable controls for every subsequent request.

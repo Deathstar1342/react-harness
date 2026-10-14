@@ -1,6 +1,7 @@
 import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink } from 'node:fs/promises';
+import * as filesystem from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -16,6 +17,7 @@ import { createApp } from '../server/app.js';
 import type { CompletionResult, ChangePreview, FileChange, ModelProvider } from '../shared/types.js';
 
 const cleanup: (()=>Promise<void>)[] = [];
+vi.mock('node:fs/promises',async importOriginal=>({...await importOriginal<typeof import('node:fs/promises')>()}));
 afterEach(async()=>{for (const fn of cleanup.splice(0).reverse()) await fn();});
 async function setup() {
   const root = await mkdtemp(path.join(tmpdir(),'rh-changes-'));
@@ -277,4 +279,75 @@ it('rechecks M9 guidance after the new snapshot read and discards the superseded
   await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
   expect(execute).not.toHaveBeenCalled();expect(t.store.fileChanges(t.project.id)).toEqual([]);
   expect(await readFile(path.join(t.projectRoot,'file.txt'),'utf8')).toBe('old');
+});
+
+async function recordedMove(t:Awaited<ReturnType<typeof setup>>) {
+  await mkdir(path.join(t.projectRoot,'original'));await writeFile(path.join(t.projectRoot,'original','source'),'retained bytes\r\n');
+  const action={name:'rename_file',args:{path:'original/source',destination:'destination',baseHash:hash('retained bytes\r\n')}};
+  const context={projectRoot:t.projectRoot,chatId:t.chat.id,agentId:'coder'};
+  const preview=await t.tools.inspect(context,action),snapshots=preview.changes!;
+  const change:FileChange={id:randomUUID(),projectId:t.project.id,chatId:t.chat.id,path:action.args.path,createdAt:new Date().toISOString(),status:'recording',...snapshots[0],destination:snapshots[1]};
+  t.store.transaction(()=>t.store.recordFileChange(change));
+  expect(await t.tools.execute(context,action)).toMatchObject({ok:true});
+  t.store.transitionFileChange(change.id,'recording','confirmed');
+  await rm(path.join(t.projectRoot,'original'),{recursive:true});
+  return {...change,status:'confirmed' as const};
+}
+it('previews and undoes one coherent two-path move and notifies both open paths',async()=>{
+  const t=await setup(),change=await recordedMove(t),preview=await t.changes.preview(t.project.id,change.id);
+  expect(preview.expectedHash).toBeNull();expect(preview.change.destinationPath).toBe('destination');
+  expect(preview.undoDiff).toContain('retained bytes');await t.undo(change,preview);
+  expect(await readFile(path.join(t.projectRoot,'original','source'),'utf8')).toBe('retained bytes\r\n');
+  expect((await t.tools.read(t.projectRoot,'destination')).hash).toBeNull();
+  expect(t.store.events(t.chat.id).filter(event=>event.type==='file_changed').map(event=>(event.data as {path:string}).path)).toEqual(['original/source','destination']);
+});
+it.each(['sync','unlink'])('retains durable unknown undo evidence after reverse-move %s failure',async point=>{
+  const t=await setup(),change=await recordedMove(t);
+  let restore:()=>void;
+  if(point==='sync'){
+    const open=filesystem.open;
+    const spy=vi.spyOn(filesystem,'open').mockImplementation(async(...args:Parameters<typeof open>)=>{const handle=await open(...args);if(String(args[0])===path.join(t.projectRoot,'original','source')&&args[1]==='wx')vi.spyOn(handle,'sync').mockRejectedValue(new Error('Injected reverse fsync failure'));return handle;});restore=()=>spy.mockRestore();
+  }else{
+    const unlink=filesystem.unlink;
+    const spy=vi.spyOn(filesystem,'unlink').mockImplementation(async target=>{if(String(target)===path.join(t.projectRoot,'destination'))throw new Error('Injected reverse unlink failure');return unlink(target);});restore=()=>spy.mockRestore();
+  }
+  try{await expect(t.undo(change)).rejects.toThrow('uncertain');}finally{restore();}
+  expect(await readFile(path.join(t.projectRoot,'original','source'),'utf8')).toBe('retained bytes\r\n');expect(await readFile(path.join(t.projectRoot,'destination'),'utf8')).toBe('retained bytes\r\n');
+  const disk=new Store(t.filename);expect(disk.fileChange(t.project.id,change.id).status).toBe('unknown');disk.close();
+  t.store.recover();expect((await t.changes.preview(t.project.id,change.id)).previewToken).toBeUndefined();
+});
+it('claims reverse move before any parent/file creation and leaves a failed journal write without effects',async()=>{
+  const t=await setup(),change=await recordedMove(t);
+  const transition=t.store.transitionFileChange.bind(t.store);
+  vi.spyOn(t.store,'transitionFileChange').mockImplementation((id,from,to)=>{if(to==='undoing')throw new Error('Injected undo claim write failure');return transition(id,from,to);});
+  await expect(t.undo(change)).rejects.toThrow('claim write');
+  expect((await t.tools.read(t.projectRoot,change.path)).hash).toBeNull();
+  expect(await readFile(path.join(t.projectRoot,'destination'),'utf8')).toBe('retained bytes\r\n');
+  await expect(t.tools.list(t.projectRoot,'original')).rejects.toMatchObject({code:'ENOENT'});
+  expect(t.store.fileChange(t.project.id,change.id).status).toBe('confirmed');
+});
+it('retains partial reverse-parent effects as unknown after a post-claim fault, including restart',async()=>{
+  const t=await setup(),change=await recordedMove(t),move=WorkspaceFiles.prototype.move;
+  const spy=vi.spyOn(WorkspaceFiles.prototype,'move').mockImplementation(function(this:WorkspaceFiles,root,input,destination,baseHash,afterCreate,claim){
+    return move.call(this,root,input,destination,baseHash,()=>{afterCreate?.();throw new Error('Injected parent/create fault');},()=>{claim?.();const disk=new Store(t.filename);expect(disk.fileChange(t.project.id,change.id).status).toBe('undoing');disk.close();});
+  });
+  await expect(t.undo(change)).rejects.toThrow('uncertain');spy.mockRestore();
+  expect(t.store.fileChange(t.project.id,change.id).status).toBe('unknown');
+  expect(await readFile(path.join(t.projectRoot,'destination'),'utf8')).toBe('retained bytes\r\n');
+  t.store.recover();expect((await t.changes.preview(t.project.id,change.id)).previewToken).toBeUndefined();
+});
+it('restores an explicit deleted file only while its path remains absent',async()=>{
+  const t=await setup(),change=await t.record('before','after');
+  const deleted:FileChange={...change,id:randomUUID(),before:change.after,after:{path:change.path,content:'',hash:null}};
+  await rm(path.join(t.projectRoot,change.path));t.store.recordFileChange(deleted);
+  const preview=await t.changes.preview(t.project.id,deleted.id);expect(preview.diff).toContain('+++ /dev/null');expect(preview.previewToken).toBeDefined();
+  await t.undo(deleted,preview);expect(await readFile(path.join(t.projectRoot,change.path),'utf8')).toBe('after');
+});
+it('rolls back a reverse-move claim COMMIT fault before creating the missing original parent',async()=>{
+  const t=await setup(),change=await recordedMove(t),exec=t.store.db.exec.bind(t.store.db);let armed=true;
+  const fault=vi.spyOn(t.store.db,'exec').mockImplementation(sql=>{if(sql==='COMMIT'&&armed){armed=false;throw new Error('Injected reverse-move COMMIT');}return exec(sql);});
+  await expect(t.undo(change)).rejects.toThrow('COMMIT');fault.mockRestore();
+  expect(t.store.fileChange(t.project.id,change.id).status).toBe('confirmed');
+  await expect(t.tools.list(t.projectRoot,'original')).rejects.toMatchObject({code:'ENOENT'});
+  expect(await readFile(path.join(t.projectRoot,'destination'),'utf8')).toBe('retained bytes\r\n');
 });

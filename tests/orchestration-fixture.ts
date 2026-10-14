@@ -32,6 +32,10 @@ export async function orchestrationFixture(phases = 1) {
   const reference = (phase = 1): PlanStepRef => ({planId:plan.id!, planVersion:plan.version!, phaseId:`phase-${phase}`,stepId:`step-${phase}`});
   const replies: Reply[] = [], requests: Input[] = [], executed: Action[] = [], commandResults: ToolResult[] = [];
   const tools: ToolService = {
+    processLifecycle:workspace.processLifecycle,
+    configureMutationGuard:workspace.configureMutationGuard.bind(workspace),
+    closeCommandContext:workspace.closeCommandContext.bind(workspace),
+    restore:workspace.restore.bind(workspace), restoreMove:workspace.restoreMove.bind(workspace),
     inspect: async (context, action) => ['run_tests','run_shell','execute_python'].includes(action.name) ? {effect:'execute',risk:'routine',description:'Synthetic command fixture'} : workspace.inspect(context, action),
     execute: async (context, action) => {
       executed.push(structuredClone(action));

@@ -4,8 +4,8 @@ import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, Mod
 import type { Config } from './config.js';
 import { Store } from './store.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
-import { hash } from './tools/paths.js';
-import { definitionFor, parseToolArguments, publishedTools, validateAction, validateToolResult } from './tool-registry.js';
+import { hash, safeRelative } from './tools/paths.js';
+import { definitionFor, parseToolArguments, publishedTools, toolRegistry, validateAction, validateToolResult } from './tool-registry.js';
 import { validateNativeCalls, validateNativeHistory } from './provider.js';
 import type { InstallService } from './installs.js';
 import { assignmentMessage, checkpointFeedback, reviewMessage, taskState, type Assignment } from './prompts/orchestration.js';
@@ -13,6 +13,7 @@ import { assignmentBlockers, recordAssignmentEvidence, refreshAssignmentEvidence
 import { promptIdentity } from './prompts.js';
 import { snapshotScope, unknownScope, type ScopeSnapshot, type VerificationSnapshot } from './verification-scope.js';
 import { acceptances, activeGoalEvidence, addGoalUncertainty, bindGoal, createGoal, goalBlockers, goalInput, goalOf, goalRevisionInput, goalStatus, inheritedGoalEvidence, invalidateGoal, parseGoalCommand, recordGoalEvidence, refreshGoalResolutions, saveGoal, unresolvedGoalEvents, type GoalInput } from './goals.js';
+import {ProcessJobs, processRecords} from './process-jobs.js';
 
 interface PendingAction { verification?: VerificationSnapshot; callId?: string; id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
 export interface Frame { acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
@@ -25,6 +26,7 @@ export interface RunState {
   generation: number;
   objective?: string;
   instructionsHash?: string | null;
+  instructionTargets?: string[];
 }
 export interface RuntimeHooks {
   instructions(role: AgentRole): string;
@@ -32,14 +34,15 @@ export interface RuntimeHooks {
   complete?: (role: AgentRole, input: Parameters<ModelProvider['complete']>[0]) => Promise<CompletionResult>;
 }
 
-const readTools = new Set(['read_file', 'list_files', 'search', 'git_status', 'git_diff']);
-const workspaceTools = new Set([...readTools, 'write_file', 'run_shell', 'execute_python', 'run_tests']);
+const readTools = new Set([...toolRegistry.values()].filter(tool=>tool.kind==='workspace' && tool.effect==='read').map(tool=>tool.name));
+const workspaceTools = new Set([...toolRegistry.values()].filter(tool=>tool.kind==='workspace').map(tool=>tool.name));
 const safeResult = (error: unknown): ToolResult => ({
   ok: false,
   output: error instanceof Error ? error.message : 'Action failed',
 });
 
 export class Runtime {
+  readonly processes:ProcessJobs;
   private active = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private runs = new Map<string, RunState>();
   private projectEdits = new Map<string,'undo'|'removal'>();
@@ -73,6 +76,7 @@ export class Runtime {
     operation: () => Promise<T>,
     removalRecovery = false,
   ): Promise<T> {
+    this.processes.assertIdle(projectId);
     if (this.store.project(projectId).removalError && !removalRecovery) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
 
     if (
@@ -104,7 +108,7 @@ export class Runtime {
     readonly config: Config,
     readonly hooks: RuntimeHooks,
     readonly installs?: InstallService,
-  ) { store.initializeModels(config.models); store.initializePlanning(); }
+  ) { store.initializeModels(config.models); store.initializePlanning();this.processes=new ProcessJobs(store,tools,()=>config.apiKey?[config.apiKey]:[]);tools.configureMutationGuard?.((root,owner)=>this.processes.guard(root,owner)); }
 
   private load(chatId: string): RunState | null {
     const cached = this.runs.get(chatId);
@@ -173,6 +177,7 @@ export class Runtime {
       if (receipt) this.store.setState(`build:${chatId}`, receipt);
       return this.prepareSubmission(chatId, content, previous,goalRequest);
     });
+    this.processes.stopChat(chatId);
     if (previous?.frames.length) {
       // prepareSubmission preserves frame identities held by the active loop.
       Object.assign(previous, next);
@@ -284,25 +289,36 @@ export class Runtime {
 
     const promise = Promise.resolve()
       .then(() => this.loop(chatId, controller.signal))
-      .catch(error => {
+      .catch(async error => {
+        // A claimed process can outlive the native-result COMMIT that started it.
+        // Stop and drain that ownership before declaring the runtime failure done.
+        let cleanupFailure = '';
+        try { this.processes.stopChat(chatId); await this.processes.drainChat(chatId); }
+        catch { cleanupFailure = ' Owned process cleanup failed; retained process evidence and ownership remain authoritative.'; }
         if (controller.signal.aborted) return;
+        const failure = (error instanceof Error ? error.message : 'Run failed') + cleanupFailure;
+        try {
         this.store.transaction(()=>{
         for (const frame of this.load(chatId)?.frames ?? []) this.store.progress(chatId, frame.planStep, frame.id, 'blocked', 'error', 'Run stopped with an error; inspect recorded evidence.');
         this.store.updateChat(chatId, { status: 'error' });
-        goalStatus(this.store,chatId,'blocked',error instanceof Error?error.message:'Run failed; inspect evidence before explicit continuation.');
+        goalStatus(this.store,chatId,'blocked',failure);
         const message = this.store.message(
           chatId,
           'system',
-          error instanceof Error ? error.message : 'Run failed',
+          failure,
         );
         this.store.event(chatId, 'error', { message: message.content, messageId: message.id });
         });
+        } catch { throw error; } // Secondary persistence failure must not mask the cause.
       })
       .finally(() => {
         this.active.delete(chatId);
       });
 
     this.active.set(chatId, { controller, promise });
+    // Callers may submit without waiting; keep the original rejection observable
+    // through wait(), but never create an unhandled detached failure.
+    void promise.catch(() => {});
   }
 
   async wait(chatId: string) {
@@ -331,6 +347,7 @@ export class Runtime {
       this.installs?.invalidate(chat.id,'WORKSPACE_CHANGED');
       this.store.invalidateApprovals(chat.id);
       });
+      this.processes.stopChat(chat.id);
 
       // A paused task stays paused; active tasks consume this at the next safe boundary.
       if (
@@ -397,7 +414,9 @@ export class Runtime {
     this.store.invalidateApprovals(chatId);
     });
     running?.controller.abort(new Error(`Task ${action} requested`));
+    this.processes.stopChat(chatId);
     await running?.promise;
+    await this.processes.drainChat(chatId);
     const state=this.load(chatId);
     if(state)this.commitRunTransition(chatId,state,draft=>{for(const frame of draft.frames)this.cancelQueued(chatId,frame,'Cancelled before dispatch; no effect started.');});
   }
@@ -500,6 +519,20 @@ export class Runtime {
         }),
     };
   }
+  private async processAction(chatId:string,state:RunState,frame:Frame,pending:PendingAction,action:Action):Promise<ToolResult> {
+    const chat=this.store.chat(chatId);
+    if(action.name==='start_process') {
+      if(!pending.callId)throw new Error('Missing process native correlation');
+      const goal=goalOf(this.store,chatId);
+      const plan=this.store.plan(chatId);
+      return this.processes.start({projectId:chat.projectId,chatId,frameId:frame.id,taskId:state.frames[0].id,callId:pending.callId,commandId:pending.id,generation:state.generation,modeVersion:chat.modeVersion??0,instructionsHash:state.instructionsHash??null,targets:state.instructionTargets??[],approvalId:pending.approvalId,approvalMode:chat.approvalMode,assignment:JSON.stringify(frame.assignment),plan:plan.id?{id:plan.id,version:plan.version!}:undefined,goal:goal?{id:goal.id,revision:goal.revision,generation:goal.generation}:undefined},action);
+    }
+    if(action.name==='cancel_process')return {ok:true,output:'Cancellation outcome recorded; effects are not rolled back.',data:await this.processes.cancel(String(action.args.processId),chatId,frame.id)};
+    const allowed=frame.role==='coder'?[frame.id]:frame.role==='critic'?[frame.reviewDelegationId??frame.id]:processRecords(this.store,chat.projectId,chatId).filter(record=>record.taskId===state.frames[0].id).map(record=>record.frameId);
+    const data=await this.processes.observe(String(action.args.processId),chatId,allowed,Number(action.args.offset??0),action.name==='process_status'?4:Number(action.args.limit??16_000),Number(action.args.waitMs??0));
+    if(action.name==='process_status')data.output='';
+    return {ok:true,output:JSON.stringify(data),data};
+  }
 
   private resolveCall(chatId:string, frame:Frame, callId:string, result:ToolResult) {
     if (!frame.queuedCalls?.some(call=>call.id===callId)) throw new Error('Native call correlation was lost');
@@ -557,13 +590,29 @@ export class Runtime {
     let instructions;
 
     try {
+      const targets = new Set(state.instructionTargets ?? []);
+      // Invalid requested paths have no applicable subtree. Reject them as tool
+      // failures below, without poisoning retained guidance for the whole task.
+      const requested=(target:string)=>{try{targets.add(safeRelative(target,true));}catch{/* rejected before inspection or dispatch */}};
+      for (const frame of state.frames) {
+        for (const target of frame.scope ?? []) targets.add(target);
+        const actions = frame.pending ? [frame.pending.action] : [];
+        for (const call of frame.queuedCalls ?? []) actions.push(parseToolArguments(call.function.name,call.function.arguments));
+        for (const action of actions) {
+          for (const target of definitionFor(action.name).affectedPaths(action)) requested(target);
+          if (action.name === 'delegate') for (const target of (action.args.paths as string[] | undefined) ?? []) requested(target);
+        }
+      }
       instructions = await readProjectInstructions(
         this.tools,
         this.store.project(this.store.chat(chatId).projectId).path,
+        [...targets].sort(),
       );
+      if (JSON.stringify(state.instructionTargets) !== JSON.stringify([...targets].sort())) this.commitRunTransition(chatId,state,draft=>{draft.instructionTargets=[...targets].sort();});
     } catch (error) {
       this.discardPrepared(chatId, state);
       this.commitRunTransition(chatId,state,draft=>{delete draft.instructionsHash;draft.generation++;invalidateGoal(this.store,chatId,'Project instructions could not be refreshed. Fresh review is required.');});
+      this.processes.stopChat(chatId);
       throw error;
     }
 
@@ -588,11 +637,12 @@ export class Runtime {
         this.store.message(
           chatId,
           'system',
-          'Root AGENTS.md changed. Prepared proposals were discarded; the next request uses fresh project guidance.',
+          'Applicable AGENTS.md guidance changed. Prepared proposals were discarded; the next request uses fresh scoped guidance.',
         );
       }
 
       });
+      if(previouslyLoaded)this.processes.stopChat(chatId);
     }
 
     return instructions;
@@ -747,6 +797,9 @@ export class Runtime {
       try {
         validateAction(action,frame.role,state.planOnly?'plan':'execute');
         const definition=definitionFor(action.name);
+        for(const target of definition.affectedPaths(action))safeRelative(target,true);
+        if(action.name==='delegate')for(const target of (action.args.paths as string[]|undefined)??[])safeRelative(target,true);
+        if(definition.effect!=='read' && definition.approval!=='owned_stop')this.processes.assertIdle(this.store.chat(chatId).projectId);
         if(definition.kind==='control' && action.name!=='recommend_packages') {
           let reviewedScope:ScopeSnapshot|undefined;
           const parent=state.frames.at(-2);
@@ -779,19 +832,15 @@ export class Runtime {
             throw new Error('Unknown workspace action');
           }
 
-          if (
-            (frame.role === 'critic' ||
-              frame.role === 'architect' ||
-              state.planOnly) &&
-            !readTools.has(action.name)
-          ) {
+          if (!definition.roles.includes(frame.role) || !definition.modes.includes(state.planOnly ? 'plan' : 'execute')) {
             throw new Error(
               'This agent or plan-only task may only use read tools; implementation belongs to the coder',
             );
           }
 
-          if (action.name === 'write_file' && frame.scope?.length) {
-            const target = String(action.args.path)
+          if (definition.fileMutation && frame.scope?.length) {
+            for (const filename of definition.affectedPaths(action)) {
+            const target = filename
               .replaceAll('\\', '/')
               .replace(/^\.\//, '');
 
@@ -809,6 +858,7 @@ export class Runtime {
                 'This edit exceeds the assigned file scope. Report the scope expansion to the architect before proceeding.',
               );
             }
+            }
           }
 
           const inspection = await definitionFor(action.name).inspect({workspace:this.tools,context:this.toolContext(chatId,frame,signal),control:async()=>{throw new Error('Not a workspace call');}},action);
@@ -825,7 +875,7 @@ export class Runtime {
           const mode = this.store.chat(chatId).approvalMode;
 
           const needsApproval =
-            inspection.effect !== 'read' &&
+            definition.approval !== 'owned_stop' && inspection.effect !== 'read' &&
             (mode === 'review' ||
               (mode === 'balanced' &&
                 (inspection.effect === 'execute' ||
@@ -996,10 +1046,7 @@ export class Runtime {
           });
         } else {
           try {
-            const fresh = await this.tools.inspect(
-              this.toolContext(chatId, frame, signal),
-              pending.action,
-            );
+            const fresh = await definitionFor(pending.action.name).inspect({workspace:this.tools,context:this.toolContext(chatId,frame,signal),control:async()=>{throw new Error('Not a workspace call');}},pending.action);
 
             if (JSON.stringify(fresh) !== JSON.stringify(approval.inspection)) {
               throw new Error(
@@ -1029,6 +1076,8 @@ export class Runtime {
         await this.refreshInstructions(chatId, state, signal);
 
         if (frame.pending !== pending) return true;
+        const pendingDefinition=definitionFor(pending.action.name);
+        if(pendingDefinition.effect!=='read'&&pendingDefinition.approval!=='owned_stop')this.processes.assertIdle(this.store.chat(chatId).projectId);
 
         if (state.steering.length) {
           this.deliverSteering(chatId, state);
@@ -1053,17 +1102,12 @@ export class Runtime {
           verification={before,after:unknownScope('Verification has not returned.'),bindingValid:true};
         }
 
-        if (pending.action.name === 'write_file') {
+        if (definitionFor(pending.action.name).fileMutation) {
           const project = this.store.project(
             this.store.chat(chatId).projectId,
           );
 
-          const args = pending.action.args;
-
-          const before = await this.tools.read(
-            project.path,
-            String(args.path),
-          );
+          const before = await this.tools.read(project.path,String(pending.action.args.path));
 
           signal.throwIfAborted();
 
@@ -1077,7 +1121,7 @@ export class Runtime {
             return true;
           }
 
-          if (before.hash !== args.baseHash) {
+          if (before.hash !== pending.action.args.baseHash) {
             transition(next=>{
               next.pending!.result = {
                 ok: false,
@@ -1089,7 +1133,13 @@ export class Runtime {
             return true;
           }
 
-          const content = String(args.content);
+          const inspection = await this.tools.inspect(this.toolContext(chatId,frame,signal),pending.action);
+          const changes = inspection.changes;
+          if (!changes?.length || changes.length > 2) throw new Error('File mutation inspection is missing exact snapshots.');
+          const {after} = changes[0];
+          await this.refreshInstructions(chatId,state,signal);
+          if (frame.pending !== pending || state.steering.length) return true;
+          signal.throwIfAborted();
 
           // A stable action ID and transaction bind snapshots to execution intent.
           this.commitRunTransition(chatId,state,draft=>{
@@ -1102,11 +1152,8 @@ export class Runtime {
               createdAt: new Date().toISOString(),
               status: 'recording',
               before,
-              after: {
-                path: before.path,
-                content,
-                hash: hash(content),
-              },
+              after,
+              ...(changes[1] ? {destination: changes[1]} : {}),
             });
 
             next.pending!.stage='executing';
@@ -1149,7 +1196,7 @@ export class Runtime {
         let executionResult:ToolResult;
         try {
           validateAction(pending.action,frame.role,state.planOnly?'plan':'execute');
-          executionResult = await definitionFor(pending.action.name).handler({workspace:this.tools,context,control:async()=>{throw new Error('Not a workspace call');}},pending.action);
+          executionResult = await definitionFor(pending.action.name).handler({workspace:this.tools,context,process:action=>this.processAction(chatId,state,frame,pending,action),control:async()=>{throw new Error('Not a workspace call');}},pending.action);
           if(verification) {
             verification.after=await snapshotScope(this.tools,context.projectRoot,frame.assignment?.paths);
             verification.bindingValid=frame.pending===pending && state.generation===verificationBinding.generation && !state.steering.length && !state.planOnly && this.store.chat(chatId).modeVersion===verificationBinding.modeVersion && JSON.stringify(frame.assignment)===verificationBinding.assignment;
@@ -1171,12 +1218,12 @@ export class Runtime {
           const frame=draft.frames.find(item=>item.id===completedFrame.id)!;
           const pending=frame.pending!;pending.result=executionResult;
           if(verification)pending.verification=verification;
-          if (pending.action.name === 'write_file') {
+          if (definitionFor(pending.action.name).fileMutation) {
             const projectId = this.store.chat(chatId).projectId;
             const change = this.store.fileChange(projectId, pending.id);
 
             const result = pending.result?.data as
-              | { hash?: string; path?: string; mutation?: string }
+              | { hash?: string | null; path?: string; mutation?: string; snapshots?: import('../shared/types.js').FileSnapshot[] }
               | undefined;
 
             this.store.transitionFileChange(
@@ -1184,7 +1231,7 @@ export class Runtime {
               'recording',
               pending.result?.ok &&
                 result?.hash === change.after.hash &&
-                result.path === change.path
+                result.path === change.path && (!change.destination || result.snapshots?.some(snapshot=>snapshot.path===change.destination!.after.path && snapshot.hash===change.destination!.after.hash && snapshot.content===change.destination!.after.content))
                 ? 'confirmed'
                 : result?.mutation === 'not_started'
                   ? 'rejected'
@@ -1263,7 +1310,7 @@ export class Runtime {
         }
         this.store.progress(chatId, frame.planStep, frame.id, result.ok && !signal.aborted ? 'in_progress' : 'blocked', signal.aborted ? 'stopped' : result.ok ? 'working' : 'failed', outcome, toolEvent.id);
 
-        if (result.ok && pending.action.name === 'write_file') {
+        if (result.ok && definitionFor(pending.action.name).fileMutation) {
           const projectId = this.store.chat(chatId).projectId;
 
           const snapshot = result.data as
@@ -1280,6 +1327,7 @@ export class Runtime {
               source: 'agent',
               hash: snapshot?.hash,
             });
+            if (typeof pending.action.args.destination === 'string') this.store.event(affected.id,'file_changed',{path: pending.action.args.destination,source:'agent'});
           }
         }
 
@@ -1329,6 +1377,7 @@ export class Runtime {
   }
 
   private async completeGoal(chatId:string,state:RunState,frame:Frame,call:NativeToolCall,action:Action,signal:AbortSignal) {
+    this.processes.assertIdle(this.store.chat(chatId).projectId);
     const goal=goalOf(this.store,chatId),plan=this.store.plan(chatId),modeVersion=this.store.chat(chatId).modeVersion;
     if(!goal || goal.status!=='running' || state.planOnly || action.args.goalId!==goal.id || action.args.goalRevision!==goal.revision || action.args.planId!==plan.id || action.args.planVersion!==plan.version || action.args.modeVersion!==modeVersion)throw new Error('Completion request has stale goal, plan or mode revisions, or goal execution is not running.');
     const blockers=goalBlockers(this.store,chatId,goal,plan);
@@ -1337,6 +1386,7 @@ export class Runtime {
     if(new Set(ids).size!==ids.length || ids.length!==goal.reviews.length || goal.reviews.some(review=>!ids.includes(review.eventId)))throw new Error('Completion must reference exactly the current recorded accepted review IDs.');
     const generation=state.generation,goalGeneration=goal.generation;
     const bound=()=> {
+      this.processes.assertIdle(this.store.chat(chatId).projectId);
       signal.throwIfAborted();
       const current=goalOf(this.store,chatId),currentPlan=this.store.plan(chatId);
       if(state.generation!==generation || state.frames.at(-1)!==frame || frame.queuedCalls?.[0]?.id!==call.id || state.steering.length || state.planOnly || current?.id!==goal.id || current.revision!==goal.revision || current.generation!==goalGeneration || current.status!=='running' || currentPlan.id!==plan.id || currentPlan.version!==plan.version || this.store.chat(chatId).modeVersion!==modeVersion)throw new Error('Goal completion changed during evidence checks; request current bindings again.');
@@ -1374,9 +1424,16 @@ export class Runtime {
   }
 
   private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot):ToolResult {
+    if(['submit_completion','review_result','delegate'].includes(action.name)) {
+      const projectId=this.store.chat(chatId).projectId;
+      if(action.name==='delegate')this.processes.assertIdle(projectId);
+      else this.processes.assertQuiescent(projectId);
+    }
     let paused=false;
     this.commitRunTransition(chatId,state,draft=>{
       const frame=draft.frames.find(item=>item.id===original.id)!;
+      if(action.name==='delegate')this.processes.assertIdle(this.store.chat(chatId).projectId);
+      else if(['submit_completion','review_result'].includes(action.name))this.processes.assertQuiescent(this.store.chat(chatId).projectId);
       validateAction(action,frame.role,draft.planOnly?'plan':'execute');
       const resolve=(output:string,data?:unknown)=>this.resolveCall(chatId,frame,call.id,{ok:true,output,...(data===undefined?{}:{data})});
       switch(action.name) {
@@ -1440,6 +1497,7 @@ export class Runtime {
   }
 
   private finishReviewInternal(chatId: string, state: RunState, passed: boolean, findings: string[],reviewedScope?:ScopeSnapshot) {
+    this.processes.assertQuiescent(this.store.chat(chatId).projectId);
     const reviewer = state.frames.pop();
     const parent = state.frames.at(-1);
 
@@ -1460,7 +1518,8 @@ export class Runtime {
 
     if (parent?.role === 'coder') {
       recordGoalEvidence(this.store,chatId,parent);
-      const blockers = assignmentBlockers(parent);
+      const processBlockers=this.processes.blockers(this.store.chat(chatId).projectId,parent.id);
+      const blockers = [...assignmentBlockers(parent),...processBlockers];
       const goal=goalOf(this.store,chatId), binding=parent.assignment?.goal;
       const goalBound=!!goal && goal.status!=='completed' && binding?.goalId===goal.id && binding.goalRevision===goal.revision && !!parent.planStep;
       const observation=parent.assignment?.evidenceKind==='observation' && this.observationEvidence(chatId,parent,reviewer);
@@ -1486,7 +1545,7 @@ export class Runtime {
         this.store.setState(`goal-evidence:${chatId}`,records);
         saveGoal(this.store,chatId,goal);
       }
-      if ((!passed || blockers.length > 0) && parent.repairs++ < 2 && !parent.acceptanceEvidence?.uncertainEventIds.length && !parent.acceptanceEvidence?.overflow) {
+      if ((!passed || blockers.length > 0) && parent.repairs++ < 2 && !parent.acceptanceEvidence?.uncertainEventIds.length && !parent.acceptanceEvidence?.overflow && !processBlockers.length) {
         delete parent.final;
         parent.messages.push({
           role: 'user',
@@ -1546,6 +1605,7 @@ export class Runtime {
     for (const item of this.active.values()) {
       item.controller.abort();
     }
+    await this.processes.close();
 
     await Promise.all(
       [...this.active.values()].map(item => item.promise),

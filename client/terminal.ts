@@ -7,7 +7,7 @@ export interface TerminalCommand {
   hasStart: boolean; hasSnapshot: boolean;
 }
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string,unknown> : {};
-const commandNames = new Set(['run_shell', 'execute_python', 'run_tests']);
+const commandNames = new Set(['run_shell', 'execute_python', 'run_tests','start_process']);
 function lifecycle(value: Record<string,unknown>): value is unknown & CommandEvent & Record<string,unknown> {
   return typeof value.commandId === 'string' && typeof value.agentId === 'string' && typeof value.sessionId === 'string'
     && ['architect','coder','critic'].includes(String(value.role))
@@ -41,7 +41,7 @@ export function terminalHistory(events: RunEvent[], chatId: string) {
       entry.lifecycle = data;
       entry.hasStart ||= data.status === 'running';
       if (typeof data.output === 'string') {
-        entry.output = data.output.slice(-LIMIT); entry.hasSnapshot = true;
+        entry.output = data.output.slice(-LIMIT); entry.hasSnapshot = data.status !== 'running';
         entry.outputTruncated = data.truncated === true || data.output.length > LIMIT;
       }
     } else if (!entry.hasSnapshot) {

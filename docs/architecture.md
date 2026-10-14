@@ -10,6 +10,14 @@ The current desktop, Linux process sandbox, workspace approvals, independent sys
 
 ## Product direction
 
+### M25 scoped guidance and mutation ownership
+
+Known-path AGENTS.md ancestor snapshots provide deterministic subtree precedence below human/runtime policy, with fixed depth/count/byte bounds and revision checks around model, approval, dispatch and acceptance boundaries. Discovery is scoped, not recursive repository enumeration. The architect's only file mutation capability is bounded canonical AGENTS line maintenance through existing approvals, leases and history; planning drafts stay prose and goals stay in SQLite.
+
+Registry metadata now drives affected paths, file history, observation eligibility, command classification and verification invalidation. Exact line patches, range reads, paginated literal search, deletion and no-clobber copy/remove moves retain existing confinement and fresh versions. Paired move journals and undo claims expose partial effects honestly; they are not atomic filesystem transactions. Public change summaries omit file snapshots.
+
+Long processes remain inside the existing single-coder runtime and Linux sandbox. Private project reservations serialize editor/file/shell/install/reset/removal mutation work before awaits. Durable task/frame/native-call claims precede sandbox setup; fresh guidance and all current authorization bindings are rechecked at the final synchronous PTY boundary. Status/output observe owned handles; only exact authorized stop is added to Terminal. Completion callbacks persist evidence rather than scheduling another mutating loop. Namespace/broker cleanup, cancellation, final COMMIT faults and restart retain uncertainty without PID adoption or replay. Active jobs cannot complete work; stopped/uncertain jobs cannot turn a review into acceptance or a start into verification. See [M25 API contract](api-contract.md#m25-scoped-instructions-files-and-processes) for bounds, known-scope limits and deliberate unreconciled-process/capacity behavior.
+
 ### M24 durable goals and completion authority
 
 Explicit `/goal` human intent adds durable objective/criteria, runtime state and completion accounting to the existing serialized native loop. A model ending or critic PASS does not stop authorized unfinished goal work. Protected current criteria and cumulative required plan scope accompany each useful next turn; budgets produce visible paused/blocked reasons. Ordinary non-goal chats remain conversational. Planning records goal intent but keeps execution behind Start building. No background service, launch-time execution or independent mutating scheduler is added.

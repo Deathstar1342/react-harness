@@ -3,9 +3,11 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { definitionFor, validateAction } from '../tool-registry.js';
-import type { Action, FileSnapshot, ToolContext, ToolInspection, ToolResult, ToolService, TestReport } from '../../shared/types.js';
+import type { Action, FileChange, FileSnapshot, ToolContext, ToolInspection, ToolResult, ToolService, TestReport } from '../../shared/types.js';
+import { patchSnapshot, type LineEdit } from './edits.js';
+import {reserveMutation} from './mutations.js';
 import { WorkspaceFiles, type FileOptions } from './files.js';
-import { allowed, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
+import { allowed, hash, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
 import { ShellPool, gitCommand, type ShellOptions, type CommandResult } from './shell.js';
 import { parseJUnit, unavailableReport } from './junit.js';
 import { LinuxSandbox, type SandboxPolicy } from './sandbox.js';
@@ -18,6 +20,7 @@ function validate(action: Action): Record<string, any> {
 }
 export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<Omit<ShellOptions, 'sandbox'>> { maxReportBytes?: number }
 export class WorkspaceTools implements ToolService {
+  readonly processLifecycle='sandbox-dispatch-v1' as const;
   private files: WorkspaceFiles;
   private shells: ShellPool;
   readonly sandbox = new LinuxSandbox();
@@ -25,6 +28,15 @@ export class WorkspaceTools implements ToolService {
   private removing=new Set<string>();
   private quarantined=new Set<string>();
   private operations = new Map<string,number>();
+  private commandOwners=new Map<string,{owner:symbol;count:number}>();
+  private mutationGuard: (root:string,owner?:symbol)=>void = () => {};
+  configureMutationGuard(guard:(root:string,owner?:symbol)=>void) {this.mutationGuard=guard;}
+  private async mutate<T>(root:string,operation:()=>Promise<T>,owner?:symbol):Promise<T> {
+    this.mutationGuard(root,owner);
+    const reservation=reserveMutation(root,owner);
+    try {return await operation();} finally {reservation.release();}
+  }
+  closeCommandContext(context:ToolContext) {return this.shells.closeContext(context);}
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
     this.sandbox.validateRoot(root);
     const id = key(path.resolve(root));
@@ -34,6 +46,9 @@ export class WorkspaceTools implements ToolService {
     finally { const count = this.operations.get(id)!-1; if (count) this.operations.set(id,count); else this.operations.delete(id); }
   }
   removeScope<T>(root: string, chatId: string | undefined, mutation: () => T): Promise<T> {
+    return this.mutate(root,()=>this.removeScopeInternal(root,chatId,mutation));
+  }
+  private removeScopeInternal<T>(root: string, chatId: string | undefined, mutation: () => T): Promise<T> {
     this.check();
     const id=key(path.resolve(root));
     if (this.operations.has(id) || this.removing.has(id) || this.quarantined.has(id)) throw new ToolError('A workspace operation is still pending or cleanup is uncertain.','CONFLICT');
@@ -56,11 +71,38 @@ export class WorkspaceTools implements ToolService {
   private check(): void { if (this.disposed) throw new ToolError('Tool service has been disposed.'); }
   read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.tracked(root,()=>this.files.read(root, path)); }
   list(root: string, path = '') { this.check(); return this.tracked(root,()=>this.files.list(root, path)); }
-  save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.tracked(root,()=>this.files.save(root, path, content, baseHash, owner)); }
+  save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.mutate(root,()=>this.tracked(root,()=>this.files.save(root, path, content, baseHash, owner))); }
   setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); if(this.removing.has(key(rootPathSync(root))))throw new ToolError('Workspace cleanup is pending.','CONFLICT');this.sandbox.validateRoot(root);this.files.setDirty(root, path, owner, dirty); }
-  restore(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void) {
+  restore(root: string, path: string, before: FileSnapshot, expectedHash: string | null, beforeMutation: () => void) {
     this.check();
-    return this.tracked(root,()=>this.files.save(root, path, before.content, expectedHash, undefined, beforeMutation, before.hash === null));
+    return this.mutate(root,()=>this.tracked(root,()=>this.files.save(root, path, before.content, expectedHash, undefined, beforeMutation, before.hash === null)));
+  }
+  async restoreMove(root: string, change: FileChange, beforeMutation: () => void) {
+    this.check();
+    const destination = change.destination;
+    if (!destination || destination.before.hash !== null || change.after.hash !== null || destination.after.hash === null) throw new ToolError('Invalid move undo.');
+    let created = false;
+    try { await this.mutate(root,()=>this.tracked(root, () => this.files.move(root, destination.after.path, change.path, destination.after.hash!, () => {created = true;}, beforeMutation))); }
+    catch(error) { throw Object.assign(error instanceof Error ? error : new Error('Move undo failed'),{mutation: created ? 'uncertain' : 'not_started'}); }
+  }
+  private async fileChanges(root: string, action: Action): Promise<NonNullable<ToolInspection['changes']>> {
+    const args = action.args;
+    const before = await this.read(root, String(args.path));
+    if (before.hash !== args.baseHash) throw new ToolError('Edit is based on a stale file version.', 'CONFLICT');
+    if (action.name === 'delete_file' || action.name === 'rename_file') {
+      if (before.hash === null) throw new ToolError('The source file is missing.', 'CONFLICT');
+      const changes = [{before, after: {path: before.path, content: '', hash: null as string | null}}];
+      if (action.name === 'rename_file') {
+        const destination = await this.read(root, String(args.destination));
+        if (key(leasePath(root,before.path)) === key(leasePath(root,destination.path)) || destination.hash !== null) throw new ToolError('Rename destination must be different and absent.', 'CONFLICT');
+        changes.push({before: destination, after: {...before, path: destination.path}});
+      }
+      return changes;
+    }
+    const after = action.name === 'write_file' ? {path: before.path, content: String(args.content), hash: hash(String(args.content))} : patchSnapshot(before, args.edits as LineEdit[]);
+    const limit = action.name === 'maintain_instructions' ? 32_000 : this.files.options.maxFileBytes;
+    if (Buffer.byteLength(after.content) > limit || after.content.includes('\0') || Buffer.from(after.content).toString('utf8') !== after.content) throw new ToolError('Invalid content or file exceeds size limit.');
+    return [{before, after}];
   }
   async inspect(context: ToolContext, action: Action): Promise<ToolInspection> {
     return this.tracked(context.projectRoot,()=>this.inspectInternal(context,action));
@@ -68,15 +110,15 @@ export class WorkspaceTools implements ToolService {
   private async inspectInternal(context: ToolContext, action: Action): Promise<ToolInspection> {
     this.check(); const args = validate(action);
     await rootPath(context.projectRoot);
-    if (args.path !== undefined) await scoped(context.projectRoot, args.path, ['list_files', 'search', 'git_diff'].includes(action.name));
-    if (action.name === 'write_file') {
-      if (Buffer.byteLength(args.content) > this.files.options.maxFileBytes || args.content.includes('\0')) throw new ToolError('Invalid content or file exceeds size limit.');
-      const before = await this.read(context.projectRoot, args.path);
-      if (before.hash !== args.baseHash) throw new ToolError('Edit is based on a stale file version.', 'CONFLICT');
-      const diff = createTwoFilesPatch(before.hash === null ? '/dev/null' : args.path, args.path, before.content, args.content, '', '', { context: 3 });
-      return { effect: 'write', risk: 'routine', description: `Write ${args.path}`, path: args.path, before: before.content, after: args.content, diff };
+    if (args.path !== undefined) await scoped(context.projectRoot, args.path, ['list_files', 'search', 'search_page', 'git_diff'].includes(action.name));
+    if (definitionFor(action.name).fileMutation) {
+      const changes = await this.fileChanges(context.projectRoot, action);
+      if (changes.reduce((bytes, change) => bytes + Buffer.byteLength(change.before.content) + Buffer.byteLength(change.after.content),0) > 200_000) throw new ToolError('Diff exceeds the 200 KB review limit.');
+      const diff = changes.map(({before,after}) => {const patch=createTwoFilesPatch(before.hash === null ? '/dev/null' : before.path, after.hash === null ? '/dev/null' : after.path, before.content, after.content, '', '', {context: 3, timeout: 1000});if(typeof patch!=='string')throw new ToolError('Diff computation exceeded its bound.');return patch;}).join('\n');
+      if (Buffer.byteLength(diff) > 200_000) throw new ToolError('Diff exceeds the 200 KB review limit.');
+      return {effect: 'write', risk: 'routine', description: `${action.name}: ${changes.map(change=>change.before.path).join(' → ')}`, path: args.path, before: changes[0].before.content, after: changes[0].after.content, diff, changes};
     }
-    if (['run_shell', 'execute_python', 'run_tests'].includes(action.name)) {
+    if (definitionFor(action.name).command) {
       if (args.reportPath) await scoped(context.projectRoot, args.reportPath);
       return { effect: 'execute', risk: 'elevated', description: `${action.name}: sandboxed execution can modify the selected project and private dependencies. Registry-only network capability. Requires runtime authorization.` };
     }
@@ -84,7 +126,14 @@ export class WorkspaceTools implements ToolService {
   }
   // This is an execution primitive for the trusted runtime, never a model-facing approval bypass.
   async execute(context: ToolContext, action: Action): Promise<ToolResult> {
-    return this.tracked(context.projectRoot,()=>this.executeInternal(context,action));
+    const operation=()=>this.tracked(context.projectRoot,()=>this.executeInternal(context,action));
+    if(definitionFor(action.name).effect==='read')return operation();
+    let slot:string|undefined;
+    let owner=context.mutationOwner;
+    if(!owner&&definitionFor(action.name).command){slot=JSON.stringify([rootPathSync(context.projectRoot),context.chatId,context.agentId]);const existing=this.commandOwners.get(slot)??{owner:Symbol('serialized shell queue'),count:0};existing.count++;this.commandOwners.set(slot,existing);owner=existing.owner;}
+    try {return await this.mutate(context.projectRoot,operation,owner);}
+    catch(error) {return {ok:false,output:error instanceof Error?error.message:'Mutation unavailable',data:{status:'not_started'}};}
+    finally {if(slot){const existing=this.commandOwners.get(slot)!;if(--existing.count===0)this.commandOwners.delete(slot);}}
   }
   private async executeInternal(context: ToolContext, action: Action): Promise<ToolResult> {
     let fileMutationStarted = false;
@@ -92,11 +141,21 @@ export class WorkspaceTools implements ToolService {
       this.check(); const args = validate(action);
       if (context.signal?.aborted) return { ok: false, output: 'Cancelled before execution.' };
       const root = rootPathSync(context.projectRoot);
+      if (definitionFor(action.name).fileMutation) {
+        const changes = await this.fileChanges(root, action), change = changes[0];
+        if (action.name === 'rename_file') {
+          const result = await this.files.move(root, args.path, args.destination, args.baseHash, () => {fileMutationStarted = true;});
+          return {ok: true, output: `Moved ${result.source.path} to ${result.destination.path}`, data: {...result.source, snapshots: [result.source, result.destination]}};
+        }
+        const result = await this.files.save(root, args.path, change.after.content, args.baseHash, context.agentId, () => {fileMutationStarted = true;}, action.name === 'delete_file');
+        return {ok: true, output: `${action.name === 'delete_file' ? 'Removed' : 'Saved'} ${result.path}`, data: {...result, snapshots: [result]}};
+      }
       switch (action.name) {
+        case 'read_file_range': { const data = await this.files.range(root,args.path,args.startLine,args.count); return {ok: data.hash !== null, output: data.content, data}; }
+        case 'search_page': { const data = await this.files.searchPage(root,args.query,args.path,args.offset,args.limit,args.revision); return {ok: true, output: JSON.stringify(data), data}; }
         case 'read_file': { const file = await this.read(root, args.path); return { ok: file.hash !== null, output: file.hash === null ? `File not found: ${file.path}` : file.content, data: file }; }
         case 'list_files': { const entries = await this.list(root, args.path); return { ok: true, output: JSON.stringify(entries), data: entries }; }
         case 'search': { const result = await this.files.search(root, args.query, args.path); return { ok: true, output: JSON.stringify(result), data: result }; }
-        case 'write_file': { const result = await this.files.save(root, args.path, args.content, args.baseHash, context.agentId,()=>{fileMutationStarted=true;}); return { ok: true, output: `Saved ${result.path}`, data: result }; }
         case 'run_shell': return this.commandResult(await this.shells.run(context, args.command, args.timeoutMs));
         case 'execute_python': {
           const encoded = Buffer.from(args.code).toString('base64');
@@ -108,7 +167,7 @@ export class WorkspaceTools implements ToolService {
         case 'git_diff': return await this.gitDiff(root, args.path, context.signal);
         default: throw new ToolError('Unknown workspace tool.');
       }
-    } catch (error) { return { ok: false, output: error instanceof Error ? error.message : 'Tool operation failed.', data: {...(error instanceof ToolError ? {code:error.code} : {}),...(action.name === 'write_file' ? {mutation:fileMutationStarted ? 'uncertain' : 'not_started'} : {})} }; }
+    } catch (error) { return { ok: false, output: error instanceof Error ? error.message : 'Tool operation failed.', data: {...(error instanceof ToolError ? {code:error.code} : {}),...(definitionFor(action.name).fileMutation ? {mutation:fileMutationStarted ? 'uncertain' : 'not_started', uncertain: fileMutationStarted} : {})} }; }
   }
   private commandResult(result: CommandResult): ToolResult {
     return { ok: result.exitCode === 0 && !result.error && !result.cancelled && !result.timedOut, output: [result.output, result.error, result.truncated ? '[Output truncated]' : ''].filter(Boolean).join('\n'), data: result };

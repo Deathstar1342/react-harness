@@ -263,6 +263,11 @@ export async function createApp(options: AppOptions) {
     return reply.code(202).send(await runtime.setGoal(paramId(request.params),body,{expectedRevision,reason}));
   });
   app.post('/api/chats/:id/control',async request=> {const {action} = z.object({action:z.enum(['pause','resume','interrupt'])}).strict().parse(request.body);await runtime.control(paramId(request.params),action);return {ok:true};});
+  app.post('/api/chats/:id/processes/:processId/cancel',async request=>{
+    const {id,processId}=z.object({id:z.string().uuid(),processId:z.string().uuid()}).strict().parse(request.params);
+    z.object({}).strict().parse(request.body);
+    store.chat(id);return runtime.processes.cancel(processId,id);
+  });
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
   app.get('/api/projects/:id/changes',async request=>changes.list(paramId(request.params)));
@@ -276,7 +281,7 @@ export async function createApp(options: AppOptions) {
   });
   app.post('/api/projects/:id/change/:changeId/undo',async request=>{
     const {id,changeId} = z.object({id:z.string(),changeId:z.string()}).parse(request.params);
-    const {expectedHash,previewToken} = z.object({expectedHash:z.string().regex(/^[a-f0-9]{64}$/),previewToken:z.string().uuid()}).strict().parse(request.body);
+    const {expectedHash,previewToken} = z.object({expectedHash:z.string().regex(/^[a-f0-9]{64}$/).nullable(),previewToken:z.string().uuid()}).strict().parse(request.body);
     return changes.undo(id,changeId,expectedHash,previewToken);
   });
   app.get('/api/projects/:id/file',async request=> {const {path:relative} = z.object({path:z.string().min(1)}).parse(request.query);return tools.read(store.project(paramId(request.params)).path,relative);});

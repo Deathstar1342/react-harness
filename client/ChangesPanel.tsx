@@ -16,7 +16,7 @@ export function ChangeReview({preview,busy,onUndo}: {preview:ChangePreview;busy:
     <h4>Undo preview</h4><DiffText text={preview.undoDiff || 'No textual difference.'} />
     {preview.reason ? <p role="status">{preview.reason}</p> : <>
       <p>Undo only this write. Pause all active project chats first. Saved or unsaved edits made later will block undo. Shell effects cannot be undone here.</p>
-      <button className="button" disabled={busy || !preview.previewToken || !preview.expectedHash} onClick={onUndo}>{busy ? 'Undoing…' : 'Undo this write'}</button>
+      <button className="button" disabled={busy || !preview.previewToken} onClick={onUndo}>{busy ? 'Undoing…' : 'Undo this change'}</button>
     </>}
   </section>;
 }
@@ -51,7 +51,7 @@ export function ChangesPanel({projectId,revision,onClose}: {projectId:string;rev
     } catch(e) {if (alive.current && current === sequence.current) setError(errorText(e));}
   }
   async function undo() {
-    if (busy || !preview?.previewToken || !preview.expectedHash) return;
+    if (busy || !preview?.previewToken) return;
     setBusy(true);setError('');
     try {
       await post(`/projects/${id(projectId)}/change/${id(preview.change.id)}/undo`,{expectedHash:preview.expectedHash,previewToken:preview.previewToken});
@@ -70,8 +70,8 @@ export function ChangesPanel({projectId,revision,onClose}: {projectId:string;rev
         {data?.git.map(item=><button className="change-file" disabled={busy} key={item.path} onClick={()=>void select('git',item.path)}><code>{item.status}</code> {item.originalPath ? `${item.originalPath} → ` : ''}{item.path}</button>)}
         {data && !data.git.length && !data.gitError && <p>No current Git changes.</p>}
         <h3>Recorded agent writes</h3>
-        <p className="muted">Individual write_file actions only. Older actions without snapshots have no undo.</p>
-        {data?.history.map(item=><button className="change-file" disabled={busy} key={item.id} onClick={()=>void select('write',item.id)}>{item.path} <small>{item.status} · {new Date(item.createdAt).toLocaleString()}</small></button>)}
+        <p className="muted">Recorded file edits, deletions and moves. Changed or uncertain files cannot be undone.</p>
+        {data?.history.map(item=><button className="change-file" disabled={busy} key={item.id} onClick={()=>void select('write',item.id)}>{item.path}{item.destinationPath ? ` → ${item.destinationPath}` : ''} <small>{item.status} · {new Date(item.createdAt).toLocaleString()}</small></button>)}
         {data && !data.history.length && <p>No recorded writes.</p>}
         {data?.historyTruncated && <p role="status">Showing the latest 100 records. Older history is not displayed.</p>}
       </nav>

@@ -50,8 +50,8 @@ it('quarantines uncertain cleanup, prevents mutation/reuse and rejects backend t
   pool.sessions.set(id,{hasBackgroundWork:false,dispose:async()=>{attempts++;throw new ToolError('termination timeout','SANDBOX_CLEANUP_FAILED');}});
   let mutated=false;
   await expect(tools.removeScope(parent,undefined,()=>{mutated=true;})).rejects.toThrow('timeout');expect(mutated).toBe(false);expect(pool.sessions.has(id)).toBe(true);
-  expect(()=>tools.resetSandbox(parent)).toThrow('uncertain');
-  await expect(tools.execute({projectRoot:parent,chatId:'chat',agentId:'coder'},{name:'run_shell',args:{command:'touch impossible'}})).rejects.toThrow('uncertain');
+  await expect(tools.resetSandbox(parent)).rejects.toThrow('uncertain');
+  expect(await tools.execute({projectRoot:parent,chatId:'chat',agentId:'coder'},{name:'run_shell',args:{command:'touch impossible'}})).toMatchObject({ok:false,output:expect.stringContaining('uncertain')});
   await expect(tools.dispose()).rejects.toThrow('timeout');expect(attempts).toBe(2);
 });
 it('refuses reset while another project HTTP request is awaiting work',async()=>{
