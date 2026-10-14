@@ -42,7 +42,7 @@ public static class CanonicalFolder {
   function Overlap([string]$a, [string]$b) { return $a.Equals($b,[StringComparison]::OrdinalIgnoreCase) -or $a.StartsWith($b+'\',[StringComparison]::OrdinalIgnoreCase) -or $b.StartsWith($a+'\',[StringComparison]::OrdinalIgnoreCase) }
   $data = Canonical $DataFolder
   $install = Canonical $InstallFolder
-  foreach ($protected in @($install,$env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)})) {
+  foreach ($protected in @($install,$env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)},$env:ProgramW6432)) {
     if ($protected -and (Overlap $data (Canonical $protected))) { throw 'Data overlaps protected application or OS files' }
   }
   if ($PreviousFolder) {

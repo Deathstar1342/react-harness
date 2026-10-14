@@ -1,7 +1,7 @@
 /** Actual dpkg transactions in the disposable authorized GitHub Ubuntu runner. */
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import assert from 'node:assert/strict';
 if(process.platform!=='linux'||process.env.GITHUB_ACTIONS!=='true')throw new Error('Disposable Linux CI only');
 const desktop='build/release/'+readdirSync('build/release').find(n=>n.endsWith('.deb'));
@@ -31,6 +31,13 @@ try{refused('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','
 finally{sudo('/usr/bin/mv',desktopReceipt+'.ci-preserved',desktopReceipt);}
 sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','backend');
 console.log('PASS missing installed desktop receipt fails closed and retains maintenance marker');
+const originalMode=(statSync('/opt/abyssus').mode&0o777).toString(8);
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','backend');
+sudo('/usr/bin/chmod','775','/opt/abyssus');
+try{refused('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','backend');assert(existsSync(marker+'/backend'));}
+finally{sudo('/usr/bin/chmod',originalMode,'/opt/abyssus');}
+sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','finish','backend');
+console.log('PASS writable installed hierarchy refused; marker retained until exact permission repair');
 sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','backend');
 sudo('/usr/bin/python3','-I','/usr/lib/abyssus/maintenance.py','begin','desktop');
 sudo('/var/lib/dpkg/info/react-harness.postinst','abort-remove');

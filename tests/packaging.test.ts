@@ -57,7 +57,9 @@ describe('Windows packaged bootstrap data isolation',()=>{
     const root=mkdtempSync(path.join(tmpdir(),'abyssus-setup-')),install=path.join(root,'install');mkdirSync(install);
     const run=(data:string,previous='')=>spawnSync(path.join(process.env.SystemRoot!,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.resolve('packaging/windows-preflight.ps1'),'-DataFolder',data,'-InstallFolder',install,'-PreviousFolder',previous],{encoding:'utf8',windowsHide:true});
     try {
-      for(const data of ['C:\\',process.env.SystemRoot!,path.join(install,'data')])expect(run(data).status).toBe(76);
+      for(const data of ['C:\\',process.env.SystemRoot!,process.env.ProgramW6432??process.env.ProgramFiles!,path.join(install,'data')])expect(run(data).status).toBe(76);
+      const x86=path.join(process.env.SystemRoot!,'SysWOW64/WindowsPowerShell/v1.0/powershell.exe');
+      if(existsSync(x86))expect(spawnSync(x86,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.resolve('packaging/windows-preflight.ps1'),'-DataFolder',process.env.ProgramW6432??process.env.ProgramFiles!,'-InstallFolder',install],{encoding:'utf8',windowsHide:true}).status).toBe(76);
       symlinkSync(install,path.join(root,'alias'),'junction');expect(run(path.join(root,'alias','data')).status).toBe(76);
       expect(existsSync(path.join(install,'data'))).toBe(false);
       const missing=path.join(root,'missing');expect(run(missing,missing).status).toBe(76);expect(existsSync(missing)).toBe(false);

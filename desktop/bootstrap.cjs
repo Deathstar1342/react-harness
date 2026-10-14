@@ -9,7 +9,7 @@ function validateLocation(value, install, probeWrite = true) {
   if (typeof value !== 'string' || value.length > 240 || !/^[A-Za-z]:\\/.test(value) || /[\x00-\x1f<>"|?*]/.test(value) || value.slice(2).includes(':') || value.split(/[\\/]/).some(p => p === '.' || p === '..' || /[. ]$/.test(p))) throw new Error('Choose an absolute local drive folder without traversal or device paths.');
   const resolved = fs.realpathSync.native(value).replace(/\\$/, '').toLowerCase();
   if (!/^[a-z]:\\/.test(resolved) || resolved.length < 4 || !fs.statSync(value).isDirectory()) throw new Error('The saved desktop data folder is unavailable. Restore its drive or repair the location; no replacement profile was created.');
-  const protectedPaths = [install, process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map(p => fs.realpathSync.native(p).replace(/\\$/, '').toLowerCase());
+  const protectedPaths = [install, process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432].filter(Boolean).map(p => fs.realpathSync.native(p).replace(/\\$/, '').toLowerCase());
   if (protectedPaths.some(p => within(resolved, p) || within(p, resolved))) throw new Error('Desktop data must be separate from application and Windows installation folders, including linked folders.');
   if (probeWrite) {
     const probe = path.join(value, '.abyssus-write-' + crypto.randomUUID());

@@ -28,6 +28,8 @@ jobs:
           sudo chown root:root /usr/share /opt
           sudo setfacl -b -k /usr/share /opt
           sudo chmod 0755 /usr/share /opt
+          stat -c '%U %G %a %n' / /opt /usr /usr/share /var /var/lib
+          getfacl -p /opt /usr/share
           python3 -m unittest discover -s tests -p 'test_package_*.py'
       - run: npm ci
       - run: npm run desktop:build
