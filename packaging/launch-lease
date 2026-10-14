@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+exec 9</var/lib/abyssus-package/runtime.lock
+/usr/bin/flock -sn 9 || exit 73
+test ! -e /var/lib/abyssus-package/maintenance || exit 73
+printf 'ready\n'
+cat >/dev/null

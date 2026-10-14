@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+exec 9</var/lib/abyssus-package/runtime.lock
+/usr/bin/flock -sn 9 || exit 73
+test ! -e /var/lib/abyssus-package/maintenance || exit 73
+test "$(id -u)" != 0 || exit 73
+expected=$1
+shift
+/usr/bin/python3 -I -c 'import json,sys; assert json.load(open("/opt/abyssus/app/release.json"))["source"] == sys.argv[1]' "$expected" || exit 73
+case "${1-}" in backend-entry.js|helper-entry.js) entry=$1 ;; *) exit 64 ;; esac
+shift
+exec /opt/abyssus/runtime/bin/node "/opt/abyssus/app/desktop/$entry" "$@"

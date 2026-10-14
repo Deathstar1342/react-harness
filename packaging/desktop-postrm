@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+if test -f /usr/lib/abyssus/maintenance.py; then
+  /usr/bin/python3 -I /usr/lib/abyssus/maintenance.py finish
+fi

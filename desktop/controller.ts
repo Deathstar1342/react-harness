@@ -35,12 +35,15 @@ export class DesktopController {
   private command(environment:Environment,entry:'backend-entry.js'|'helper-entry.js',args:string[]=[]) {
     if(environment.kind==='wsl') {
       if(process.platform!=='win32'||!this.state.distributions.includes(environment.distribution))throw new Error('Select an available Ubuntu/Debian WSL2 environment');
-      return {file:this.wsl(),args:['--distribution',environment.distribution,'--exec','/opt/abyssus/runtime/bin/node',`/opt/abyssus/app/desktop/${entry}`,...args],cwd:process.env.SystemRoot??'C:\\Windows'};
+      const packaged=existsSync(path.join(this.appRoot,'release.json'));
+      const source=packaged?z.object({source:z.string().regex(/^[a-f0-9]{40}$/)}).parse(JSON.parse(readFileSync(path.join(this.appRoot,'release.json'),'utf8'))).source:'';
+      return {file:this.wsl(),args:['--distribution',environment.distribution,'--exec',...(packaged?['/usr/lib/abyssus/launch-backend',source,entry]:['/opt/abyssus/runtime/bin/node',`/opt/abyssus/app/desktop/${entry}`]),...args],cwd:process.env.SystemRoot??'C:\\Windows'};
     }
     if(process.platform!=='linux')throw new Error('A Windows shell requires an explicitly selected WSL2 backend');
     const runtime=path.resolve(this.appRoot,'../runtime'),node=path.join(runtime,'bin/node');
     const manifest=z.object({nodeVersion:z.string(),modules:z.string(),platform:z.literal('linux'),arch:z.literal('x64'),nodeSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(JSON.parse(readFileSync(path.join(runtime,'manifest.json'),'utf8')));
     if(createHash('sha256').update(readFileSync(node)).digest('hex')!==manifest.nodeSha256)throw new Error('Packaged Node runtime hash mismatch. Repair installation.');
+    if(this.appRoot==='/opt/abyssus/app')return {file:'/usr/lib/abyssus/launch-backend',args:[z.object({source:z.string().regex(/^[a-f0-9]{40}$/)}).parse(JSON.parse(readFileSync(path.join(this.appRoot,'release.json'),'utf8'))).source,entry,...args],cwd:this.appRoot};
     return {file:node,args:[path.join(this.appRoot,'desktop',entry),...args],cwd:this.appRoot};
   }
   private trackChild(child:ChildProcessWithoutNullStreams) {

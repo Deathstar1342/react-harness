@@ -1,0 +1,21 @@
+import { cp, mkdir, readFile, writeFile, chmod, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { manifest } from './package-manifest.mjs';
+const root=path.resolve(import.meta.dirname,'..'),stage=path.join(root,'build/backend-stage');
+if(process.platform!=='linux'||process.arch!=='x64')throw new Error('Build on Ubuntu 24.04 x64');
+const os=await readFile('/etc/os-release','utf8');if(!/^ID=ubuntu$/m.test(os)||!/^VERSION_ID="24.04"$/m.test(os))throw new Error('Only Ubuntu 24.04 packages are verified');
+await rm(stage,{recursive:true,force:true});
+await mkdir(stage+'/opt/abyssus',{recursive:true});await mkdir(stage+'/usr/lib/abyssus',{recursive:true});await mkdir(stage+'/DEBIAN',{recursive:true});
+await cp(root+'/build/app',stage+'/opt/abyssus/app',{recursive:true});await cp(root+'/build/runtime',stage+'/opt/abyssus/runtime',{recursive:true});
+await cp(root+'/packaging/maintenance.py',stage+'/usr/lib/abyssus/maintenance.py');
+await cp(root+'/packaging/launch-backend',stage+'/usr/lib/abyssus/launch-backend');await chmod(stage+'/usr/lib/abyssus/launch-backend',0o755);
+await cp(root+'/packaging/launch-lease',stage+'/usr/lib/abyssus/launch-lease');await chmod(stage+'/usr/lib/abyssus/launch-lease',0o755);
+await writeFile(stage+'/opt/abyssus/app/release.json',JSON.stringify({source:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),target:'ubuntu-24.04-x64'}));
+await mkdir(stage+'/usr/share/abyssus',{recursive:true});
+await writeFile(stage+'/usr/share/abyssus/backend-manifest.json',JSON.stringify(await manifest(stage+'/opt/abyssus')));
+const guard=await readFile(root+'/packaging/maintenance.py','utf8');
+for(const [name,operation] of [['preinst','begin'],['prerm','begin'],['postinst','finish']]){await writeFile(stage+'/DEBIAN/'+name,guard.replace('sys.argv[1]',JSON.stringify(operation)),{mode:0o755});}
+await writeFile(stage+'/DEBIAN/control','Package: abyssus-backend\nVersion: 0.1.0\nArchitecture: amd64\nMaintainer: abysSUS contributors\nDepends: libc6 (>= 2.39), libstdc++6, python3, python3-venv, bash, bubblewrap, socat, git, util-linux\nDescription: abysSUS dedicated Node24 runtime and backend for Ubuntu24.04\n');
+await mkdir(root+'/build/bundled',{recursive:true});
+execFileSync('/usr/bin/dpkg-deb',['--root-owner-group','--build',stage,root+'/build/bundled/abyssus-backend_0.1.0_amd64.deb'],{stdio:'inherit',env:{...process.env,SOURCE_DATE_EPOCH:'1791849600'}});

@@ -63,6 +63,8 @@ def main():
     # Admin operations cannot race each other. Service is stopped before its lock is acquired.
     admin_lock = open(STATE / "admin.lock", "a+b")
     fcntl.flock(admin_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if Path('/var/lib/abyssus-package/maintenance').exists():
+        raise RuntimeError('PACKAGE_MAINTENANCE_INCOMPLETE')
     exists = (CONFIG / "config.json").exists()
     if action == "setup" and exists:
         raise RuntimeError("ALREADY_CONFIGURED_USE_REPAIR")

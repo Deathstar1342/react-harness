@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+# The backend package is installed/configured first. Desktop maintenance shares
+# its lease; an interrupted replacement keeps launches disabled until repair.
+exec /usr/bin/python3 -I /usr/lib/abyssus/maintenance.py begin

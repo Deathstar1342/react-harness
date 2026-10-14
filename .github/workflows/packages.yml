@@ -1,0 +1,89 @@
+name: Installer candidates
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: npm
+      - name: Disposable build and acceptance prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-apt acl bubblewrap socat python3-venv pkexec xvfb libgbm1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npm run desktop:stage-runtime
+      - run: build/runtime/bin/node tests/desktop-runtime-probe.mjs
+      - name: Build actual Ubuntu payloads
+        run: |
+          node scripts/backend-package.mjs
+          node scripts/helper-stage.mjs --release
+          cp build/abyssus-helper-staging.deb build/bundled/
+          npm run package:prepare
+          node scripts/package-manifest.mjs build/bundled
+          npm run package:linux
+      - name: Install actual backend and desktop in disposable runner
+        run: |
+          sudo apt-get install -y ./build/bundled/abyssus-backend_0.1.0_amd64.deb
+          sudo apt-get install -y ./build/release/*.deb
+          xvfb-run -a node tests/packaged-smoke.ts /opt/abysSUS/abysSUS
+      - name: Preserve data through package removal and reinstall
+        run: |
+          mkdir -p "$HOME/abyssus-preservation"
+          printf 'preserve\n' > "$HOME/abyssus-preservation/fixture"
+          sudo apt-get remove -y react-harness
+          test "$(cat "$HOME/abyssus-preservation/fixture")" = preserve
+          sudo apt-get install -y ./build/release/*.deb
+          xvfb-run -a node tests/packaged-smoke.ts /opt/abysSUS/abysSUS
+      - run: node scripts/package-manifest.mjs build/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer-candidate
+          path: |
+            build/release/*.deb
+            build/release/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundled-linux-payload
+          path: build/bundled/
+  windows:
+    needs: linux
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundled-linux-payload
+          path: build/bundled
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npm run package:prepare
+      - run: npm run package:windows
+      - name: Actual packaged executable (no WSL provisioning)
+        run: node tests/packaged-smoke.ts build/release/win-unpacked/abysSUS.exe
+      - name: Actual disposable NSIS install and manual upgrade
+        run: ./tests/windows-installer.ps1
+      - run: node scripts/package-manifest.mjs build/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-candidate
+          path: |
+            build/release/*setup.exe
+            build/release/SHA256SUMS
