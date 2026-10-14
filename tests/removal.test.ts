@@ -1,3 +1,4 @@
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, rm, rename, symlink, realpath } from 'node:fs/promises';
 import { existsSync, writeFileSync } from 'node:fs';
@@ -12,7 +13,7 @@ import { WorkspaceFiles } from '../server/tools/files.js';
 import { readConfig } from '../server/config.js';
 import { createApp } from '../server/app.js';
 import { ShellPool } from '../server/tools/shell.js';
-import type { AgentResponse, DeletionPreview, ModelProvider } from '../shared/types.js';
+import type { CompletionResult, DeletionPreview, ModelProvider } from '../shared/types.js';
 
 const cleanups:(()=>Promise<void>)[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const clean of cleanups.splice(0).reverse()) await clean();});
@@ -22,8 +23,8 @@ async function fixture() {
   await writeFile(path.join(root,'keep.txt'),'user files');
   const config=readConfig({HARNESS_DATA_DIR:path.join(temp,'data'),HARNESS_WORKSPACE_ROOT:path.join(temp,'workspace'),STARK_BASE_URL:'http://localhost/v1',STARK_API_KEY:'test'});
   const filename=path.join(config.dataDir,'state.sqlite'),store=new Store(filename),tools=new WorkspaceTools();
-  const provider:ModelProvider={models:async()=>[],complete:async()=>({text:JSON.stringify({version:1,type:'final',message:'Done'})})};
-  const hooks={parse:(text:string)=>JSON.parse(text) as AgentResponse,instructions:()=>''};
+  const provider:ModelProvider={models:async()=>[],complete:async()=>(nativeReply('submit_completion',{summary:'Done'},'Done'))};
+  const hooks={instructions:()=>''};
   const runtime=new Runtime(store,provider,tools,config,hooks),locations=new WorkspaceLocations(store,config.workspaceRoot),cleanup=vi.fn();
   const removal=new Removal(store,runtime,tools,config,locations,cleanup);
   const project=store.createProject('Project',root),chat=store.createChat(project.id,'Chat','autonomous');
@@ -47,7 +48,7 @@ it.each(['expiry','path swap'])('revalidates disk authorization after deferred s
 
 it('app-only removal preserves all bytes including Git/hidden files and deletes dependent records durably',async()=>{
   const t=await fixture();await mkdir(path.join(t.root,'.git'));await writeFile(path.join(t.root,'.git','config'),'private config');await writeFile(path.join(t.root,'.env'),'local-only');
-  t.store.message(t.chat.id,'user','history');t.store.setPlan(t.chat.id,{phases:[]});t.store.setState(`run:${t.chat.id}`,paused);t.store.setState(`context:archive:${t.chat.id}:frame:hash`,{messages:['archive']});
+  t.store.message(t.chat.id,'user','history');t.store.setPlan(t.chat.id,{phases:[]});t.store.setState(`run:${t.chat.id}`,nativeState(paused));t.store.setState(`context:archive:${t.chat.id}:frame:hash`,{messages:['archive']});
   t.store.setState('preferences:debug',true);
   await t.removal.project(t.project.id,{mode:'app-only'});
   expect(await readFile(path.join(t.root,'.env'),'utf8')).toBe('local-only');expect(await readFile(path.join(t.root,'.git','config'),'utf8')).toBe('private config');
@@ -60,7 +61,7 @@ it('app-only removal preserves all bytes including Git/hidden files and deletes 
 
 it('chat deletion forgets paused frames and its history, preserves siblings and project files',async()=>{
   const t=await fixture(),sibling=t.store.createChat(t.project.id,'Other','review');
-  t.store.setState(`run:${t.chat.id}`,paused);t.store.updateChat(t.chat.id,{status:'paused'});t.runtime.notifyFileChange(t.project.id,'keep.txt','external');
+  t.store.setState(`run:${t.chat.id}`,nativeState(paused));t.store.updateChat(t.chat.id,{status:'paused'});t.runtime.notifyFileChange(t.project.id,'keep.txt','external');
   t.store.message(t.chat.id,'user','deleted');t.store.message(sibling.id,'user','preserved');
   await t.removal.chat(t.chat.id);
   expect(t.store.chats(t.project.id).map(c=>c.id)).toEqual([sibling.id]);expect(t.store.messages(sibling.id)).toHaveLength(1);expect(existsSync(t.root)).toBe(true);
@@ -139,7 +140,7 @@ it('tool operations are counted before their first await, preventing save/delete
 
 it('excludes concurrent launches/deletions and rejects stopping work until its promise settles',async()=>{
   const t=await fixture();let release!:()=>void;let entered!:()=>void;const ready=new Promise<void>(resolve=>entered=resolve);
-  t.provider.complete=async()=>{entered();await new Promise<void>(resolve=>release=resolve);return {text:JSON.stringify({version:1,type:'final',message:'Done'})};};
+  t.provider.complete=async()=>{entered();await new Promise<void>(resolve=>release=resolve);return nativeReply('submit_completion',{summary:'Done'},'Done');};
   await t.runtime.submit(t.chat.id,'work');await ready;
   const stop=t.runtime.control(t.chat.id,'pause');
   try {await expect(t.disk()).rejects.toThrow('pending');} finally {release();await stop;}
@@ -153,7 +154,7 @@ it('runtime guard refuses pending approvals, executing frames and overlapping un
   t.store.invalidateApprovals(t.chat.id);
   let release!:()=>void;const undo=t.runtime.exclusiveProjectEdit(t.project.id,()=>new Promise<void>(resolve=>release=resolve));
   await expect(t.disk()).rejects.toThrow('active');release();await undo;
-  t.store.setState(`run:${t.chat.id}`,{...paused,frames:[{...paused.frames[0],pending:{id:'action',action:{name:'run_shell',args:{}},stage:'executing'}}]});
+  t.store.setState(`run:${t.chat.id}`,nativeState({...paused,frames:[{...paused.frames[0],pending:{id:'action',action:{name:'run_shell',args:{}},stage:'executing'}}]}));
   await expect(t.removal.chat(t.chat.id)).rejects.toThrow('pending');
 });
 
@@ -207,7 +208,7 @@ it('a database failure after disk deletion keeps the recovery marker and permits
 
 it('counts approval decision awaits even after pause makes their approval stale',async()=>{
   const t=await fixture();
-  t.store.setState(`run:${t.chat.id}`,{...paused,frames:[{...paused.frames[0],pending:{id:'pending',stage:'prepared',approvalId:'approval',action:{name:'write_file',args:{}}}}]});
+  t.store.setState(`run:${t.chat.id}`,nativeState({...paused,frames:[{...paused.frames[0],pending:{id:'pending',stage:'prepared',approvalId:'approval',action:{name:'write_file',args:{}}}}]}));
   t.store.approval({id:'approval',chatId:t.chat.id,agentId:'frame',action:{name:'write_file',args:{}},inspection:{effect:'write',risk:'routine',description:''},status:'pending',createdAt:''});
   let entered!:()=>void,release!:()=>void;const ready=new Promise<void>(resolve=>entered=resolve),original=t.tools.read.bind(t.tools);
   vi.spyOn(t.tools,'read').mockImplementation(async(...args)=>{entered();await new Promise<void>(resolve=>release=resolve);return original(...args);});

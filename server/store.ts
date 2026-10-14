@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { commandEvent, isCommand } from './command-events.js';
 import type { RunState } from './runtime.js';
@@ -29,6 +29,16 @@ export class Store {
   }
   constructor(readonly filename: string) {
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
+    if(filename !== ':memory:' && existsSync(filename)) {
+      const existing = new DatabaseSync(filename,{readOnly:true});
+      try {
+        const tables=existing.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+        if(tables.length) {
+          const marker=tables.some(t=>t.name==='state') ? existing.prepare("SELECT data FROM state WHERE key='prototype:protocol'").get() : undefined;
+          if(marker?.data !== JSON.stringify('native-tools-v1')) throw new Error('Incompatible prototype profile. Select an explicitly fresh application home for native-tools-v1; existing data and project folders were preserved.');
+        }
+      } finally {existing.close();}
+    }
     this.db = new DatabaseSync(filename);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, data TEXT NOT NULL);
@@ -45,9 +55,12 @@ export class Store {
       CREATE TABLE IF NOT EXISTS install_requests (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, chat_id TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS installs_project ON install_requests(project_id);
     `);
+    this.setState('prototype:protocol','native-tools-v1');
     this.changes.setMaxListeners(100);
   }
   transaction<T>(fn: () => T): T {
+    // Nested domain transitions participate in the same atomic transaction.
+    if(this.transactionEvents)return fn();
     this.db.exec('BEGIN IMMEDIATE');
     const events: RunEvent[] = [];
     this.transactionEvents = events;
@@ -190,7 +203,7 @@ export class Store {
   approvals(chatId: string): Approval[] { return this.db.prepare('SELECT data FROM approvals WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))); }
   invalidateApprovals(chatId: string): void {
     const run = this.getState<{frames:{pending?:{stage:string;approvalId?:string}}[]}>(`run:${chatId}`,{frames:[]});
-    const prepared = new Set(run.frames.filter(frame=>frame.pending?.stage === 'prepared').map(frame=>frame.pending?.approvalId));
+    const prepared = new Set((run.frames ?? []).filter(frame=>frame.pending?.stage === 'prepared').map(frame=>frame.pending?.approvalId));
     for (const approval of this.approvals(chatId)) {
       if (approval.status === 'pending' || approval.status === 'approved' && prepared.has(approval.id)) this.approval({...approval,status:'stale'});
     }
@@ -245,10 +258,21 @@ export class Store {
     const recent = this.recentEvents(chatId,1001);
     return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), approvals: this.approvals(chatId), events: recent.slice(-1000), eventsTruncated:recent.length>1000, tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
   }
-  recover() {
+  recover():void {
+    if(!this.transactionEvents)return this.transaction(()=>this.recover());
     this.db.prepare("UPDATE file_changes SET status='unknown' WHERE status IN ('recording','undoing')").run();
     for (const chat of this.chats()) {
       const run = this.getState<RunState|null>(`run:${chat.id}`,null);
+      this.invalidateApprovals(chat.id);
+      for(const frame of run?.frames ?? []) {
+        if(frame.pending?.stage==='prepared' && frame.pending.action.name!=='recommend_packages') {frame.pending.stage='done';frame.pending.result={ok:false,output:'Backend restarted before dispatch; obsolete proposal was not executed.',data:{status:'not_started'}};}
+        for(const call of [...(frame.queuedCalls ?? [])]) if(call.id!==frame.pending?.callId) {
+          frame.messages.push({role:'tool',tool_call_id:call.id,content:JSON.stringify({ok:false,output:'Backend restarted before dispatch; not executed.',data:{status:'not_started'}})});
+          frame.queuedCalls=frame.queuedCalls!.filter(item=>item.id!==call.id);
+        }
+        this.setState(`native:frame:${chat.id}:${frame.id}`,frame.messages);
+      }
+      if(run)this.setState(`run:${chat.id}`,run);
       for (const frame of run?.frames ?? []) if (frame.planStep && (chat.status === 'running' || frame.pending?.stage === 'executing') && this.planStep(chat.id,frame.planStep)?.evidence?.outcome !== 'interrupted') {
         this.progress(chat.id,frame.planStep,frame.id,'blocked','interrupted','Backend restarted; unfinished work must be reconciled before completion.');
       }
@@ -260,7 +284,7 @@ export class Store {
         });
       }
     }
-    for (const chat of this.chats()) if (chat.status === 'running') {
+    for (const chat of this.chats()) if (chat.status === 'running' || chat.status === 'awaiting_approval') {
       this.updateChat(chat.id, { status: 'interrupted' });
       this.message(chat.id,'system','The backend restarted during this task. Resume will reconcile recorded actions; uncertain commands will not be rerun automatically.');
     }

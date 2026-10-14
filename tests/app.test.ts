@@ -1,3 +1,4 @@
+import { nativeReply, actionOf } from './native-fixture.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,7 +6,7 @@ import path from 'node:path';
 import { createApp } from '../server/app.js';
 import { Store } from '../server/store.js';
 import { readConfig } from '../server/config.js';
-import type { AgentResponse, ToolService } from '../shared/types.js';
+import type { CompletionResult, ToolService } from '../shared/types.js';
 
 const roots: string[] = [];
 afterEach(async()=>{for(const root of roots.splice(0)) await rm(root,{recursive:true,force:true});});
@@ -13,7 +14,7 @@ const tools: ToolService = {inspect:async()=>({effect:'read',risk:'routine',desc
 async function make() {
   const store = new Store(':memory:');
   const config = readConfig({STARK_API_KEY:'private-secret-value',STARK_BASE_URL:'http://127.0.0.1/v1'});
-  const result = await createApp({config,store,tools,provider:{models:async()=>['test-model'],complete:async()=>({text:JSON.stringify({version:1,type:'final',message:'Hello'})})},hooks:{parse:text=>JSON.parse(text) as AgentResponse,instructions:()=> 'JSON'}});
+  const result = await createApp({config,store,tools,provider:{models:async()=>['test-model'],complete:async()=>(nativeReply('submit_completion',{summary:'Hello'},'Hello'))},hooks:{instructions:()=> 'JSON'}});
   return {...result,close:async()=>{await result.app.close();store.close();}};
 }
 describe('local application API',()=> {

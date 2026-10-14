@@ -1,10 +1,11 @@
+import { nativeReply } from './native-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createApp } from '../server/app.js';
 import { Store } from '../server/store.js';
 import { readConfig } from '../server/config.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
+import { protocolInstructions } from '../server/protocol.js';
 import { BUDGET_STATE_KEY } from '../server/scheduler.js';
 import type { ModelProvider, PackageHelperRecord, ToolService } from '../shared/types.js';
 import { SettingsDialog } from '../client/WorkspaceDialogs.js';
@@ -13,13 +14,13 @@ import { deferred, fakeHelper } from './install-fixture.js';
 
 const cleanup:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const close of cleanup.splice(0))await close();});
-const recommendation=JSON.stringify({message:'System dependency needed',action:'recommend_packages',parameters:{packages:[{name:'hello'}],reason:'Print a greeting for the requested build'}});
-async function fixture(responses=[recommendation,JSON.stringify({message:'Done',action:'complete',parameters:{}})]) {
+const recommendation=nativeReply('recommend_packages',{packages:[{name:'hello'}],reason:'Print a greeting for the requested build'},'System dependency needed');
+async function fixture(responses=[recommendation,nativeReply('submit_completion',{summary:'Done'},'Done')]) {
   const store=new Store(':memory:'),{helper,records}=fakeHelper();
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'PRIVATE_CONFIG_KEY',HARNESS_DATA_DIR:'/uncreated-install-test-data'});
-  const provider:ModelProvider={models:async()=>['reviewer'],complete:vi.fn(async input=>input.messages[0]?.content.startsWith('Evaluate a proposed')?{text:'{"decision":"approve","reason":"Specific needed dependency"}',usage:{inputTokens:20,outputTokens:12}}:{text:responses.shift()??JSON.stringify({message:'Done',action:'complete',parameters:{}})})};
+  const provider:ModelProvider={models:async()=>['reviewer'],complete:vi.fn(async input=>input.messages[0]?.content.startsWith('Evaluate a proposed')?{...nativeReply('install_decision',{decision:'approve',reason:'Specific needed dependency'}),usage:{inputTokens:20,outputTokens:12}}:responses.shift()??nativeReply('submit_completion',{summary:'Done'},'Done'))};
   const tools:ToolService={inspect:vi.fn(),execute:vi.fn(),read:async(_root,path)=>({path,content:'',hash:null}),list:async()=>[],save:vi.fn(),setDirty:vi.fn(),dispose:async()=>{},removeScope:async(_root,_chat,mutate)=>mutate()};
-  const t=await createApp({config,provider,store,tools,hooks:{parse:parseAgentResponse,instructions:protocolInstructions},packageHelper:async()=>helper});
+  const t=await createApp({config,provider,store,tools,hooks:{instructions:protocolInstructions},packageHelper:async()=>helper});
   const project=store.createProject('Test','/not-present-test-project'),chat=store.createChat(project.id,'New chat','autonomous');
   cleanup.push(async()=>{await t.app.close();store.close();});
   const start=async(content='Build')=>{const response=await t.app.inject({method:'POST',url:`/api/chats/${chat.id}/messages`,payload:{content}});expect(response.statusCode).toBe(202);await t.runtime.wait(chat.id);};
@@ -65,7 +66,7 @@ describe('system install runtime and public API',()=>{
   });
   it('plan-only rejects the action under auto policy without preparation',async()=>{
     const t=await fixture();t.installs.update({policy:'auto',revision:0});await t.start('/plan Build');
-    expect(t.helper.prepare).not.toHaveBeenCalled();expect(t.store.installs()).toHaveLength(0);expect(t.store.messages(t.chat.id).some(m=>m.content.includes('unavailable in this mode'))).toBe(true);
+    expect(t.helper.prepare).not.toHaveBeenCalled();expect(t.store.installs()).toHaveLength(0);expect(t.store.messages(t.chat.id).some(m=>m.content.includes('not permitted for this role or mode'))).toBe(true);
   });
   it('mode/steering during final context refresh prevents execute',async()=>{
     const t=await fixture();t.installs.update({policy:'auto',revision:0});const block=deferred<PackageHelperRecord>();

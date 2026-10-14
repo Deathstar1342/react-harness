@@ -96,7 +96,7 @@ interface Receipt {
   version:1; id:string; phase:'preparing'|'ready'|'committed'; source?:string; createdAt:string;
   database:boolean; configHash?:string; databaseHash?:string; treeHash?:string;
 }
-interface Marker {version:1; id:string; migrationId:string; source?:string}
+interface Marker {protocol:'native-tools-v1';version:1; id:string; migrationId:string; source?:string}
 export interface ProfileOptions {env?:NodeJS.ProcessEnv; cwd?:string; installRoot?:string; checkpoint?:(phase:string)=>void}
 export interface PreparedProfile {paths:ReturnType<typeof profilePaths>; id:string; ownership:ProfileOwnership; receipt:Receipt}
 
@@ -134,6 +134,7 @@ export async function prepareProfile(options:ProfileOptions={}):Promise<Prepared
     const stageOf=(r:Receipt)=>path.join(paths.home,`migration-${r.id}`);
     const commitReady=(r:Receipt) => {
       const stage=stageOf(r);
+      if(json<Marker>(path.join(stage,'profile.json')).protocol!=='native-tools-v1')throw fail('Incompatible prototype staging; preserve it and initialize a fresh HARNESS_HOME.');
       if (treeHash(stage)!==r.treeHash) throw fail('Migration staging changed; preserve it and recover explicitly');
       if (existsSync(paths.profile)) throw fail('Destination profile exists; refusing to overwrite or merge');
       renameSync(stage,paths.profile);
@@ -143,6 +144,7 @@ export async function prepareProfile(options:ProfileOptions={}):Promise<Prepared
     if (existsSync(paths.profile)) {
       privateDirectory(paths.profile);
       const marker=json<Marker>(path.join(paths.profile,'profile.json'));
+      if(marker.protocol!=='native-tools-v1')throw fail('Incompatible prototype profile. Choose a fresh HARNESS_HOME and initialize native-tools-v1; existing files and projects are preserved.');
       if (marker.version!==1 || !/^[a-f0-9-]{36}$/.test(marker.id) || !receipt || marker.migrationId!==receipt.id || receipt.phase==='preparing') throw fail('Profile and migration receipt disagree; recover explicitly');
       if (env.HARNESS_LEGACY_ROOT && path.resolve(env.HARNESS_LEGACY_ROOT)!==receipt.source) throw fail('This home already has a different profile; no merge is permitted');
       if (receipt.phase==='ready') {
@@ -164,9 +166,21 @@ export async function prepareProfile(options:ProfileOptions={}):Promise<Prepared
     const selected=env.HARNESS_LEGACY_ROOT ? path.resolve(env.HARNESS_LEGACY_ROOT) : undefined;
     if (receipt && selected!==receipt.source) throw fail('Retry must select the original migration source');
     const candidates=legacyCandidates([cwd,options.installRoot ?? installationRoot,...(selected?[selected]:[])]);
-    if (!selected && candidates.length) throw fail(`Legacy profiles found at ${candidates.join(', ')}. Select exactly one with HARNESS_LEGACY_ROOT; profiles are never merged`);
+    if (!selected && candidates.length && env.HARNESS_INIT!=='1') throw fail(`Legacy profiles found at ${candidates.join(', ')}. Select exactly one with HARNESS_LEGACY_ROOT; profiles are never merged`);
     if (selected && !candidates.includes(selected)) throw fail('Selected legacy source is missing; refusing to initialize an empty profile');
     if (!selected && env.HARNESS_INIT!=='1') throw fail('No initialized profile. Select HARNESS_LEGACY_ROOT or set HARNESS_INIT=1 to explicitly create a new profile');
+    if(selected) {
+      const legacy=normalizeLegacyConfig(selected);
+      const explicit=env.HARNESS_DATA_DIR??legacy.values.HARNESS_DATA_DIR;
+      const sourceDb=path.join(explicit?path.resolve(selected,explicit):path.join(selected,'.harness'),'state.sqlite');
+      if(!existsSync(sourceDb))throw fail('Selected source has no state.sqlite; old prototype migration is unsupported. Initialize a fresh HARNESS_HOME.');
+      regularFile(sourceDb);
+      const database=new DatabaseSync(sourceDb,{readOnly:true});
+      try {
+        const hasState=database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='state'").get();
+        if(!hasState||database.prepare("SELECT data FROM state WHERE key='prototype:protocol'").get()?.data!==JSON.stringify('native-tools-v1'))throw fail('Incompatible prototype state. Old-profile migration is unsupported; initialize a fresh HARNESS_HOME. Original data is preserved.');
+      }finally{database.close();}
+    }
     if(receipt)durableWrite(path.join(paths.home,`interrupted-${receipt.id}.json`),JSON.stringify(receipt));
     receipt={version:1,id:randomUUID(),phase:'preparing',source:selected,createdAt:new Date().toISOString(),database:false};
     durableWrite(journal,JSON.stringify(receipt));
@@ -206,7 +220,7 @@ export async function prepareProfile(options:ProfileOptions={}):Promise<Prepared
         copyArtifacts(path.dirname(sourceDb),path.join(stage,'state'));
       }
       if(selected && normalizeLegacyConfig(selected).text!==legacy.text)throw fail('Legacy configuration changed during migration; retry after stopping its writer');
-      const marker:Marker={version:1,id:randomUUID(),migrationId:receipt.id,source:selected};
+      const marker:Marker={protocol:'native-tools-v1',version:1,id:randomUUID(),migrationId:receipt.id,source:selected};
       durableWrite(path.join(stage,'profile.json'),JSON.stringify(marker));
       receipt.configHash=hash(path.join(stage,'config','.env'));
       receipt.treeHash=treeHash(stage);

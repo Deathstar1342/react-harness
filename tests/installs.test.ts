@@ -1,3 +1,4 @@
+import { nativeReply } from './native-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { InstallService } from '../server/installs.js';
@@ -99,9 +100,9 @@ describe('independent system install decisions',()=>{
     const fresh=t.create();expect(fresh.id).not.toBe(next.id);await t.advance(fresh.id);expect(t.helper.execute).not.toHaveBeenCalled();
   });
   it('late reviewer approval after settings change is discarded',async()=>{
-    const t=fixture();policy(t,'ai');const blocked=deferred<{text:string;finishReason:string}>();t.complete.mockReturnValueOnce(blocked.promise);
+    const t=fixture();policy(t,'ai');const blocked=deferred<import('../shared/types.js').CompletionResult>();t.complete.mockReturnValueOnce(blocked.promise);
     const item=t.create(),running=t.advance(item.id);await vi.waitFor(()=>expect(t.complete).toHaveBeenCalled());policy(t,'auto');
-    blocked.resolve({text:'{"decision":"approve","reason":"yes"}',finishReason:'stop'});await running;
+    blocked.resolve(nativeReply('install_decision',{decision:'approve',reason:'yes'}));await running;
     expect(t.store.install(item.id).state).toBe('stale');expect(t.helper.execute).not.toHaveBeenCalled();
   });
   it('schema/digest/impact changes never reach a reviewer or approval',async()=>{

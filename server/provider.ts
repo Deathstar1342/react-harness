@@ -1,4 +1,5 @@
-import type { CompletionResult, ModelProvider, ModelUsage } from '../shared/types.js';
+import { parseNativeJSON } from './native-json.js';
+import type { CompletionResult, ModelProvider, ModelUsage, NativeToolCall, ModelCatalogEntry } from '../shared/types.js';
 
 type ErrorCode = 'configuration' | 'http' | 'transport' | 'aborted' | 'timeout' | 'malformed' | 'truncated' | 'refusal' | 'limit';
 export class ProviderError extends Error {
@@ -13,6 +14,7 @@ export interface StarkProviderOptions { baseUrl: string; apiKey: string; streami
  * as long as their request. Errors never expose raw upstream text or credentials. */
 export class ReloadingProvider implements ModelProvider {
   constructor(private options: () => StarkProviderOptions) {}
+  catalog(signal?: AbortSignal): Promise<ModelCatalogEntry[]> { return new StarkProvider({...this.options()}).catalog(signal); }
   models(signal?: AbortSignal): Promise<string[]> { return new StarkProvider({...this.options()}).models(signal); }
   complete(input: Parameters<ModelProvider['complete']>[0]): Promise<CompletionResult> {
     return new StarkProvider({...this.options()}).complete(input);
@@ -25,7 +27,7 @@ const malformed = () => new ProviderError('malformed', 'Provider returned an inv
 const truncated = () => new ProviderError('truncated', 'Provider completion was truncated or did not finish normally');
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 function parseJSON(text: string): unknown {
-  try { return JSON.parse(text); } catch { throw malformed(); }
+  try { return parseNativeJSON(text,MAX_BYTES); } catch { throw malformed(); }
 }
 function usageFrom(value: unknown): ModelUsage | undefined {
   if (value == null) return undefined;
@@ -37,13 +39,38 @@ function usageFrom(value: unknown): ModelUsage | undefined {
 function rejectRefusal(value: unknown): void {
   if (value != null && value !== '') throw new ProviderError('refusal', 'Provider refused the completion');
 }
-function checkFinish(reason: unknown): asserts reason is 'stop' {
+export const NATIVE_LIMITS = Object.freeze({calls:16,id:200,name:64,arguments:1_100_000});
+function checkFinish(reason: unknown, calls: number): asserts reason is 'stop' | 'tool_calls' {
   if (reason === 'content_filter') throw new ProviderError('refusal', 'Provider refused the completion');
   if (reason === 'length' || reason == null) throw truncated();
-  if (reason !== 'stop') throw malformed();
+  if (reason !== (calls ? 'tool_calls' : 'stop')) throw malformed();
 }
-function rejectNativeTools(value: Record<string, unknown>): void {
-  if (value.tool_calls != null || value.function_call != null) throw malformed();
+export function validateNativeCalls(value: unknown): NativeToolCall[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.length || value.length > NATIVE_LIMITS.calls) throw malformed();
+  const ids = new Set<string>();
+  return value.map(call => {
+    if (!record(call) || call.type !== 'function' || typeof call.id !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(call.id) || ids.has(call.id) || !record(call.function)) throw malformed();
+    const {name,arguments:args} = call.function;
+    if (typeof name !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(name) || typeof args !== 'string' || Buffer.byteLength(args) > NATIVE_LIMITS.arguments) throw malformed();
+    ids.add(call.id);
+    return {id:call.id,type:'function',function:{name,arguments:args}};
+  });
+}
+export function validateNativeHistory(messages: Parameters<ModelProvider['complete']>[0]['messages']): void {
+  let pending = new Set<string>(); const used = new Set<string>();
+  for (const message of messages) {
+    if (typeof message.content !== 'string') throw malformed();
+    if (message.role === 'tool') {
+      if (!pending.delete(message.tool_call_id)) throw malformed();
+    } else {
+      if (pending.size) throw malformed();
+      if (message.role === 'assistant') for (const call of validateNativeCalls(message.tool_calls)) {
+        if (used.has(call.id)) throw malformed(); used.add(call.id); pending.add(call.id);
+      }
+    }
+  }
+  if (pending.size) throw malformed();
 }
 
 async function readJSON(response: Response): Promise<unknown> {
@@ -162,7 +189,7 @@ export class StarkProvider implements ModelProvider {
         controller.signal.throwIfAborted();
         const response = await fetch(`${this.#baseUrl}${endpoint}`, {
           ...init, redirect: 'error', signal: controller.signal,
-          headers: { 'Authorization': `Bearer ${this.#apiKey}`, 'Accept': endpoint === '/models' || !this.#streaming ? 'application/json' : 'text/event-stream', ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
+          headers: { 'Authorization': `Bearer ${this.#apiKey}`, 'Accept': (init.headers as Record<string,string>|undefined)?.Accept ?? (endpoint === '/models' || !this.#streaming ? 'application/json' : 'text/event-stream'), ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
         });
         if (!response.ok) {
           await response.body?.cancel().catch(() => undefined);
@@ -196,16 +223,25 @@ export class StarkProvider implements ModelProvider {
     }
   }
 
-  async models(signal?: AbortSignal): Promise<string[]> {
-    return this.#request('/models', { method: 'GET' }, signal, async response => {
+  async models(signal?: AbortSignal): Promise<string[]> { return (await this.catalog(signal)).map(m=>m.id); }
+  async catalog(signal?: AbortSignal): Promise<ModelCatalogEntry[]> {
+    return this.#request('/models', {method:'GET'}, signal, async response => {
       const body = await readJSON(response);
-      if (!record(body) || body.error != null || !Array.isArray(body.data) || body.data.length > 10_000) throw malformed();
-      const ids: string[] = [];
+      if (!record(body) || body.error != null || !Array.isArray(body.data) || body.data.length > 10000) throw malformed();
+      const entries = new Map<string,ModelCatalogEntry>();
       for (const model of body.data) {
-        if (!record(model) || typeof model.id !== 'string' || !model.id.trim() || model.id.length > 1_024) throw malformed();
-        ids.push(model.id);
+        if (!record(model) || typeof model.id !== 'string' || !model.id.trim() || model.id.length > 1024) throw malformed();
+        // Untrusted metadata is informational, never capability authority.
+        const {id,...metadata} = model;
+        if (Buffer.byteLength(JSON.stringify(metadata)) > 64000) throw malformed();
+        if(id.includes(this.#apiKey))throw malformed();
+        const safeMetadata=JSON.parse(JSON.stringify(metadata,(key,value)=>{
+          if(key.includes(this.#apiKey))throw malformed();
+          return typeof value==='string'?value.split(this.#apiKey).join('[redacted]'):value;
+        }));
+        entries.set(id,{id,metadata:safeMetadata,capabilities:{ordinary:'unknown',native:'unknown',streaming:'unknown'}});
       }
-      return [...new Set(ids)];
+      return [...entries.values()];
     });
   }
 
@@ -213,20 +249,26 @@ export class StarkProvider implements ModelProvider {
     if (!input.model.trim() || (input.maxTokens !== undefined && (!Number.isSafeInteger(input.maxTokens) || input.maxTokens <= 0))) {
       throw new ProviderError('configuration', 'A model and positive integer token limit are required');
     }
-    const body = JSON.stringify({ model: input.model, messages: input.messages, stream: this.#streaming, ...(input.maxTokens !== undefined ? { max_tokens: input.maxTokens } : {}) });
-    return this.#request('/chat/completions', { method: 'POST', body }, input.signal, async response => {
-      if (!this.#streaming) {
+    validateNativeHistory(input.messages);
+    const streaming = input.streaming ?? this.#streaming;
+    const body = JSON.stringify({ model: input.model, messages: input.messages, stream: streaming, ...(input.tools?.length ? {tools:input.tools,tool_choice:input.toolChoice ?? 'auto'} : {}), ...(input.maxTokens !== undefined ? { max_tokens: input.maxTokens } : {}) });
+    return this.#request('/chat/completions', { method: 'POST', body,headers:{Accept:streaming?'text/event-stream':'application/json'} }, input.signal, async response => {
+      const requestId = response.headers.get('x-request-id');
+      const trace = requestId && /^[A-Za-z0-9_.:-]{1,200}$/.test(requestId) && !requestId.includes(this.#apiKey) ? {requestId} : {};
+      if (!streaming) {
         const payload = await readJSON(response);
         if (!record(payload) || payload.error != null || !Array.isArray(payload.choices) || payload.choices.length !== 1) throw malformed();
         const choice = payload.choices[0];
         if (!record(choice) || !record(choice.message)) throw malformed();
         rejectRefusal(choice.message.refusal);
-        rejectNativeTools(choice.message);
-        checkFinish(choice.finish_reason);
-        if (typeof choice.message.content !== 'string' || !choice.message.content.trim()) throw malformed();
+        if (choice.message.function_call != null || choice.message.role !== 'assistant') throw malformed();
+        const toolCalls = validateNativeCalls(choice.message.tool_calls);
+        checkFinish(choice.finish_reason, toolCalls.length);
+        const text = choice.message.content ?? '';
+        if (typeof text !== 'string' || !text.trim() && !toolCalls.length) throw malformed();
         const usage = usageFrom(payload.usage);
-        input.onDelta?.(choice.message.content);
-        return { text: choice.message.content, usage, finishReason: choice.finish_reason };
+        if (text) input.onDelta?.(text);
+        return { text, ...(toolCalls.length ? {toolCalls} : {}), usage, finishReason: choice.finish_reason, ...trace };
       }
       if (!(response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'text/event-stream')) {
         await response.body?.cancel().catch(() => undefined);
@@ -234,12 +276,16 @@ export class StarkProvider implements ModelProvider {
       }
       if (!response.body) throw malformed();
       let text = '', finishReason: string | undefined, usage: ModelUsage | undefined;
+      const fragments = new Map<number,{id:string;name:string;arguments:string}>();
       for await (const frame of frames(response.body)) {
         if (frame.event === 'error') throw new ProviderError('transport', 'Provider reported a stream error');
         if (frame.data === '[DONE]') {
-          checkFinish(finishReason);
-          if (!text.trim()) throw malformed();
-          return { text, usage, finishReason };
+          const ordered = [...fragments.entries()].sort((a,b)=>a[0]-b[0]);
+          if (ordered.some(([index],position)=>index!==position)) throw malformed();
+          const toolCalls = ordered.length ? validateNativeCalls(ordered.map(([,f])=>({id:f.id,type:'function',function:{name:f.name,arguments:f.arguments}}))) : [];
+          checkFinish(finishReason,toolCalls.length);
+          if (!text.trim() && !toolCalls.length) throw malformed();
+          return { text, ...(toolCalls.length ? {toolCalls} : {}), usage, finishReason, ...trace };
         }
         const payload = parseJSON(frame.data);
         if (!record(payload)) throw malformed();
@@ -253,7 +299,31 @@ export class StarkProvider implements ModelProvider {
         const choice = payload.choices[0];
         if (!record(choice) || choice.index !== 0 || !record(choice.delta)) throw malformed();
         rejectRefusal(choice.delta.refusal);
-        rejectNativeTools(choice.delta);
+        if (choice.delta.function_call != null || choice.delta.role != null && choice.delta.role !== 'assistant') throw malformed();
+        if (choice.delta.tool_calls != null) {
+          if (!Array.isArray(choice.delta.tool_calls) || choice.delta.tool_calls.length > NATIVE_LIMITS.calls) throw malformed();
+          for (const delta of choice.delta.tool_calls) {
+            if (!record(delta) || !Number.isSafeInteger(delta.index) || Number(delta.index)<0 || Number(delta.index)>=NATIVE_LIMITS.calls || delta.type != null && delta.type !== 'function') throw malformed();
+            const index = Number(delta.index), prior = fragments.get(index) ?? {id:'',name:'',arguments:''};
+            if (delta.id != null) {
+              if (typeof delta.id !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(delta.id) || prior.id && prior.id !== delta.id || [...fragments.entries()].some(([i,f])=>i!==index && f.id === delta.id)) throw malformed();
+              prior.id = delta.id;
+            }
+            if (delta.function != null) {
+              if (!record(delta.function)) throw malformed();
+              if (delta.function.name != null) {
+                if (typeof delta.function.name !== 'string') throw malformed();
+                prior.name += delta.function.name;
+              }
+              if (delta.function.arguments != null) {
+                if (typeof delta.function.arguments !== 'string') throw malformed();
+                prior.arguments += delta.function.arguments;
+              }
+            }
+            if (prior.name.length > NATIVE_LIMITS.name || Buffer.byteLength(prior.arguments) > NATIVE_LIMITS.arguments) throw malformed();
+            fragments.set(index,prior);
+          }
+        }
         const content = choice.delta.content;
         if (content != null && typeof content !== 'string') throw malformed();
         if (finishReason !== undefined) throw malformed();
@@ -262,7 +332,7 @@ export class StarkProvider implements ModelProvider {
           input.onDelta?.(content); // Provisional display only; never action execution.
         }
         if (choice.finish_reason != null) {
-          checkFinish(choice.finish_reason);
+          checkFinish(choice.finish_reason,fragments.size);
           finishReason = choice.finish_reason;
         }
       }

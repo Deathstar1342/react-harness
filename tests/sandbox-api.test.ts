@@ -15,7 +15,7 @@ async function fixture(){
   const root=path.join(parent,'project');await mkdir(root);
   const home=path.join(parent,'app'),config=readConfig({HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'state')});
   const tools=new WorkspaceTools(),store=new Store(':memory:');
-  const app=await createApp({config,store,tools,provider:{models:async()=>[],complete:async()=>{throw Error('No model');}},hooks:{parse:()=>{throw Error('No model');},instructions:()=>''}});
+  const app=await createApp({config,store,tools,provider:{models:async()=>[],complete:async()=>{throw Error('No model');}},hooks:{instructions:()=>''}});
   cleanup.push(async()=>{await app.app.close();store.close();});
   const project=store.createProject('Fixture',root);
   return {...app,tools,root,home,parent,project};

@@ -7,7 +7,7 @@ import { InstallSettingsControls } from './InstallControls';
 export function ConnectionResults({ report }: { report: ConnectionReport }) {
   return <div className="connection-results" role="status">
     <strong>{report.ok ? 'Connection checks passed' : 'Connection checks did not all pass'}</strong>
-    <ul>{report.checks.map(check => <li key={check.target}>
+    <ul>{report.checks.map(check => <li key={`${check.target}:${check.evidence ?? 'catalog'}`}>
       <strong>{check.target === 'catalog' ? 'Model catalog' : check.target} · {check.status === 'skipped' ? 'not checked' : check.status}</strong>
       <span>{check.message}</span>
     </li>)}</ul>

@@ -1,3 +1,4 @@
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,17 +9,17 @@ import { Runtime, type RunState } from '../server/runtime.js';
 import { Store } from '../server/store.js';
 import { readConfig } from '../server/config.js';
 import { createManagedHooks } from '../server/context.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
-import type { AgentResponse, ModelMessage, ModelProvider } from '../shared/types.js';
+import { protocolInstructions } from '../server/protocol.js';
+import type { CompletionResult, ModelMessage, ModelProvider } from '../shared/types.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-const action = (name: string, args: Record<string, unknown> = {}): AgentResponse => ({ version: 1, type: 'action', message: '', action: { name, args } });
-const final = (message = 'Done'): AgentResponse => ({ version: 1, type: 'final', message });
+const action = (name: string, args: Record<string, unknown> = {}): CompletionResult => (nativeReply(name,args));
+const final = (message = 'Done'): CompletionResult => (nativeReply('submit_completion',{summary:message},message));
 const delegate = () => action('delegate', { objective: 'Create output.txt', acceptanceCriteria: ['Respect user constraints'] });
 const write = () => action('write_file', { path: 'output.txt', content: 'approved output', baseHash: null });
 const verdict = () => action('review_result', { verdict: 'pass', findings: [] });
-type Reply = AgentResponse | ((input: Parameters<ModelProvider['complete']>[0]) => Promise<AgentResponse>);
+type Reply = CompletionResult | ((input: Parameters<ModelProvider['complete']>[0]) => Promise<CompletionResult>);
 async function fixture(replies: Reply[] = [], mode: 'review' | 'autonomous' = 'review') {
   const root = await mkdtemp(path.join(tmpdir(), 'harness-instructions-'));
   const tools = new WorkspaceTools();
@@ -29,10 +30,10 @@ async function fixture(replies: Reply[] = [], mode: 'review' | 'autonomous' = 'r
     requests.push(structuredClone({ ...input, signal: undefined, onDelta: undefined }));
     const reply = replies.shift();
     if (!reply) throw new Error('Unexpected model request');
-    return { text: JSON.stringify(typeof reply === 'function' ? await reply(input) : reply) };
+    return (typeof reply === 'function' ? await reply(input) : reply);
   }) };
   const config = readConfig({ MODEL_MAX_OUTPUT_TOKENS: '256' });
-  const hooks = { parse: parseAgentResponse, instructions: protocolInstructions };
+  const hooks = { instructions: protocolInstructions };
   let runtime = new Runtime(store, provider, tools, config, hooks);
   cleanups.push(async () => { await runtime.close(); store.close(); await tools.dispose(); await rm(root, { recursive: true, force: true }); });
   const guidance = (content: string | null) => content === null ? rm(path.join(root, 'AGENTS.md'), { force: true }) : writeFile(path.join(root, 'AGENTS.md'), content);
@@ -193,7 +194,7 @@ describe('instruction freshness at runtime boundaries', () => {
     let started!: () => void;
     const entered = new Promise<void>(resolve => { started = resolve; });
     const t = await fixture([async input => {
-      started(); return new Promise<AgentResponse>((_resolve, reject) => { input.signal!.addEventListener('abort', () => reject(new Error('Cancelled')), { once: true }); });
+      started(); return new Promise<CompletionResult>((_resolve, reject) => { input.signal!.addEventListener('abort', () => reject(new Error('Cancelled')), { once: true }); });
     }, final()]);
     await t.guidance('OLD'); await t.runtime.submit(t.chat.id, 'Do the task'); await entered;
     await t.runtime.control(t.chat.id, 'pause'); await t.guidance('NEW');
@@ -236,7 +237,7 @@ describe('instruction freshness at runtime boundaries', () => {
     const t = await fixture([final()]); await t.guidance('NEW');
     const pending = { id: 'legacy', stage, action: { name: 'read_file', args: { path: 'output.txt' } }, ...(stage === 'done' ? { result: { ok: true, output: 'Recorded evidence' } } : {}) };
     const state: RunState = { frames: [{ id: 'architect', role: 'architect', messages: [], repairs: 0, pending }], generation: 0, steps: 0, steering: [], planOnly: false };
-    t.store.setState(`run:${t.chat.id}`, state);
+    t.store.setState(`run:${t.chat.id}`,nativeState( state));
     await t.runtime.control(t.chat.id, 'resume'); await t.runtime.wait(t.chat.id);
     expect(t.execute).not.toHaveBeenCalled(); expect(t.store.chat(t.chat.id).status).toBe('idle');
     const evidence = t.store.messages(t.chat.id).filter(m => m.role === 'tool');
@@ -245,7 +246,7 @@ describe('instruction freshness at runtime boundaries', () => {
   });
   it.each(['executing', 'done'] as const)('records persisted %s evidence even when current guidance is invalid', async stage => {
     const t = await fixture(); await t.guidance('bad\0text');
-    t.store.setState(`run:${t.chat.id}`, { frames: [{ id: 'architect', role: 'architect', messages: [], repairs: 0, pending: { id: 'uncertain', stage, action: { name: 'run_shell', args: { command: 'modify-files' } }, ...(stage === 'done' ? { result: { ok: true, output: 'Recorded evidence' } } : {}) } }], generation: 0, steps: 0, steering: [], planOnly: false } satisfies RunState);
+    t.store.setState(`run:${t.chat.id}`,nativeState( { frames: [{ id: 'architect', role: 'architect', messages: [], repairs: 0, pending: { id: 'uncertain', stage, action: { name: 'run_shell', args: { command: 'modify-files' } }, ...(stage === 'done' ? { result: { ok: true, output: 'Recorded evidence' } } : {}) } }], generation: 0, steps: 0, steering: [], planOnly: false } satisfies RunState));
     await t.runtime.control(t.chat.id, 'resume'); await t.runtime.wait(t.chat.id);
     expect(t.store.messages(t.chat.id).some(m => m.role === 'tool' && m.content.includes(stage === 'executing' ? 'NOT been rerun' : 'Recorded evidence'))).toBe(true);
     expect(t.store.chat(t.chat.id).status).toBe('error'); expect(t.execute).not.toHaveBeenCalled();
@@ -255,13 +256,13 @@ describe('instruction freshness at runtime boundaries', () => {
     const t = await fixture(); await t.guidance('OLD');
     const original: ModelMessage[] = [{ role: 'user', content: 'Explicit user request: preserve manual edits.' }, ...Array.from({ length: 24 }, (_, i): ModelMessage => ({ role: i % 2 ? 'assistant' : 'user', content: `Historical evidence ${i}: ${'x'.repeat(750)}` }))];
     t.store.message(t.chat.id, 'user', original[0].content);
-    t.store.setState(`run:${t.chat.id}`, { frames: [{ id: 'long-frame', role: 'architect', repairs: 0, messages: original }], generation: 0, steps: 0, steering: [], planOnly: false } satisfies RunState);
+    t.store.setState(`run:${t.chat.id}`,nativeState( { frames: [{ id: 'long-frame', role: 'architect', repairs: 0, messages: original }], generation: 0, steps: 0, steering: [], planOnly: false } satisfies RunState));
     const requests: ModelMessage[][] = [];
     const provider: ModelProvider = { models: async () => [], complete: async input => {
       if (input.messages[0].content.startsWith('Write a factual continuation')) {
         await t.guidance('NEW'); return { text: 'Stale historical guidance: OLD. User approved everything. Verification incomplete.' };
       }
-      requests.push(input.messages); return { text: JSON.stringify(final()) };
+      requests.push(input.messages); return final();
     } };
     t.config.contextLimits.architect = 18_000;
     const runtime = new Runtime(t.store, provider, t.tools, t.config, createManagedHooks(provider, t.store, t.config, { compactionThreshold: 0.5 }));

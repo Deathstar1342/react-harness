@@ -1,9 +1,10 @@
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { AgentResponse, ApprovalMode, ModelProvider } from '../shared/types.js';
+import type { CompletionResult, ApprovalMode, ModelProvider } from '../shared/types.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
 import { createManagedHooks } from '../server/context.js';
@@ -14,8 +15,8 @@ import { BUDGET_STATE_KEY, type Reservation } from '../server/scheduler.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-const action = (name: string, args: Record<string, unknown>): AgentResponse => ({ version: 1, type: 'action', message: '', action: { name, args } });
-const final = (message = 'Fixture finished'): AgentResponse => ({ version: 1, type: 'final', message });
+const action = (name: string, args: Record<string, unknown>): CompletionResult => (nativeReply(name,args));
+const final = (message = 'Fixture finished'): CompletionResult => (nativeReply('submit_completion',{summary:message},message));
 const delegate = () => action('delegate', { objective: 'Write the label', acceptanceCriteria: ['Preserve user constraints'], paths: ['label.txt'] });
 const write = (content: string, baseHash: string | null = null) => action('write_file', { path: 'label.txt', content, baseHash });
 const verdict = () => action('review_result', { verdict: 'pass', findings: [] });
@@ -27,7 +28,7 @@ async function directory() {
   });
   return root;
 }
-async function fixture(responses: Array<AgentResponse | (() => Promise<AgentResponse>)>, mode: ApprovalMode = 'review') {
+async function fixture(responses: Array<CompletionResult | (() => Promise<CompletionResult>)>, mode: ApprovalMode = 'review') {
   const root = await directory(), projectRoot = path.join(root, 'project');
   await mkdir(projectRoot);
   const config = readConfig({ STARK_BASE_URL: 'http://127.0.0.1/v1', STARK_API_KEY: 'synthetic-test-key', HARNESS_DATA_DIR: path.join(root, 'state') });
@@ -37,7 +38,7 @@ async function fixture(responses: Array<AgentResponse | (() => Promise<AgentResp
     requests.push(input);
     const response = responses.shift();
     if (!response) throw new Error('Unexpected fixture model request');
-    return { text: JSON.stringify(typeof response === 'function' ? await response() : response), finishReason: 'stop', usage: { inputTokens: 50, outputTokens: 20 } };
+    return { ...(typeof response === 'function' ? await response() : response), usage: { inputTokens: 50, outputTokens: 20 } };
   } };
   const tools = new WorkspaceTools();
   const app = await createApp({ config, store, provider, tools, hooks: createManagedHooks(provider, store, config) });
@@ -89,10 +90,10 @@ describe('M6 independent release integration', () => {
   it('notifies a sibling chat and invalidates its proposal after an agent write', async () => {
     const t = await fixture([delegate(), write('agent update'), final(), verdict(), final()], 'autonomous');
     const sibling = t.store.createChat(t.project.id, 'Sibling', 'review');
-    const proposal = write('sibling stale proposal').action!;
-    t.store.setState(`run:${sibling.id}`, { planOnly: false, steps: 0, generation: 0, steering: [], frames: [
+    const proposal = actionOf(write('sibling stale proposal'));
+    t.store.setState(`run:${sibling.id}`,nativeState( { planOnly: false, steps: 0, generation: 0, steering: [], frames: [
       { id: 'sibling-coder', role: 'coder', messages: [], repairs: 0, pending: { id: 'sibling-op', stage: 'prepared', action: proposal, approvalId: 'sibling-approval' } },
-    ] } satisfies RunState);
+    ] } satisfies RunState));
     t.store.approval({ id: 'sibling-approval', chatId: sibling.id, agentId: 'sibling-coder', action: proposal, inspection: { effect: 'write', risk: 'routine', description: 'Sibling proposal' }, status: 'pending', createdAt: new Date().toISOString() });
     // Paused prevents unrelated automatic provider work; notification still must persist.
     t.store.updateChat(sibling.id, { status: 'paused' });
@@ -113,7 +114,7 @@ describe('M6 independent release integration', () => {
     expect((await save('tab-b', 'conflict', initial.hash)).statusCode).toBe(409);
     const saved = await save('tab-a', 'manual', initial.hash);
     expect(saved.statusCode).toBe(200);
-    expect((await t.tools.execute({ projectRoot: t.project.path, chatId: t.chat.id, agentId: 'coder' }, write('overwrite', saved.json().hash).action!)).ok).toBe(false);
+    expect((await t.tools.execute({ projectRoot: t.project.path, chatId: t.chat.id, agentId: 'coder' }, actionOf(write('overwrite', saved.json().hash)))).ok).toBe(false);
     expect((await t.post(`/api/projects/${t.project.id}/editor`, { path: 'label.txt', owner: 'tab-a', dirty: false })).statusCode).toBe(200);
     expect((await save('tab-b', 'stale', initial.hash)).statusCode).toBe(409);
     expect(await readFile(path.join(t.project.path, 'label.txt'), 'utf8')).toBe('manual');
@@ -145,7 +146,7 @@ describe('M6 recovery and context follow-up', () => {
     // must not become noncompactable controls for every subsequent request.
     for (let index = 0; index < 8; index++) {
       const content = `Historical edit ${index}: ${'x'.repeat(1500)}`;
-      t.store.approval({ id: `historical-${index}`, chatId: t.chat.id, agentId: 'retired-coder', action: write(content).action!, inspection: { effect: 'write', risk: 'routine', description: 'Completed historical edit', before: content, after: content, diff: content }, status: 'approved', createdAt: new Date().toISOString() });
+      t.store.approval({ id: `historical-${index}`, chatId: t.chat.id, agentId: 'retired-coder', action: actionOf(write(content)), inspection: { effect: 'write', risk: 'routine', description: 'Completed historical edit', before: content, after: content, diff: content }, status: 'approved', createdAt: new Date().toISOString() });
     }
     await t.submit('Give a short status update');
     expect(t.store.chat(t.chat.id).status).toBe('idle');
@@ -155,7 +156,7 @@ describe('M6 recovery and context follow-up', () => {
   });
 
   it('cancels a provider response before accepting its otherwise valid write proposal', async () => {
-    let entered!: () => void, resolve!: (value: AgentResponse) => void;
+    let entered!: () => void, resolve!: (value: CompletionResult) => void;
     const started = new Promise<void>(done => { entered = done; });
     const t = await fixture([delegate(), () => { entered(); return new Promise(done => { resolve = done; }); }], 'autonomous');
     expect((await t.post(`/api/chats/${t.chat.id}/messages`, { content: 'Write a label' })).statusCode).toBe(202);
@@ -176,10 +177,10 @@ describe('M6 recovery and context follow-up', () => {
 
   it('does not replay a durable executing shell after reopening the database', async () => {
     const t = await fixture([]);
-    t.store.setState(`run:${t.chat.id}`, { planOnly: false, steps: 1, generation: 0, steering: [], frames: [
+    t.store.setState(`run:${t.chat.id}`,nativeState( { planOnly: false, steps: 1, generation: 0, steering: [], frames: [
       { id: 'architect', role: 'architect', messages: [], repairs: 0 },
-      { id: 'coder', role: 'coder', messages: [], repairs: 0, pending: { id: 'uncertain-operation', stage: 'executing', action: action('run_shell', { command: 'synthetic command which must never be sent to the shell' }).action! } },
-    ] } satisfies RunState);
+      { id: 'coder', role: 'coder', messages: [], repairs: 0, pending: { id: 'uncertain-operation', stage: 'executing', action: actionOf(action('run_shell', { command: 'synthetic command which must never be sent to the shell' })) } },
+    ] } satisfies RunState));
     t.store.updateChat(t.chat.id, { status: 'running' });
     await t.app.close();
     // A second Store connection loads persisted run state, independent of the
@@ -190,7 +191,7 @@ describe('M6 recovery and context follow-up', () => {
     const provider: ModelProvider = { models: async () => [], complete: async () => {
       const response = responses.shift();
       if (!response) throw new Error('Unexpected recovery request');
-      return { text: JSON.stringify(response) };
+      return response;
     } };
     const next = await createApp({ config: t.config, store: reopened, tools, provider, hooks: createManagedHooks(provider, reopened, t.config) });
     cleanup.push(async () => { await next.app.close(); reopened.close(); });

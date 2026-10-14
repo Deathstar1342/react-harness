@@ -1,3 +1,4 @@
+import { nativeState } from './native-fixture.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +30,7 @@ describe('durable workspace state', () => {
     try {
       const project = store.createProject('A','/a');const chat = store.createChat(project.id,'Work','review');
       for(const id of ['past','current','pending']) store.approval({id,chatId:chat.id,agentId:'coder',action:{name:'write_file',args:{}},inspection:{effect:'write',risk:'routine',description:'Edit'},status:id==='pending'?'pending':'approved',createdAt:new Date().toISOString()});
-      store.setState(`run:${chat.id}`,{frames:[{pending:{stage:'prepared',approvalId:'current'}}]});
+      store.setState(`run:${chat.id}`,nativeState({frames:[{pending:{stage:'prepared',approvalId:'current'}}]}));
       store.invalidateApprovals(chat.id);
       expect(store.approvals(chat.id).map(item=>[item.id,item.status])).toEqual([['past','approved'],['current','stale'],['pending','stale']]);
     } finally {store.close();}
@@ -42,7 +43,7 @@ describe('durable workspace state', () => {
     const chat = first.createChat(project.id,'Work','review');
     first.message(chat.id,'user','Keep my label');
     first.updateChat(chat.id,{status:'running'});
-    first.setState(`run:${chat.id}`,{step:3,pending:{stage:'executing'}});
+    first.setState(`run:${chat.id}`,nativeState({step:3,pending:{stage:'executing'}}));
     first.approval({id:'approval-1',chatId:chat.id,agentId:'coder',action:{name:'write_file',args:{}},inspection:{effect:'write',risk:'routine',description:'Edit'},status:'pending',createdAt:new Date().toISOString()});
     first.close();
     const next = new Store(file);
@@ -51,7 +52,7 @@ describe('durable workspace state', () => {
       expect(next.chat(chat.id).status).toBe('interrupted');
       expect(next.messages(chat.id)[0].content).toBe('Keep my label');
       expect(next.getState(`run:${chat.id}`,null)).toEqual({step:3,pending:{stage:'executing'}});
-      expect(next.getApproval('approval-1').status).toBe('pending');
+      expect(next.getApproval('approval-1').status).toBe('stale');
       expect(next.events(chat.id).map(event=>event.id)).toEqual([...next.events(chat.id).map(event=>event.id)].sort((a,b)=>a-b));
     } finally { next.close(); }
   });

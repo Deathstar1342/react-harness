@@ -1,3 +1,4 @@
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,7 +13,7 @@ import { WorkspaceFiles } from '../server/tools/files.js';
 import { hash } from '../server/tools/paths.js';
 import { readConfig } from '../server/config.js';
 import { createApp } from '../server/app.js';
-import type { AgentResponse, ChangePreview, FileChange, ModelProvider } from '../shared/types.js';
+import type { CompletionResult, ChangePreview, FileChange, ModelProvider } from '../shared/types.js';
 
 const cleanup: (()=>Promise<void>)[] = [];
 afterEach(async()=>{for (const fn of cleanup.splice(0).reverse()) await fn();});
@@ -23,8 +24,8 @@ async function setup() {
   const store = new Store(filename);
   const tools = new WorkspaceTools();
   const config = readConfig({STARK_BASE_URL:'http://localhost/v1',STARK_API_KEY:'test'});
-  const provider: ModelProvider = {models:async()=>[],complete:async()=>({text:JSON.stringify({version:1,type:'final',message:'Done'})})};
-  const hooks = {parse:(text:string)=>JSON.parse(text) as AgentResponse,instructions:()=>''};
+  const provider: ModelProvider = {models:async()=>[],complete:async()=>(nativeReply('submit_completion',{summary:'Done'},'Done'))};
+  const hooks = {instructions:()=>''};
   const runtime = new Runtime(store,provider,tools,config,hooks);
   const changes = new Changes(store,tools,runtime);
   const project = store.createProject('Test',projectRoot);
@@ -50,7 +51,7 @@ it('restores a write, preserves staged and unrelated work, and notifies every ch
   const other=t.store.createChat(t.project.id,'Other','review');
   t.store.updateChat(other.id,{status:'paused'});
   const state:RunState={frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending:{id:'pending',stage:'prepared',approvalId:'approval',action:{name:'write_file',args:{}}}}],steering:[],generation:0,steps:0,planOnly:false};
-  t.store.setState(`run:${other.id}`,state);
+  t.store.setState(`run:${other.id}`,nativeState(state));
   t.store.approval({id:'approval',chatId:other.id,agentId:'coder',action:{name:'write_file',args:{}},inspection:{effect:'write',risk:'routine',description:''},status:'approved',createdAt:''});
   const c=await t.record();await writeFile(path.join(t.projectRoot,'manual.txt'),'untouched');
   await t.undo(c);
@@ -205,7 +206,7 @@ it('runtime records successful writes exactly once, retains the before snapshot 
   const t=await setup();await writeFile(path.join(t.projectRoot,'file.txt'),'original');
   const pending={id:randomUUID(),stage:'prepared' as const,instructionsHash:null,action:{name:'write_file',args:{path:'file.txt',content:'agent',baseHash:hash('original')}}};
   const state:RunState={frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending}],instructionsHash:null,steering:[],steps:0,generation:0,planOnly:false};
-  t.store.setState(`run:${t.chat.id}`,state);
+  t.store.setState(`run:${t.chat.id}`,nativeState(state));
   const execute=t.tools.execute.bind(t.tools);let calls=0;
   t.tools.execute=async(ctx,action)=>{
     calls++;
@@ -214,14 +215,14 @@ it('runtime records successful writes exactly once, retains the before snapshot 
     expect(t.store.getState<RunState>(`run:${t.chat.id}`,state).frames[0].pending?.stage).toBe('executing');
     return execute(ctx,action);
   };
-  const replies=[{version:1,type:'final',message:'Done'},{version:1,type:'action',message:'',action:{name:'review_result',args:{verdict:'pass',findings:[]}}}];
+  const replies=[nativeReply('submit_completion',{summary:'Done'},'Done'),{version:1,type:'action',message:'',action:{name:'review_result',args:{verdict:'pass',findings:[]}}}];
   t.provider.complete=async()=>({text:JSON.stringify(replies.shift())});
   await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
   const change=t.store.fileChange(t.project.id,pending.id);
   expect(change.status).toBe('confirmed');expect(change.after.content).toBe('agent');expect(calls).toBe(1);
   // Simulate restart after durable done, but before consuming its event/transcript.
   state.frames[0].pending={...pending,stage:'done',result:{ok:true,output:'Saved file.txt',data:change.after}};
-  t.store.setState(`run:${t.chat.id}`,state);
+  t.store.setState(`run:${t.chat.id}`,nativeState(state));
   const next=new Runtime(t.store,t.provider,t.tools,t.config,t.hooks);
   await next.control(t.chat.id,'resume');await next.wait(t.chat.id);await next.close();
   expect(calls).toBe(1);expect(t.store.fileChanges(t.project.id)).toHaveLength(1);
@@ -230,7 +231,7 @@ it('runtime records successful writes exactly once, retains the before snapshot 
 it('runtime never promotes a crash after filesystem mutation to confirmed or repeats the write',async()=>{
   const t=await setup(),c=await t.record('before','after','file.txt','recording');
   const state:RunState={frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending:{id:c.id,stage:'executing',action:{name:'write_file',args:{path:c.path,content:c.after.content,baseHash:c.before.hash}}}}],steering:[],generation:0,steps:0,planOnly:false};
-  t.store.setState(`run:${t.chat.id}`,state);t.store.recover();
+  t.store.setState(`run:${t.chat.id}`,nativeState(state));t.store.recover();
   const spy=vi.spyOn(t.tools,'execute');
   await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
   expect(spy).not.toHaveBeenCalled();expect(t.store.fileChange(t.project.id,c.id).status).toBe('unknown');
@@ -243,7 +244,7 @@ it('runtime records a safe dirty-buffer rejection without claiming that a write 
   t.tools.setDirty(t.projectRoot,'file.txt','human',true);
   const pending={id:randomUUID(),stage:'prepared' as const,instructionsHash:null,action:{name:'write_file',args:{path:'file.txt',content:'new',baseHash:hash('old')}}};
   const state:RunState={frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending}],instructionsHash:null,steering:[],steps:0,generation:0,planOnly:false};
-  t.store.setState(`run:${t.chat.id}`,state);
+  t.store.setState(`run:${t.chat.id}`,nativeState(state));
   await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
   expect(t.store.fileChange(t.project.id,pending.id).status).toBe('rejected');
   expect(await readFile(path.join(t.projectRoot,'file.txt'),'utf8')).toBe('old');
@@ -269,7 +270,7 @@ it('rechecks M9 guidance after the new snapshot read and discards the superseded
   const t=await setup();await writeFile(path.join(t.projectRoot,'file.txt'),'old');
   const pending={id:randomUUID(),stage:'prepared' as const,instructionsHash:null,action:{name:'write_file',args:{path:'file.txt',content:'new',baseHash:hash('old')}}};
   const state:RunState={frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending}],instructionsHash:null,steering:[],steps:0,generation:0,planOnly:false};
-  t.store.setState(`run:${t.chat.id}`,state);
+  t.store.setState(`run:${t.chat.id}`,nativeState(state));
   const read=t.tools.read.bind(t.tools);
   t.tools.read=async(root,file)=>{const result=await read(root,file);if(file==='file.txt') await writeFile(path.join(root,'AGENTS.md'),'Changed guidance');return result;};
   const execute=vi.spyOn(t.tools,'execute');

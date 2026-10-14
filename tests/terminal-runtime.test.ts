@@ -1,3 +1,4 @@
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,10 +9,10 @@ import { readConfig } from '../server/config.js';
 import { commandEvent } from '../server/command-events.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 import { terminalHistory } from '../client/terminal.js';
-import type { Action, AgentResponse, CommandEvent, ModelProvider, ToolContext, ToolResult, ToolService } from '../shared/types.js';
+import type { Action, CompletionResult, CommandEvent, ModelProvider, ToolContext, ToolResult, ToolService } from '../shared/types.js';
 
-const action = (name:string,args:Record<string,unknown>={}):AgentResponse=>({version:1,type:'action',message:'',action:{name,args}});
-const final:AgentResponse = {version:1,type:'final',message:'Done'};
+const action = (name:string,args:Record<string,unknown>={}):CompletionResult=>(nativeReply(name,args));
+const final:CompletionResult = nativeReply('submit_completion',{summary:'Done'},'Done');
 const verdict = ()=>action('review_result',{verdict:'pass',findings:[]});
 const resources: {runtime:Runtime;store:Store}[] = [];
 afterEach(async()=>{for (const item of resources.splice(0)) {await item.runtime.close();item.store.close();}});
@@ -19,10 +20,10 @@ function setup(commands:Action[],execute:ToolService['execute']) {
   const store = new Store(':memory:');
   const project = store.createProject('Terminal','/workspace');
   const chat = store.createChat(project.id,'Commands','autonomous');
-  const responses:AgentResponse[] = [action('delegate',{objective:'Run checks',acceptanceCriteria:['Evidence']}),...commands.flatMap(command=>[action(command.name,command.args),verdict()]),final,verdict(),final];
-  const provider:ModelProvider = {models:async()=>['test'],complete:async()=>{const next=responses.shift();if (!next) throw new Error('Unexpected request');return {text:JSON.stringify(next)};}};
+  const responses:CompletionResult[] = [action('delegate',{objective:'Run checks',acceptanceCriteria:['Evidence']}),...commands.flatMap(command=>[action(command.name,command.args),verdict()]),final,verdict(),final];
+  const provider:ModelProvider = {models:async()=>['test'],complete:async()=>{const next=responses.shift();if (!next) throw new Error('Unexpected request');return next;}};
   const tools:ToolService = {inspect:async()=>({effect:'execute',risk:'elevated',description:'Command'}),execute,read:async(_root,path)=>({path,content:'',hash:null}),list:async()=>[],save:async()=>{throw new Error('Unexpected write');},setDirty:()=>{},dispose:async()=>{}};
-  const runtime = new Runtime(store,provider,tools,readConfig({}),{instructions:()=>'',parse:text=>JSON.parse(text)});
+  const runtime = new Runtime(store,provider,tools,readConfig({}),{instructions:()=>'',});
   resources.push({runtime,store});
   return {store,chat,runtime};
 }
@@ -86,7 +87,7 @@ describe('durable terminal command evidence',()=>{
     let executions=0;
     const t=setup([],async()=>{executions++;return {ok:true,output:''};});
     const state:RunState={planOnly:false,steps:0,generation:0,steering:[],frames:[{id:'old-coder',shellId:'coder-primary',role:'coder',messages:[],repairs:0,pending:{id:'old-command',stage:'executing',action:command('do not repeat')}}]};
-    t.store.setState(`run:${t.chat.id}`,state);t.store.updateChat(t.chat.id,{status:'paused'});
+    t.store.setState(`run:${t.chat.id}`,nativeState(state));t.store.updateChat(t.chat.id,{status:'paused'});
     t.store.event(t.chat.id,'tool_output',{agentId:'old-coder',output:'legacy uncorrelated'});
     t.store.recover();t.store.recover();
     expect(lifecycle(t.store,t.chat.id)).toHaveLength(1);
@@ -99,7 +100,7 @@ describe('durable terminal command evidence',()=>{
   it('keeps done results across recovery and reports actual event-history omission',()=>{
     const t=setup([],async()=>({ok:true,output:''}));
     const state:RunState={planOnly:false,steps:0,generation:0,steering:[],frames:[{id:'coder',role:'coder',messages:[],repairs:0,pending:{id:'done',stage:'done',action:command('done'),result:{ok:true,output:'',data:{exitCode:0}}}}]};
-    t.store.setState(`run:${t.chat.id}`,state);t.store.recover();
+    t.store.setState(`run:${t.chat.id}`,nativeState(state));t.store.recover();
     expect(lifecycle(t.store,t.chat.id)).toEqual([]);
     const original=t.store.detail(t.chat.id).events.length;
     for(let i=original;i<1000;i++)t.store.event(t.chat.id,'delta',{});
@@ -114,7 +115,7 @@ describe('durable terminal command evidence',()=>{
     try {
       const project=store.createProject('Restart',root),chat=store.createChat(project.id,'Restart','autonomous');
       const frame={id:'coder',role:'coder' as const,messages:[],repairs:0,pending:{id:'interrupted',stage:'executing' as const,action:command('once')}};
-      store.setState(`run:${chat.id}`,{planOnly:false,steps:0,generation:0,steering:[],frames:[frame]} satisfies RunState);
+      store.setState(`run:${chat.id}`,nativeState({planOnly:false,steps:0,generation:0,steering:[],frames:[frame]} satisfies RunState));
       store.event(chat.id,'command',commandEvent(frame,frame.pending));
       store.event(chat.id,'tool_output',{commandId:'interrupted',agentId:'coder',sessionId:'coder',output:'durable partial'});
       store.close();store=new Store(filename);store.recover();

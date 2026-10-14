@@ -2,7 +2,6 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { setImmediate as tick } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StarkProvider, ProviderError } from '../server/provider.js';
-import { parseAgentResponse } from '../server/protocol.js';
 
 const servers: http.Server[] = [];
 const key = 'private-test-key-NEVER-ECHO';
@@ -100,7 +99,7 @@ describe('StarkProvider ordinary HTTP completions', () => {
     const text = JSON.stringify({ version: 1, type: 'action', message: 'write', action: { name: 'write_file', args: { path: 'a', content: 'x', baseHash: null } } });
     const baseUrl = await fake((_req, res) => stream(res, frame({ content: text }, 'stop')));
     const execute = vi.fn(), onDelta = vi.fn();
-    await expect(new StarkProvider({ baseUrl, apiKey: key }).complete({ ...input, onDelta }).then(result => execute(parseAgentResponse(result.text)))).rejects.toMatchObject({ code: 'truncated' });
+    await expect(new StarkProvider({ baseUrl, apiKey: key }).complete({ ...input, onDelta }).then(result => execute(result.toolCalls))).rejects.toMatchObject({ code: 'truncated' });
     expect(onDelta).toHaveBeenCalledWith(text);
     expect(execute).not.toHaveBeenCalled();
   });
@@ -213,4 +212,58 @@ describe('StarkProvider ordinary HTTP completions', () => {
     }
     expect(() => new StarkProvider({ baseUrl: '', apiKey: '', timeoutMs: 0 })).toThrow(ProviderError);
   });
+});
+
+
+describe('native transport boundaries',()=>{
+ const call=(id='call_1',name='read_file',args='{"path":"a"}')=>({id,type:'function',function:{name,arguments:args}});
+ it.each(['','Inspecting'])('accepts tool-only and text plus multiple calls: %s',async text=>{
+   let request:Record<string,unknown>={};
+   const calls=[call(),call('call_2','git_status','{}')];
+   const baseUrl=await fake(async(req,res)=>{request=await requestBody(req);json(res,{choices:[{message:{role:'assistant',content:text||null,tool_calls:calls},finish_reason:'tool_calls'}]});});
+   const result=await new StarkProvider({baseUrl,apiKey:key,streaming:false}).complete({...input,tools:[{type:'function',function:{name:'read_file',description:'Read',parameters:{type:'object'}}}]});
+   expect(result).toMatchObject({text,toolCalls:calls,finishReason:'tool_calls'});expect(request.tools).toHaveLength(1);expect(request).not.toHaveProperty('response_format');
+ });
+ it('assembles interleaved fragments by index and validates matching tool results on the next request',async()=>{
+   const baseUrl=await fake(async(req,res)=>{
+     const body=await requestBody(req);
+     if((body.messages as any[]).some(m=>m.role==='tool')){stream(res,finished('Observed both results'));return;}
+     stream(res,frame({tool_calls:[{index:1,id:'b',type:'function',function:{name:'git_',arguments:'{'}}]})+
+       frame({content:'Reading',tool_calls:[{index:0,id:'a',type:'function',function:{name:'read_file',arguments:'{"pa'}}]})+
+       frame({tool_calls:[{index:1,function:{name:'status',arguments:'}'}},{index:0,function:{arguments:'th":"a"}'}}]},'tool_calls')+'data: [DONE]\n\n');
+   });
+   const provider=new StarkProvider({baseUrl,apiKey:key});const result=await provider.complete(input);
+   expect(result.toolCalls).toEqual([call('a'),call('b','git_status','{}')]);
+   const next=await provider.complete({...input,messages:[...input.messages,{role:'assistant',content:result.text,tool_calls:result.toolCalls},{role:'tool',tool_call_id:'a',content:'file evidence'},{role:'tool',tool_call_id:'b',content:'status evidence'}]});
+   expect(next.text).toBe('Observed both results');
+ });
+ it.each([
+   [frame({tool_calls:[{index:0,...call()}]},'length'),'truncated'],
+   [frame({tool_calls:[{index:0,...call()}]},'tool_calls'),'truncated'],
+   [frame({tool_calls:[{index:0,...call()}]})+frame({refusal:'private'},'tool_calls'),'refusal'],
+   [frame({tool_calls:[{index:0,...call()},{index:1,...call()}]},'tool_calls')+'data: [DONE]\n\n','malformed'],
+   [frame({tool_calls:[{index:0,...call()}]})+frame({tool_calls:[{index:0,id:'conflict'}]},'tool_calls')+'data: [DONE]\n\n','malformed'],
+   [frame({tool_calls:[{index:1,...call()}]},'tool_calls')+'data: [DONE]\n\n','malformed'],
+   [frame({tool_calls:[{index:0,...call()}]},'stop')+'data: [DONE]\n\n','malformed'],
+   [frame({tool_calls:[{index:16,...call()}]},'tool_calls')+'data: [DONE]\n\n','malformed'],
+ ])('rejects unsafe native stream %#',async(wire,code)=>{
+   const baseUrl=await fake((_req,res)=>stream(res,wire));const execute=vi.fn();
+   await expect(new StarkProvider({baseUrl,apiKey:key}).complete(input).then(execute)).rejects.toMatchObject({code});expect(execute).not.toHaveBeenCalled();
+ });
+ it('refuses orphaned, duplicate and incomplete native history before HTTP',async()=>{
+   const fetcher=vi.spyOn(globalThis,'fetch');const provider=new StarkProvider({baseUrl:'https://unused.invalid',apiKey:key});
+   await expect(provider.complete({...input,messages:[{role:'tool',tool_call_id:'orphan',content:'fake'}]})).rejects.toThrow();
+   await expect(provider.complete({...input,messages:[{role:'assistant',content:'',tool_calls:[call() as any]}]})).rejects.toThrow();
+   expect(fetcher).not.toHaveBeenCalled();
+ });
+ it('preserves bounded catalog metadata while capabilities remain unknown',async()=>{
+   const baseUrl=await fake((_req,res)=>json(res,{data:[{id:'candidate-withtools',context_window:12345,tools:true}]}));
+   expect(await new StarkProvider({baseUrl,apiKey:key}).catalog()).toEqual([{id:'candidate-withtools',metadata:{context_window:12345,tools:true},capabilities:{ordinary:'unknown',native:'unknown',streaming:'unknown'}}]);
+ });
+ it('never exposes a credential echoed in nested catalog metadata',async()=>{
+   const baseUrl=await fake((_req,res)=>json(res,{data:[{id:'candidate',nested:{description:`echo ${key}`}}]}));
+   const result=await new StarkProvider({baseUrl,apiKey:key}).catalog();expect(JSON.stringify(result)).not.toContain(key);expect(result[0].metadata).toEqual({nested:{description:'echo [redacted]'}});
+   const unsafeUrl=await fake((_req,res)=>json(res,{data:[{id:'candidate',nested:{[key]:'value'}}]}));
+   await expect(new StarkProvider({baseUrl:unsafeUrl,apiKey:key}).catalog()).rejects.toThrow();
+ });
 });

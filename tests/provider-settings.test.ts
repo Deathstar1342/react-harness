@@ -1,3 +1,4 @@
+import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, linkSync, symlinkSync, unlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,7 +9,7 @@ import { Store } from '../server/store.js';
 import { ReloadingProvider } from '../server/provider.js';
 import { createApp } from '../server/app.js';
 import { createManagedHooks } from '../server/context.js';
-import { parseAgentResponse, protocolInstructions } from '../server/protocol.js';
+import { protocolInstructions } from '../server/protocol.js';
 import { childEnvironment } from '../server/tools/shell.js';
 import type { ModelProvider, ToolService } from '../shared/types.js';
 import type { Frame, RunState } from '../server/runtime.js';
@@ -136,7 +137,7 @@ it('captures in-flight credentials through retries and clears only subsequent re
 const tools:ToolService={inspect:async()=>({effect:'read',risk:'routine',description:''}),execute:async()=>({ok:true,output:''}),read:async(_root,path)=>({path,content:'',hash:null}),list:async()=>[],save:async()=>({path:'x',content:'',hash:null}),setDirty:()=>{},dispose:async()=>{}};
 it('API persists settings with local-origin guards, snapshots new chats, and never exposes keys',async()=>{
   const t=fixture();const provider:ModelProvider={models:async()=>['old-a'],complete:async()=>({text:'unused'})};
-  const {app}=await createApp({config:t.config,store:t.store,provider,providerSettingsFile:t.file,tools,hooks:{parse:parseAgentResponse,instructions:protocolInstructions}});cleanup.push(()=>app.close());
+  const {app}=await createApp({config:t.config,store:t.store,provider,providerSettingsFile:t.file,tools,hooks:{instructions:protocolInstructions}});cleanup.push(()=>app.close());
   expect(t.store.chatModels(t.legacy.id).architect).toBe('old-a');
   for(const [headers,status] of [[{origin:'https://attacker.example'},403],[{'content-type':'text/plain'},415]] as const)expect((await app.inject({method:'PATCH',url:'/api/provider-settings',headers,payload:'{}'})).statusCode).toBe(status);
   const response=await app.inject({method:'PATCH',url:'/api/provider-settings',payload:{models:{architect:'new-a'},apiKey:'new-test-key'}});expect(response.statusCode).toBe(200);expect(response.body).not.toContain('test-key');
@@ -150,7 +151,7 @@ it('rotation during a normal chat request preserves the old request and sanitize
   vi.stubGlobal('fetch',vi.fn(async(_url:unknown,init?:RequestInit)=>{
     requests.push({model:JSON.parse(String(init!.body)).model,authorization:(init!.headers as Record<string,string>).Authorization});
     if(requests.length===1)return new Promise<Response>((_,r)=>{reject=r;});
-    return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({version:1,type:'final',message:'Completed'})},finish_reason:'stop'}]}));
+    return new Response(JSON.stringify({choices:[{message:{role:'assistant',content:'Completed'},finish_reason:'stop'}]}));
   }));
   const provider=new ReloadingProvider(()=>({...t.config,maxRetries:0}));
   const {app,runtime}=await createApp({config:t.config,store:t.store,provider,providerSettingsFile:t.file,tools,hooks:createManagedHooks(provider,t.store,t.config)});cleanup.push(()=>app.close());
@@ -166,11 +167,11 @@ it('rotation during a normal chat request preserves the old request and sanitize
   expect(requests.at(-1)).toEqual({model:'new-a',authorization:'Bearer rotated-test-key'});
 });
 it.each(['architect','coder','critic'] as const)('compaction for %s retains saved models after changing defaults',async role=>{
-  const t=fixture();t.config.contextLimits={architect:10000,coder:10000,critic:10000};t.config.maxOutputTokens=256;
+  const t=fixture();t.config.contextLimits={architect:18000,coder:18000,critic:18000};t.config.maxOutputTokens=256;
   const calls:string[]=[];const provider:ModelProvider={models:async()=>[],complete:async input=>{calls.push(input.model);return {text:'Summary of observed history.',finishReason:'stop'};}};
   const hooks=createManagedHooks(provider,t.store,t.config);t.settings.update({models:{architect:'new-a',coder:'new-c',critic:'new-r'}});
-  const frame:Frame={id:'frame',role,objective:'task',repairs:0,messages:[{role:'user',content:'Task'},...Array.from({length:20},(_,i)=>({role:'assistant' as const,content:`History ${i}: ${'x'.repeat(750)}`}))]};
-  const state:RunState={frames:[frame],steering:[],generation:0,steps:0,planOnly:false};t.store.setState(`run:${t.legacy.id}`,state);
+  const frame:Frame={id:'frame',role,objective:'task',repairs:0,messages:[{role:'user',content:'Task'},...Array.from({length:20},(_,i)=>({role:'assistant' as const,content:`History ${i}: ${'x'.repeat(1500)}`}))]};
+  const state:RunState={frames:[frame],steering:[],generation:0,steps:0,planOnly:false};t.store.setState(`run:${t.legacy.id}`,nativeState(state));
   await hooks.prepareMessages!(t.legacy.id,frame,[{role:'system',content:'Policy'},...frame.messages],new AbortController().signal);
   expect(calls.length).toBeGreaterThan(0);expect(new Set(calls)).toEqual(new Set([t.store.chatModels(t.legacy.id)[role]]));
 });
@@ -178,12 +179,12 @@ it.each(['architect','coder','critic'] as const)('compaction for %s retains save
 it.each(['architect','coder','critic'] as const)('resumed %s frames use durable assignments after restart',async role=>{
   const t=fixture();t.store.initializeModels(t.config.models);
   const frame:Frame={id:'resumed-frame',role,objective:'Continue',repairs:0,messages:[{role:'user',content:'Continue safely'}]};
-  t.store.setState(`run:${t.legacy.id}`,{frames:[frame],steering:[],generation:0,steps:0,planOnly:false} satisfies RunState);
+  t.store.setState(`run:${t.legacy.id}`,nativeState({frames:[frame],steering:[],generation:0,steps:0,planOnly:false} satisfies RunState));
   t.store.updateChat(t.legacy.id,{status:'paused'});t.settings.update({models:{architect:'new-a',coder:'new-c',critic:'new-r'}});
   const config=loadBackendConfig({},t.filename).config;
   const reopened=new Store(path.join(t.root,'state.sqlite'));cleanup.push(()=>reopened.close());
-  const calls:string[]=[];const provider:ModelProvider={models:async()=>[],complete:async input=>{calls.push(input.model);return {text:JSON.stringify({version:1,type:'final',message:'Done'})};}};
-  const runtime=new Runtime(reopened,provider,tools,config,{parse:parseAgentResponse,instructions:protocolInstructions});cleanup.push(()=>runtime.close());
+  const calls:string[]=[];const provider:ModelProvider={models:async()=>[],complete:async input=>{calls.push(input.model);return nativeReply('submit_completion',{summary:'Done'},'Done');}};
+  const runtime=new Runtime(reopened,provider,tools,config,{instructions:protocolInstructions});cleanup.push(()=>runtime.close());
   await runtime.control(t.legacy.id,'resume');
   await vi.waitFor(()=>expect(calls.length).toBeGreaterThan(0));
   expect(calls[0]).toBe(t.store.chatModels(t.legacy.id)[role]);

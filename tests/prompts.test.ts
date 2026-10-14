@@ -23,7 +23,6 @@ describe('local role prompt configuration',()=>{
       const hooks = createManagedHooks({models:async()=>[],complete:async()=>{throw new Error('not called');}},store,config,{promptExtensions:prompts});
       expect(hooks.instructions('architect')).toContain('Preserve the UI labels.');
       expect(hooks.instructions('coder')).not.toContain('Preserve the UI labels.');
-      expect(()=>hooks.parse('{"version":1,"type":"action","message":"","action":{"name":"invented","args":{}}}')).toThrow();
     } finally {store.close();}
   });
   it.each(['', 'x'.repeat(32001), Buffer.from([0xff,0xff]), 'text\0binary', 'private-key'])('rejects invalid or credential-containing guidance',async content=>{

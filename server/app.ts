@@ -182,7 +182,10 @@ export async function createApp(options: AppOptions) {
     try { return await diagnostics.run(controller.signal); }
     finally { request.raw.off('aborted',abort);reply.raw.off('close',abort); }
   });
-  app.get('/api/models',async()=>({models:await provider.models()}));
+  app.get('/api/models',async()=>{
+    const catalog=provider.catalog?await provider.catalog(): (await provider.models()).map(id=>({id,metadata:{},capabilities:{ordinary:'unknown',native:'unknown',streaming:'unknown'}}));
+    return {models:catalog.map(entry=>entry.id),catalog};
+  });
   app.get('/api/projects',async()=>store.projects());
   app.get('/api/workspace',async()=>locations.settings());
   app.patch('/api/workspace',async request=>{const body=z.object({workspaceRoot:z.string().min(1).max(4096)}).strict().parse(request.body);return locations.update(body.workspaceRoot);});

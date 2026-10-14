@@ -44,14 +44,14 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory =
     port: positive('PORT', 3000), dataDir: path.resolve(baseDirectory,env.HARNESS_DATA_DIR ?? profilePaths(applicationHome(env)).dataDir),
     appHome: applicationHome(env),
     workspaceRoot: path.resolve(baseDirectory,env.HARNESS_WORKSPACE_ROOT || path.join(homedir(),'React Harness Projects')),
-    models: { architect: env.ARCHITECT_MODEL ?? 'gemini-3.1-pro-preview', coder: env.CODER_MODEL ?? 'gemini-3.8-flash', critic: env.CRITIC_MODEL ?? 'gemini-3.6-flash' },
+    models: { architect: env.ARCHITECT_MODEL ?? 'gemini-3.5-pro', coder: env.CODER_MODEL ?? 'gemini-3.5-flash-withtools', critic: env.CRITIC_MODEL ?? 'gemini-3.5-pro' },
     promptFiles,
     approvalMode: mode as ApprovalMode, maxParallelCoders: 1,
-    limits: { requestsPerMinute: positive('REQUESTS_PER_MINUTE', 120), tokensPerMinute: positive('TOKENS_PER_MINUTE', 1500000), tokensPerDay: positive('TOKENS_PER_DAY', 150000000) },
-    contextLimits: { architect: positive('ARCHITECT_INPUT_TOKEN_LIMIT', 1048576), coder: positive('CODER_INPUT_TOKEN_LIMIT', 1048576), critic: positive('CRITIC_INPUT_TOKEN_LIMIT', 1048576) },
+    limits: { requestsPerMinute: positive('REQUESTS_PER_MINUTE', 60), tokensPerMinute: positive('TOKENS_PER_MINUTE', 500000), tokensPerDay: positive('TOKENS_PER_DAY', 10000000) },
+    contextLimits: { architect: positive('ARCHITECT_INPUT_TOKEN_LIMIT', 128000), coder: positive('CODER_INPUT_TOKEN_LIMIT', 128000), critic: positive('CRITIC_INPUT_TOKEN_LIMIT', 128000) },
     maxOutputTokens: positive('MODEL_MAX_OUTPUT_TOKENS', 16384),
   };
 }
 export function publicSettings(config: Config): PublicSettings {
-  return { configured: Boolean(config.baseUrl && config.apiKey), models: config.models, approvalMode: config.approvalMode, maxParallelCoders: config.maxParallelCoders, platform: process.platform, protocol: 'json', limits: config.limits, contextLimits: config.contextLimits };
+  return { limitSource:'application-budget',providerLimits:'unknown',configured: Boolean(config.baseUrl && config.apiKey), models: config.models, approvalMode: config.approvalMode, maxParallelCoders: config.maxParallelCoders, platform: process.platform, protocol: 'native-tools-v1', limits: config.limits, contextLimits: config.contextLimits };
 }

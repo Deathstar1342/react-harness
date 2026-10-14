@@ -28,7 +28,7 @@ export function installFixture(options:{now?:()=>number;review?:string;timeout?:
   const store=options.store??new Store(':memory:');
   const project=store.createProject('Test','/workspace'),chat=store.createChat(project.id,'Install','autonomous');
   const {helper,records}=fakeHelper(options.now);
-  const complete=vi.fn(async()=>({text:options.review??'{"decision":"approve","reason":"A specific dependency"}',finishReason:'stop'}));
+  const complete=vi.fn<()=>Promise<import('../shared/types.js').CompletionResult>>(async()=>({text:'',finishReason:'tool_calls',toolCalls:[{id:randomUUID(),type:'function' as const,function:{name:'install_decision',arguments:options.review??'{"decision":"approve","reason":"A specific dependency"}'}}]}));
   const service=new InstallService(store,'initial-critic',complete,async()=>helper,options.now,options.timeout);
   const create=(reason='Required compiler')=>service.create(randomUUID(),chat.id,'frame','architect',0,{packages:[{name:'hello'}],reason});
   const advance=(id:string,signal=new AbortController().signal,guard=()=>true)=>service.advance(id,guard,signal);
