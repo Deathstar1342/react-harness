@@ -38,7 +38,7 @@ for(let i=0;i<2;i++){
         assert.equal(process.env.GITHUB_ACTIONS,'true');
         const attempt=async(file:string,args:string[])=>{const child=spawn(file,args,{env,stdio:'ignore'});return (await once(child,'exit'))[0];};
         const other=path.join(path.dirname(path.dirname(path.resolve(executable))),'other-app');
-        assert.equal(await attempt(process.env.ABYSSUS_TEST_INSTALLER,['/S','/D='+other]),73);
+        assert.equal(await attempt(process.env.ABYSSUS_TEST_INSTALLER,['/S','/D='+other]),74);
         // An unrelated child exit cannot release the process-owned native lease.
         execFileSync(process.execPath,['-e','process.exit(0)']);
         const uninstall=readdirSync(path.dirname(executable)).find(n=>/^Uninstall.*\.exe$/.test(n));assert(uninstall);

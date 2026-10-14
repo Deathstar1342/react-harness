@@ -69,7 +69,9 @@ try:
             if key == actor: continue  # dpkg is executing this package's configuration hook
             if (marker / key).exists(): continue  # its durable marker still blocks all starts
             query = subprocess.run(['/usr/bin/dpkg-query', '-W', '-f=${Status}', package], capture_output=True, text=True)
-            if query.returncode == 0 and query.stdout not in ('install ok installed', 'deinstall ok config-files', 'unknown ok not-installed'):
+            # dpkg may retain a deinstall/hold selection after a refused removal;
+            # current package/error state, not desired selection, decides safety.
+            if query.returncode == 0 and query.stdout.split()[1:] not in (['ok', 'installed'], ['ok', 'config-files'], ['ok', 'not-installed']):
                 raise RuntimeError('Another package transaction is unfinished')
         if marker.exists():
             trusted_directory(marker)
@@ -81,6 +83,7 @@ try:
         os.write(fd, b'Package maintenance incomplete. Configure or reinstall the matching packages.\n')
         os.fsync(fd)
         os.close(fd)
-except Exception:
+except Exception as error:
+    if isinstance(error, RuntimeError): print(str(error), file=sys.stderr)
     print('abysSUS package maintenance refused: close the desktop/backend and disable helper authority first. Ubuntu 24.04 and trusted package state are required. No process was killed or user data removed.', file=sys.stderr)
     sys.exit(73)

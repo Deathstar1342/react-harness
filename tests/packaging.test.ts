@@ -6,7 +6,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 const require=createRequire(import.meta.url);
 const {validateLocation}=require('../desktop/bootstrap.cjs') as {validateLocation:(v:string,i:string)=>string};
+const {parseLocation}=require('../desktop/bootstrap.cjs') as {parseLocation:(v:Buffer)=>string};
 describe('Windows packaged bootstrap data isolation',()=>{
+  it('accepts only a bounded complete location record and rejects malformed/truncated/extra fields',()=>{
+    expect(parseLocation(Buffer.from('[desktop]\r\npath=D:\\saved\r\n'))).toBe('D:\\saved');
+    expect(parseLocation(Buffer.concat([Buffer.from([255,254]),Buffer.from('[desktop]\r\npath=D:\\saved\r\n','utf16le')]))).toBe('D:\\saved');
+    for(const bytes of [Buffer.from('[desktop]\npath=D:\\saved\nextra=yes'),Buffer.from('[desktop]\npath='),Buffer.alloc(2049),Buffer.from([255,254,65]),Buffer.from([255])])expect(()=>parseLocation(bytes)).toThrow();
+  });
   it.each(['C:\\','\\\\server\\share','\\\\?\\C:\\data','C:\\a\\..\\data','C:\\data:stream','C:\\bad.\\data','relative'])('rejects unsafe location %s',value=>{expect(()=>validateLocation(value,'C:\\Windows')).toThrow();});
   it.skipIf(process.platform!=='win32')('probes an existing separate folder; refuses missing and overlapping folders',()=>{
     const root=mkdtempSync(path.join(tmpdir(),'abyssus-bootstrap-'));mkdirSync(path.join(root,'install'));mkdirSync(path.join(root,'data'));

@@ -16,6 +16,15 @@ function validateLocation(value, install, probeWrite = true) {
   return fs.realpathSync.native(value);
 }
 
+function parseLocation(bytes) {
+  if (bytes.length > 2048) throw new Error('Invalid desktop location file.');
+  const unicode=bytes[0]===255&&bytes[1]===254;
+  if(unicode&&bytes.length%2!==0)throw new Error('Invalid desktop location encoding.');
+  const text=new TextDecoder(unicode?'utf-16le':'utf-8',{fatal:true}).decode(unicode?bytes.subarray(2):bytes);
+  const match=text.match(/^\[desktop\]\r?\npath=([^\r\n]+)\r?\n?$/);
+  if(!match)throw new Error('Invalid desktop location file. Repair the installation.');
+  return match[1];
+}
 function configure(app) {
   if (!app.isPackaged) return;
   const install = path.dirname(process.execPath), file = path.join(install, 'desktop-location.ini');
@@ -30,11 +39,7 @@ function configure(app) {
   let saved;
   if (fs.existsSync(file)) {
     if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).size > 2048) throw new Error('Invalid desktop location file. Repair the installation.');
-    const bytes = fs.readFileSync(file);
-    const text = bytes[0] === 255 && bytes[1] === 254 ? bytes.subarray(2).toString('utf16le') : bytes.toString('utf8');
-    const match = text.match(/^\[desktop\]\r?\npath=([^\r\n]+)\r?\n?$/);
-    if (!match) throw new Error('Invalid desktop location file. Repair the installation.');
-    saved = validateLocation(match[1], install, false);
+    saved = validateLocation(parseLocation(fs.readFileSync(file)), install, false);
   }
   const override = app.commandLine.getSwitchValue('user-data-dir');
   const selected = override ? validateLocation(override, install, false) : saved;
@@ -43,4 +48,4 @@ function configure(app) {
   app.setPath('sessionData', selected);
   app.setPath('cache', selected);
 }
-module.exports = { configure, validateLocation };
+module.exports = { configure, validateLocation, parseLocation };

@@ -1,6 +1,7 @@
 import { readdir, readFile, writeFile, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 export async function manifest(root) {
   const files={};
   async function walk(dir){for(const name of (await readdir(dir)).sort()){
@@ -12,4 +13,4 @@ export async function manifest(root) {
     }
   }}await walk(root);return files;
 }
-if(process.argv[1]===import.meta.filename){const dir=path.resolve(process.argv[2]);await writeFile(path.join(dir,'SHA256SUMS'),Object.entries(await manifest(dir)).filter(([name])=>name!=='SHA256SUMS').map(([name,hash])=>`${hash}  ${name}\n`).join(''));}
+if(process.argv[1]&&realpathSync(process.argv[1])===import.meta.filename){const dir=path.resolve(process.argv[2]);await writeFile(path.join(dir,'SHA256SUMS'),Object.entries(await manifest(dir)).filter(([name])=>name!=='SHA256SUMS').map(([name,hash])=>`${hash}  ${name}\n`).join(''));}

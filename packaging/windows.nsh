@@ -8,6 +8,12 @@ Var PackageMutex
 
 !macro customCheckAppRunning
   !ifndef BUILD_UNINSTALLER
+    ReadRegStr $2 HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+    ${If} $2 != ""
+      MessageBox MB_OK "An abysSUS installation is already registered. Close it and uninstall its application files first. Setup will not invoke an old uninstaller or replace a different installation path." /SD IDOK
+      SetErrorLevel 74
+      Quit
+    ${EndIf}
     IfFileExists "$INSTDIR\abysSUS.exe" 0 +4
       MessageBox MB_OK "Close abysSUS, uninstall application files, then install this version. Your saved data is preserved." /SD IDOK
       SetErrorLevel 74
@@ -106,6 +112,12 @@ FunctionEnd
     ${EndIf}
   ${EndIf}
   ClearErrors
+  FileOpen $3 "$INSTDIR\desktop-location.ini.new" w
+  IfErrors location_failed
+  FileWriteByte $3 255
+  FileWriteByte $3 254
+  FileClose $3
+  IfErrors location_failed
   WriteINIStr "$INSTDIR\desktop-location.ini.new" "desktop" "path" "$DataFolder"
   IfErrors location_failed
   Rename "$INSTDIR\desktop-location.ini.new" "$INSTDIR\desktop-location.ini"

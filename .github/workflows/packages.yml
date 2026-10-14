@@ -51,6 +51,11 @@ jobs:
       - name: Actual maintenance refusal, interruption and helper dependency ordering
         timeout-minutes: 5
         run: node tests/package-maintenance-linux.mjs
+      - name: Actual main crash and surviving backend lease
+        timeout-minutes: 3
+        run: |
+          xvfb-run -a node tests/packaged-crash.ts /opt/abysSUS/abysSUS
+          xvfb-run -a node tests/packaged-smoke.ts /opt/abysSUS/abysSUS verify
       - run: node scripts/package-manifest.mjs build/release
       - uses: actions/upload-artifact@v4
         with:
