@@ -133,6 +133,7 @@ class Engine:
             # Resolve under the real package-system lock; no package mutation.
             with self.adapter.lock():
                 preview = self.adapter.preview(body)
+            require(len(canonical(preview)) <= 128 * 1024, "UNBOUNDED_PREVIEW")
             record = {"requestId": body["requestId"], "request": body, "preview": preview,
                       "previewDigest": digest(preview), "state": "noop" if not preview["packages"] else "prepared", "createdAt": now(),
                       "expiresAt": now() + 120000, "code": "PREPARED" if preview["packages"] else "ALREADY_INSTALLED"}

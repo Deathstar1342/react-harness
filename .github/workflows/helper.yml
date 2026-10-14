@@ -25,7 +25,8 @@ jobs:
           sudo chmod 0755 /usr/share
           # Hosted Swift cache entries resolve into writable runner toolchains.
           # Test a distro-only loader cache; production never changes loader policy.
-          sudo /usr/sbin/ldconfig -C /etc/ld.so.cache -f /dev/null /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
+          printf '/lib/x86_64-linux-gnu\n/usr/lib/x86_64-linux-gnu\n' | sudo tee /etc/ld.so.conf
+          sudo /usr/sbin/ldconfig
           test "$(id -u)" != 0
       - run: npm ci
       - name: Portable helper state tests
@@ -40,6 +41,7 @@ jobs:
           sudo install -m 0755 build/helper/launcher /usr/lib/abyssus-helper/launcher
           sudo install -m 0644 helper/core.py helper/service.py helper/admin.py helper/apt_adapter.py helper/apt.conf helper/abyssus-helper.service /usr/lib/abyssus-helper/
           sudo install -d -m 0755 /usr/lib/abyssus-helper/python
+          sudo install -d -m 0755 /usr/lib/abyssus-helper/empty-apt-config
           sudo ln -s /usr/lib/python3/dist-packages/apt /usr/lib/abyssus-helper/python/apt
           for module in /usr/lib/python3/dist-packages/apt_pkg.*.so /usr/lib/python3/dist-packages/apt_inst.*.so; do
             sudo ln -s "$module" /usr/lib/abyssus-helper/python/

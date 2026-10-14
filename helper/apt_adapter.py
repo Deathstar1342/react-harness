@@ -42,8 +42,8 @@ class AptAdapter:
         self.cache = None
         apt_pkg.init_config()
         # APT_CONFIG is fixed by launcher. Never load ambient apt.conf.d hooks.
-        require(apt_pkg.config.find("Dir::Etc::parts") == "-", "UNSAFE_APT_CONFIG")
-        require(apt_pkg.config.find("Dir::Etc::main") == "-", "UNSAFE_APT_CONFIG")
+        require(apt_pkg.config.find("Dir::Etc::parts") == "/usr/lib/abyssus-helper/empty-apt-config", "UNSAFE_APT_CONFIG")
+        require(apt_pkg.config.find("Dir::Etc::main") == "/dev/null", "UNSAFE_APT_CONFIG")
         apt_pkg.config.set("APT::Install-Recommends", "false")
         apt_pkg.config.set("APT::Install-Suggests", "false")
         apt_pkg.config.set("Acquire::AllowInsecureRepositories", "false")
@@ -66,7 +66,14 @@ class AptAdapter:
 
     @contextlib.contextmanager
     def lock(self):
-        with apt_pkg.SystemLock(), apt_pkg.FileLock("/var/lib/apt/lists/lock"):
+        stack = contextlib.ExitStack()
+        try:
+            stack.enter_context(apt_pkg.SystemLock())
+            stack.enter_context(apt_pkg.FileLock("/var/lib/apt/lists/lock"))
+        except Exception:
+            stack.close()
+            raise Rejected("PACKAGE_MANAGER_BUSY") from None
+        with stack:
             yield
 
     def healthy(self, cache):
@@ -77,6 +84,11 @@ class AptAdapter:
     def preview(self, request):
         cache = apt.Cache()
         require(self.healthy(cache), "DPKG_RECOVERY_REQUIRED")
+        # Freeze existing dependency candidates so the resolver cannot upgrade
+        # them opportunistically when their current version already suffices.
+        for existing in cache:
+            if existing.is_installed:
+                existing.candidate = existing.installed
         # Explicit trust overrides and alternative transports defeat signed repository provenance.
         for path in [Path("/etc/apt/sources.list"), *Path("/etc/apt/sources.list.d").glob("*")]:
             if not path.is_file():

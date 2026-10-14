@@ -72,7 +72,7 @@ const hostile={...envelope,nonce:randomBytes(32).toString('hex'),action:'prepare
 assert.equal((await wire({...hostile,mac:helperMac(hostile,descriptor.key)})).error,'INVALID_REQUEST');
 console.log('PASS unauthorized UID, forged envelope, nonce replay, expired envelope, helper-side option injection');
 const locked=await fixture('lock');
-await assert.rejects(prepare(),/HELPER_FAILED/);
+await assert.rejects(prepare(),/PACKAGE_MANAGER_BUSY/);
 sudo('/usr/bin/kill','-TERM',locked.output().trim());await once(locked.child,'close');
 console.log('PASS actual dpkg frontend lock conflict without package effects');
 const stale=await prepare(),staleDecision=decision(stale);await client.authorize(staleDecision);
@@ -90,6 +90,7 @@ const installed=await client.execute(dec);
 assert.equal(installed.state,'succeeded',JSON.stringify(installed));
 await assert.rejects(client.execute(dec),/INVALID_STATE/);
 assert.equal((await prepare()).state,'noop');
+await assert.rejects(client.prepare({requestId:randomUUID(),targetId:hello.target.id,manager:'apt',packages:[{name:'hello',version:'0.0'}]}),/EXISTING_PACKAGE_CHANGE/);
 console.log('PASS real apt install, authenticated preview, forged/expired/reused decision, installed no-op');
 // Normal-user writable code/config must fail before Python imports.
 for(const file of ['/usr/lib/abyssus-helper/core.py','/usr/lib/abyssus-helper','/etc/abyssus-helper/config.json','/usr/share']){
