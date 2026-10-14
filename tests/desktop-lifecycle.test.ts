@@ -40,6 +40,11 @@ it('allows legitimate drain indefinitely and requires actual process exit after 
   t.finish();await vi.waitFor(()=>expect(t.lifecycle.identity().state).toBe('stopped'));expect(settled).toBe(false);
   t.child.emit('close',0);await stopped;expect(t.owned.child).toBeUndefined();expect(t.child.kill).not.toHaveBeenCalled();
 });
+it('observes failure through the owned pipe even after the HTTP listener has closed',async()=>{
+  const t=await fixture(),stopped=t.controller.stop();const failed=expect(stopped).rejects.toThrow('cleanup failed');
+  await vi.waitFor(()=>expect(t.drain).toHaveBeenCalledOnce());await t.app.close();expect(t.app.server.listening).toBe(false);
+  t.fail();await failed;expect(t.controller.state.phase).toBe('failed');expect(t.owned.child).toBe(t.child);expect(t.controller.target()).toBeUndefined();expect(t.child.kill).not.toHaveBeenCalled();
+});
 it('accepts only bounded complete private notices and ignores other instance failures',async()=>{
   const t=await fixture();t.child.stdout.emit('data',Buffer.from(JSON.stringify({type:'cleanup-failed',instanceId:randomUUID()})+'\n'));expect(t.controller.state.phase).toBe('ready');
   const stream=new PassThrough(),seen:string[]=[];const stop=observeCleanupFailure(stream,id=>seen.push(id)),id=randomUUID();

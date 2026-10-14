@@ -28,6 +28,10 @@ The shell permits one application instance, focusing its existing window on a se
 
 Renderer crash/reload keeps the backend tracked; a crash warning explains possible unsaved buffer loss. Backend crash requires explicit recovery. A restarted/different backend is assigned a new verified session and replaces the prior renderer after its dirty guard; old document requests cannot cross into it. Historical M19 uncertainty remains durable and does not itself hold an endless shutdown loop.
 
+Startup and close bind to the original document and edit revision. After native confirmation, a private preload handshake pauses document input before asynchronous startup/cleanup; the old published session and editor remain until a safe commit. Late edits or navigation veto replacement/close. A newly prepared backend stays inaccessible to the old document and is drained if commit is vetoed. Failure/cancellation restores input; no buffer is silently discarded.
+
+A cleanup failure is reported over the bounded private pipe from the exact owned backend, including after HTTP listener teardown. The desktop reports failure and restores the window while retaining process/profile ownership. A subsequent close checks that retained failure; it does not replay cleanup actions or clear uncertainty. Legitimate running work has no arbitrary drain deadline. Preserve/copy any buffers and inspect the failed backend before deliberate recovery; only actual process exit releases ownership.
+
 Ordinary `npm start` remains available. It prints one deliberately displayed single-use, five-minute **browser pairing code**. Enter it in the browser to receive an HttpOnly SameSite cookie scoped to this backend instance. Ten invalid attempts exhaust pairing; restart deliberately to obtain a new code. No reusable capability is printed or put in a URL. Desktop launch disables browser pairing for its backend. Existing browser sessions expire on backend restart. Sandbox network isolation protects backend transport from project processes; arbitrary unsandboxed same-user programs are outside this boundary.
 
 ## Validation commands and boundaries

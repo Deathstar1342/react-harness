@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 const root=path.resolve(import.meta.dirname,'..'),home=mkdtempSync(path.join(tmpdir(),'abyssus-electron-'));
 mkdirSync(path.join(root,'test-results'),{recursive:true});
 const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],chromiumSandbox:true,cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home,MODEL_STREAMING:'false'},timeout:30000});
@@ -136,11 +135,11 @@ try {
       await page.screenshot({path:path.join(root,'test-results/electron-linux-connected.png')});
       console.log('PASS real Linux staged Node/SQLite/PTY prerequisites, authenticated API+streaming SSE, unauthenticated denial, native-picker cancellation adapter and dirty setup guard');
       console.log('CHECK waiting deliberate backend shutdown');
-      await app.evaluate(async(_electron,url)=>{
-        const {DesktopController}=await import(url),original=DesktopController.prototype.stop;
+      await app.evaluate(()=>{
+        const DesktopController=(globalThis as unknown as {m20Controller:typeof import('../desktop/controller.js').DesktopController}).m20Controller,original=DesktopController.prototype.stop;
         const probe=globalThis as unknown as {m20Stopped?:boolean;m20StopRelease?:()=>void};probe.m20Stopped=false;
         DesktopController.prototype.stop=async function(){DesktopController.prototype.stop=original;await original.call(this);probe.m20Stopped=true;await new Promise<void>(resolve=>{probe.m20StopRelease=resolve;});};
-      },pathToFileURL(path.join(root,'build/app/desktop/controller.js')).href);
+      });
       await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());
       await expect.poll(()=>app.evaluate(()=>Boolean((globalThis as unknown as {m20Stopped?:boolean}).m20Stopped))).toBe(true);
       assert.equal(await page.evaluate(()=>document.documentElement.inert),true);
@@ -174,14 +173,14 @@ try {
         if(nextHome===profile){
           await page.getByRole('button',{name:'Return to editor buffers'}).click();
           const oldEditor=await page.locator('.monaco-editor').first().elementHandle();
-          await app.evaluate(async(_electron,url)=>{
-            const {DesktopController}=await import(url),original=DesktopController.prototype.start;
+          await app.evaluate(()=>{
+            const DesktopController=(globalThis as unknown as {m20Controller:typeof import('../desktop/controller.js').DesktopController}).m20Controller,original=DesktopController.prototype.start;
             const probe=globalThis as unknown as {m20Prepared?:boolean;m20Release?:()=>void};probe.m20Prepared=false;
             DesktopController.prototype.start=async function(input:unknown){
               DesktopController.prototype.start=original;const result=await original.call(this,input);
               probe.m20Prepared=true;await new Promise<void>(resolve=>{probe.m20Release=resolve;});return result;
             };
-          },pathToFileURL(path.join(root,'build/app/desktop/controller.js')).href);
+          });
           await page.evaluate(home=>{
             (window as unknown as {m20Start?:Promise<string>}).m20Start=window.abyssusDesktop!.start({environment:{kind:'linux'},home,mode:'existing'}).then(()=> 'unexpected commit',e=>String(e));
           },profile);
