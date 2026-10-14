@@ -82,6 +82,12 @@ describe('system install runtime and public API',()=>{
     expect((await t.app.inject({method:'DELETE',url:`/api/chats/${t.chat.id}`,payload:{}})).statusCode).toBe(200);
     expect((await t.app.inject('/api/system-installs/history')).json().items[0].id).toBe(item.id);
   });
+  it('removal itself expires pending previews, clears obsolete awaiting status and retains correlation',async()=>{
+    const t=await fixture();await t.start();const item=t.store.installs()[0];t.store.saveInstall({...item,expiresAt:Date.now()-1});
+    const removed=await t.app.inject({method:'DELETE',url:`/api/chats/${t.chat.id}`,payload:{}});
+    expect(removed.statusCode,removed.body).toBe(200);
+    expect(t.store.install(item.id)).toMatchObject({state:'stale',code:'PREVIEW_EXPIRED'});
+  });
   it('shows independent settings directly after workspace approvals and renders package metadata as text',async()=>{
     const settings=renderToStaticMarkup(createElement(SettingsDialog,{onClose(){}}));
     expect(settings.indexOf('System installs')).toBeGreaterThan(settings.indexOf('Default for future chats'));

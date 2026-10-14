@@ -1,5 +1,6 @@
 """Fixed disposable-CI probes; staged root-owned by the CI workflow, never shipped."""
 import fcntl
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -26,8 +27,17 @@ elif mode == 'interrupt':
         if main == '0':
             time.sleep(.01)
             continue
-        with sqlite3.connect('file:/var/lib/abyssus-helper/audit.sqlite?mode=ro', uri=True, timeout=.1) as db:
-            row = db.execute('SELECT record FROM requests WHERE id=?', (request_id,)).fetchone()
+        try:
+            with closing(sqlite3.connect('file:/var/lib/abyssus-helper/audit.sqlite?mode=ro', uri=True, timeout=.1)) as db:
+                row = db.execute('SELECT record FROM requests WHERE id=?', (request_id,)).fetchone()
+        except sqlite3.OperationalError as error:
+            # A concurrent durable helper save can briefly hold the audit lock.
+            # Retry observation only, within the existing deadline; never count
+            # a lock error as evidence of running/dpkg or successful interruption.
+            if getattr(error, 'sqlite_errorcode', 0) & 255 not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                raise
+            time.sleep(.002)
+            continue
         if not row or json.loads(row[0])['state'] != 'running':
             time.sleep(.002)
             continue

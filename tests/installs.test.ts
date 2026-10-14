@@ -133,4 +133,11 @@ describe('independent system install decisions',()=>{
     expect(t.store.install(item.id).state).toBe('stale');expect(t.store.install(dispatched.id)).toMatchObject({state:'uncertain',recoveryRequired:true});
     expect(t.helper.execute).not.toHaveBeenCalled();await restarted.close();
   });
+  it('shutdown drains a readiness probe and rejects settings changes while closing',async()=>{
+    const t=fixture(),blocked=deferred<Awaited<ReturnType<typeof t.helper.hello>>>();t.helper.hello.mockReturnValueOnce(blocked.promise);
+    const view=t.service.view();await vi.waitFor(()=>expect(t.helper.hello).toHaveBeenCalled());
+    let closed=false;const closing=t.service.close().then(()=>{closed=true;});await Promise.resolve();expect(closed).toBe(false);
+    expect(()=>policy(t,'auto')).toThrow();blocked.resolve({protocol:'abyssus-helper-v1',target});
+    expect(await view).toMatchObject({available:false});await closing;expect(closed).toBe(true);
+  });
 });
