@@ -26,7 +26,7 @@ for(let i=0;i<2;i++){
     const info=await app.evaluate(({app,BrowserWindow})=>({packaged:app.isPackaged,data:app.getPath('userData'),session:app.getPath('sessionData'),sandbox:(BrowserWindow.getAllWindows()[0].webContents as unknown as {getLastWebPreferences:()=>{sandbox:boolean}}).getLastWebPreferences().sandbox}));
     assert(info.packaged);assert(info.sandbox);assert.equal(realpathSync.native(info.data).toLowerCase(),realpathSync.native(home).toLowerCase());
     if(i===0){
-      const runtime=await app.evaluate(async()=>{const {createRequire}=await import('node:module');const {join}=await import('node:path');const {app}=await import('electron');const addon=createRequire(join(app.getAppPath(),'package.json'))('./desktop/package-lease.node');return {electron:process.versions.electron,node:process.versions.node,napi:process.versions.napi,leaseHeld:addon.held,exports:Object.keys(addon)};});
+      const runtime=await app.evaluate(({app})=>{const {createRequire}=process.getBuiltinModule('node:module');const {join}=process.getBuiltinModule('node:path');const addon=createRequire(join(app.getAppPath(),'package.json'))('./desktop/package-lease.node');return {electron:process.versions.electron,node:process.versions.node,napi:process.versions.napi,leaseHeld:addon.held,exports:Object.keys(addon)};});
       assert.equal(runtime.electron,'42.11.13');assert.equal(runtime.node,'24.19.0');assert.equal(runtime.napi,'10');assert.equal(runtime.leaseHeld,true);assert.deepEqual(runtime.exports,['held']);
       console.log('PASS actual packaged stable N-API8 addon load and acquired lease:',runtime);
     }

@@ -19,8 +19,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Installed executable check failed' }
 $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru -Wait
 if ($p.ExitCode -eq 0) { throw 'In-place replacement was not refused' }
 $uninstaller = (Get-Item (Join-Path $install 'Uninstall*.exe')).FullName
-$p = Start-Process -FilePath $uninstaller -ArgumentList @('/S', "_?=$install") -WindowStyle Hidden -PassThru -Wait
+# NSIS normally copies its uninstaller to TEMP. Run that same payload outside
+# INSTDIR so the explicit synchronous _?= fixture does not lock its own file.
+$uninstallFixture = Join-Path $testRoot 'uninstall-fixture.exe'
+Copy-Item -LiteralPath $uninstaller -Destination $uninstallFixture
+$p = Start-Process -FilePath $uninstallFixture -ArgumentList @('/S', "_?=$install") -WindowStyle Hidden -PassThru -Wait
 if ($p.ExitCode -ne 0) { throw 'Uninstall failed' }
+if (Test-Path -LiteralPath (Join-Path $install 'abysSUS.exe')) { throw 'Application payload survived uninstall' }
 if ((Get-Content -LiteralPath (Join-Path $data 'preserve.txt') -Raw) -ne 'package-preservation-fixture') { throw 'Desktop data lost' }
 if ((Get-ItemProperty 'HKCU:\Software\abysSUS\Storage').DataFolder -ne $data) { throw 'Saved location lost' }
 Install-Candidate

@@ -29,6 +29,7 @@ See [release procedure](../release.md) for contracts and [setup guide](../instal
 - Coordinator required installer-time canonical path validation and per-package Linux interruption state. Preflight now rejects invalid locations before copying/persisting; a focused test additionally caught drive-root trimming (`C:\` becoming drive-relative `C:`), now explicitly rejected. Linux completion verifies payload/source/package state and owns only its own marker.
 - Broad `git add -A` was rejected by automatic approval review because generated artifacts might be staged. Only explicit reviewed source/test/docs/workflow paths were staged afterward. No artifacts or credentials were committed.
 - A local builder cache inside this ESM repository caused the downloaded CommonJS icon helper to inherit `type: module`; relocating only that cache outside the repository on D: restored the branded unsigned build.
+- The first explicit addon assertion used dynamic import inside Playwright's ephemeral evaluation context, which has no dynamic-import callback. The corrected test uses Node's built-in module accessor; the actual packaged Windows process now passes the exact runtime/addon export assertion, second-instance focus and restart. The disposable NSIS uninstall fixture runs a temporary copy, matching NSIS's normal temporary-uninstaller behavior while permitting synchronous exit checks.
 
 ## Remaining delivery/release gates
 
