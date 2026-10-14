@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink } from 'node:fs/
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import { spawnSync } from 'node:child_process';
 import { publicAddress, registryAuthority, resolveRegistry, startRegistryProxy } from '../server/tools/registry-proxy.js';
 import { LinuxSandbox } from '../server/tools/sandbox.js';
 import { WorkspaceTools } from '../server/tools/index.js';
@@ -66,6 +67,10 @@ describe('project mount policy',()=>{
 });
 
 describe.skipIf(process.platform!=='linux')('real Linux sandbox security',()=>{
+  it('constructs a functioning namespace with the production mount policy',async()=>{
+    const {root,sandbox}=await fixture();const launch=await sandbox.launch(root,['/usr/bin/true']);
+    try{const result=spawnSync(launch.file,launch.args,{env:launch.env,encoding:'utf8',timeout:5000});expect(result.status,result.stderr).toBe(0);}finally{await launch.close();}
+  });
   async function execution(){
     const f=await fixture(),tools=new WorkspaceTools();tools.configureSandbox({home:f.home,protectedPaths:[],projects:()=>[]});cleanup.push(()=>tools.dispose());
     const context={projectRoot:f.root,chatId:'test',agentId:'coder'};
