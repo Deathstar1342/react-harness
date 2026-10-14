@@ -37,6 +37,8 @@ Delivered on GitHub main `94ad705` on 2026-10-13: candidate `73f0328`, merge `ab
 
 ### M18 — Narrow privileged package-install helper
 
+Reviewed candidate `af0fda3` is integrated; GitHub publication and both exact main workflows precede M19 dispatch. Independent coordinator checks passed (527 portable tests, 33 platform/optional skips, 20 Python tests, typecheck/build). The exact candidate source passed ordinary and real privileged Linux CI. Current publication state is in [STATUS](STATUS.md); evidence and platform limits are in [M18 report](reports/milestone-18.md).
+
 - Implement a separately installed Linux helper/service for the selected execution environment; start with `apt` on Ubuntu/Debian. Define a versioned package-manager adapter so unsupported managers are rejected explicitly. Keep the application/backend non-root.
 - Provide explicit setup/uninstall/repair entrypoints for M20. A trusted OS authentication flow installs root-owned helper code/configuration and registers the authorized local application principal. No administrator passwords in model context, browser state, ordinary logs or IPC payloads. No broad passwordless sudo, arbitrary root shell, user-writable privileged module/runtime, or agent access to helper sockets/capabilities.
 - Accept structured target/package/version requests only, never a model-supplied executable, shell command, package path, package-manager option, configuration file or environment. Use trusted fixed binaries, sanitized environment/working directory and authenticated narrow IPC. Preview resolved packages/versions/dependencies, configured repository provenance and system impact. Unknown/unbounded impact fails closed.
