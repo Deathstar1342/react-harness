@@ -22,21 +22,46 @@ from core import require, digest, Rejected
 def hash_files(roots):
     result = hashlib.sha256()
     count = total = 0
+    excluded = {Path("/var/lib/apt/lists/partial"), Path("/var/lib/apt/lists/auxfiles"), Path("/var/lib/apt/lists/lock")}
+
+    def trusted(path):
+        # Ownership of a file is insufficient if an ancestor permits replacement.
+        for item in [path, *path.parents]:
+            require(item.exists() and not item.is_symlink(), "UNSAFE_APT_STATE")
+            info = item.stat()
+            require(info.st_uid == 0 and info.st_mode & 0o022 == 0, "UNSAFE_APT_STATE")
+        return path.stat()
+
+    def entries(path):
+        trusted(path)
+        yield path
+        if path.is_dir():
+            with os.scandir(path) as scan:
+                children = sorted(scan, key=lambda item: item.name)
+            require(len(children) <= 5000, "APT_STATE_LIMIT")
+            for item in children:
+                child = Path(item.path)
+                if child not in excluded:
+                    yield from entries(child)
+
     for root in roots:
         path = Path(root)
-        files = sorted(path.rglob("*")) if path.is_dir() else [path]
-        for file in files:
-            if file.name == "lock" or (path.is_dir() and any(part in ("partial", "auxfiles") for part in file.relative_to(path).parts)) or not file.is_file():
-                continue
-            require(not file.is_symlink(), "UNSAFE_APT_STATE")
-            require(file.stat().st_uid == 0 and file.stat().st_mode & 0o022 == 0, "UNSAFE_APT_STATE")
+        for file in entries(path):
             count += 1
-            total += file.stat().st_size
+            before = trusted(file)
+            result.update(str(file).encode() + b"\0")
+            require(file.is_dir() or file.is_file(), "UNSAFE_APT_STATE")
+            if file.is_dir():
+                require(count <= 5000, "APT_STATE_LIMIT")
+                result.update(b"directory\0")
+                continue
+            total += before.st_size
             require(count <= 5000 and total <= 1024 * 1024 * 1024, "APT_STATE_LIMIT")
-            result.update(str(file).encode())
             with file.open("rb") as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b""):
                     result.update(block)
+            after = trusted(file)
+            require((before.st_ino, before.st_size, before.st_mtime_ns) == (after.st_ino, after.st_size, after.st_mtime_ns), "STALE_APT_STATE")
     return result.hexdigest()
 
 
@@ -88,6 +113,10 @@ class AptAdapter:
             for p in cache)
 
     def preview(self, request):
+        state_roots = ["/var/lib/dpkg/status", "/var/lib/apt/extended_states"]
+        repository_roots = ["/etc/apt", "/var/lib/apt/lists"]
+        state_digest = hash_files(state_roots)
+        repository_digest = hash_files(repository_roots)
         cache = apt.Cache()
         require(self.healthy(cache), "DPKG_RECOVERY_REQUIRED")
         # Freeze existing dependency candidates so the resolver cannot upgrade
@@ -145,10 +174,11 @@ class AptAdapter:
         download = sum(p["downloadBytes"] for p in resolved)
         installed = sum(p["installedBytes"] for p in resolved)
         require(download <= 128 * 1024 * 1024 and installed <= 512 * 1024 * 1024, "UNBOUNDED_PLAN")
+        require(state_digest == hash_files(state_roots) and repository_digest == hash_files(repository_roots), "STALE_APT_STATE")
         self.cache = cache
         return {"target": self.target(), "packages": resolved,
-                "stateDigest": hash_files(["/var/lib/dpkg/status", "/var/lib/apt/extended_states"]),
-                "repositoryDigest": hash_files(["/etc/apt", "/var/lib/apt/lists"]),
+                "stateDigest": state_digest,
+                "repositoryDigest": repository_digest,
                 "impact": {"newPackages": len(resolved), "downloadBytes": download, "installedBytes": installed,
                            "removals": 0, "upgrades": 0, "downgrades": 0,
                            "maintainerScripts": "trusted-package-root-execution",

@@ -80,6 +80,13 @@ sudo('/usr/bin/touch','/etc/apt/preferences.d/abyssus-ci-stale');
 assert.equal((await client.execute(staleDecision)).code,'STALE_PREVIEW');
 sudo('/usr/bin/rm','/etc/apt/preferences.d/abyssus-ci-stale');
 console.log('PASS changed privileged apt input invalidates exact preview');
+sudo('/usr/bin/chmod','g+w','/var/lib/apt/lists');
+try{await assert.rejects(prepare(),/UNSAFE_APT_STATE/);}finally{sudo('/usr/bin/chmod','g-w','/var/lib/apt/lists');}
+sudo('/usr/bin/mkdir','-p','/etc/apt/partial');
+sudo('/usr/bin/touch','/etc/apt/partial/helper-ci-policy');
+sudo('/usr/bin/chmod','0666','/etc/apt/partial/helper-ci-policy');
+try{await assert.rejects(prepare(),/UNSAFE_APT_STATE/);}finally{sudo('/usr/bin/rm','/etc/apt/partial/helper-ci-policy');sudo('/usr/bin/rmdir','/etc/apt/partial');}
+console.log('PASS metadata ancestor and similarly named configuration staging-path denial');
 const record=await prepare();
 assert.equal(record.state,'prepared');assert(record.preview.packages.some(p=>p.name==='hello'));
 const dec=decision(record);
