@@ -99,13 +99,15 @@ int main(int argc,char **argv) {
     closedir(lib);
     hierarchy("/usr/bin/python3"); hierarchy("/usr/bin/dpkg");
     hierarchy("/usr/bin/systemctl"); hierarchy("/usr/bin/setfacl");
+    hierarchy("/var/lib"); hierarchy("/var/lib/dpkg"); hierarchy("/var/lib/dpkg/status");
+    hierarchy("/etc/systemd/system"); hierarchy("/run");
     hierarchy("/lib64/ld-linux-x86-64.so.2");
     loader_cache();
     tree("/usr/lib/apt",0); tree("/etc/apt",0);
     struct stat preload;
     if(!stat("/etc/ld.so.preload",&preload) && preload.st_size) fail("/etc/ld.so.preload unsupported");
     if(!strcmp(argv[1],"serve") || !strcmp(argv[1],"repair") || !strcmp(argv[1],"uninstall")) {
-        tree("/etc/abyssus-helper",0); hierarchy("/var/lib/abyssus-helper");
+        tree("/etc/abyssus-helper",0); tree("/var/lib/abyssus-helper",0);
     }
     char *env[]={"PATH=/usr/sbin:/usr/bin:/sbin:/bin","HOME=/root","LANG=C.UTF-8",
                  "DEBIAN_FRONTEND=noninteractive","APT_CONFIG=/usr/lib/abyssus-helper/apt.conf",NULL};

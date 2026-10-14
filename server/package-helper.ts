@@ -17,7 +17,7 @@ const decisionSchema=z.object({requestId:z.string().uuid(),previewDigest:hex,dec
 /** ASCII protocol inputs; sorted JSON matches the helper's canonical encoding. */
 export function helperCanonical(value:unknown):string {
   if(Array.isArray(value))return '['+value.map(helperCanonical).join(',')+']';
-  if(value!==null&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+helperCanonical((value as Record<string,unknown>)[k])).join(',')+'}';
+  if(value!==null&&typeof value==='object')return '{'+Object.keys(value).filter(k=>(value as Record<string,unknown>)[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+helperCanonical((value as Record<string,unknown>)[k])).join(',')+'}';
   return JSON.stringify(value).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
 }
 export function helperMac(value:unknown,key:string){return createHmac('sha256',key).update(helperCanonical(value)).digest('hex');}

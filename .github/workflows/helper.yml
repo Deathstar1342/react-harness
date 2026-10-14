@@ -15,10 +15,12 @@ jobs:
           sudo apt-get install -y python3-apt acl build-essential
           # First adapter supports fixed HTTP(S) repositories, not mirror-list indirection.
           sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update
           # Hosted image makes /usr/share writable; record and normalize only in this disposable VM.
           stat -c '%U %G %a %n' /usr/share
           getfacl -p /usr/share
           sudo chown root:root /usr/share
+          sudo setfacl -b -k /usr/share
           sudo chmod 0755 /usr/share
           test "$(id -u)" != 0
       - run: npm ci

@@ -76,7 +76,13 @@ def main():
         if uid <= 0:
             raise RuntimeError("NONROOT_UID_REQUIRED")
         account = pwd.getpwuid(uid)
-        config = {"version": 1, "uid": uid, "gid": account.pw_gid, "installationId": str(uuid.uuid4())}
+        identity = STATE / "identity.json"
+        if identity.exists():
+            installation_id = str(uuid.UUID(json.loads(identity.read_text())["installationId"]))
+        else:
+            installation_id = str(uuid.uuid4())
+            write(identity, json.dumps({"installationId": installation_id}))
+        config = {"version": 1, "uid": uid, "gid": account.pw_gid, "installationId": installation_id}
     service_lock = open(STATE / "service.lock", "a+b")
     fcntl.flock(service_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     if action == "uninstall":

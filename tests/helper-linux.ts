@@ -80,7 +80,7 @@ await assert.rejects(client.execute(dec),/INVALID_STATE/);
 assert.equal((await prepare()).state,'noop');
 console.log('PASS real apt install, authenticated preview, forged/expired/reused decision, installed no-op');
 // Normal-user writable code/config must fail before Python imports.
-for(const file of ['/usr/lib/abyssus-helper/core.py','/usr/lib/abyssus-helper','/etc/abyssus-helper/config.json']){
+for(const file of ['/usr/lib/abyssus-helper/core.py','/usr/lib/abyssus-helper','/etc/abyssus-helper/config.json','/usr/share']){
   sudo('/usr/bin/chmod','g+w',file);
   assert.throws(()=>admin('repair'),/UNTRUSTED_HELPER_PATH/);
   sudo('/usr/bin/chmod','g-w',file);
