@@ -19,10 +19,12 @@ import { Changes } from './changes.js';
 import { Removal } from './removal.js';
 import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
+import { installationRoot } from './locations.js';
+import type { BackendLifecycle } from './lifecycle.js';
 
 const executeFile = promisify(execFile);
 const approvalMode = z.enum(['autonomous','balanced','review']);
-export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile }
+export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>} }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
@@ -112,6 +114,7 @@ export async function createApp(options: AppOptions) {
     const statusCode = conflict ? 409 : e.statusCode ?? (e.code === 'ENOENT' ? 404 : 400);
     reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({error:e.message.replaceAll(config.apiKey || '\u0000','[redacted]')});
   });
+  options.lifecycle?.identity.register(app,options.lifecycle.close);
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
   // Track complete request lifetimes, including awaits before a save or registration.
   app.addHook('preHandler',async request=>{
@@ -265,7 +268,7 @@ export async function createApp(options: AppOptions) {
     chatStreams.get(id)!.set(reply.raw,cleanup);
     reply.raw.on('close',cleanup);
   });
-  const staticRoot = options.staticRoot ?? path.resolve('dist/client');
+  const staticRoot = options.staticRoot ?? path.join(installationRoot,'dist/client');
   if (existsSync(staticRoot)) {
     await app.register(staticFiles,{root:staticRoot,prefix:'/',index:'index.html'});
     app.setNotFoundHandler((request,reply)=>request.url.startsWith('/api') ? reply.code(404).send({error:'API route not found'}) : reply.sendFile('index.html'));

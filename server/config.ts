@@ -1,14 +1,16 @@
 import path from 'node:path';
 import { homedir } from 'node:os';
+import { applicationHome, profilePaths } from './locations.js';
 import type { AgentRole, ApprovalMode, PublicSettings } from '../shared/types.js';
 
 export interface Config {
   baseUrl: string; apiKey: string; streaming: boolean; host: string; port: number; dataDir: string; workspaceRoot: string;
   models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number;
   promptFiles: Partial<Record<AgentRole,string>>;
+  appHome?: string;
   limits: PublicSettings['limits']; contextLimits: Record<AgentRole, number>; maxOutputTokens: number;
 }
-export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
+export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory = process.cwd()): Config {
   const positive = (key: string, fallback: number) => {
     const value = Number(env[key] ?? fallback);
     if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${key} must be a positive integer`);
@@ -28,12 +30,13 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     const file = env[`${role.toUpperCase()}_PROMPT_FILE`]?.trim();
     if (!file) continue;
     if (file.length>4096 || file.includes('\0')) throw new Error(`${role.toUpperCase()}_PROMPT_FILE is invalid`);
-    promptFiles[role] = path.resolve(file);
+    promptFiles[role] = path.resolve(baseDirectory,file);
   }
   return {
     baseUrl, apiKey: env.STARK_API_KEY ?? '', streaming: env.MODEL_STREAMING !== 'false', host,
-    port: positive('PORT', 3000), dataDir: path.resolve(env.HARNESS_DATA_DIR ?? '.harness'),
-    workspaceRoot: path.resolve(env.HARNESS_WORKSPACE_ROOT || path.join(homedir(),'React Harness Projects')),
+    port: positive('PORT', 3000), dataDir: path.resolve(baseDirectory,env.HARNESS_DATA_DIR ?? profilePaths(applicationHome(env)).dataDir),
+    appHome: applicationHome(env),
+    workspaceRoot: path.resolve(baseDirectory,env.HARNESS_WORKSPACE_ROOT || path.join(homedir(),'React Harness Projects')),
     models: { architect: env.ARCHITECT_MODEL ?? 'gemini-3.1-pro-preview', coder: env.CODER_MODEL ?? 'gemini-3.8-flash', critic: env.CRITIC_MODEL ?? 'gemini-3.6-flash' },
     promptFiles,
     approvalMode: mode as ApprovalMode, maxParallelCoders: 1,

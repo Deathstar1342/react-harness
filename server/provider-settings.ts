@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { readConfig, type Config } from './config.js';
 import type { ProviderSettings as PublicProviderSettings, ProviderSettingsPatch } from '../shared/types.js';
 import type { Store } from './store.js';
+import { applicationHome, profilePaths } from './locations.js';
 
 const fields = { architect: 'ARCHITECT_MODEL', coder: 'CODER_MODEL', critic: 'CRITIC_MODEL', apiKey: 'STARK_API_KEY' } as const;
 const value = z.string().max(1024).regex(/^[^\x00-\x1f\x7f\u2028\u2029]*$/, 'Use a single line without control characters');
@@ -48,7 +49,7 @@ export class ProviderSettingsFile {
     } catch { throw fail('Cannot safely read backend .env'); }
     finally { if (fd !== undefined) closeSync(fd); }
   }
-  config(): Config { return readConfig({...parse(this.snapshot.text), ...this.overrides}); }
+  config(): Config { return readConfig({...parse(this.snapshot.text), ...this.overrides},this.parent); }
   lockedFields(): string[] { return Object.entries(fields).filter(([,key]) => this.overrides[key] !== undefined).map(([key]) => key); }
   write(patch: ProviderSettingsPatch) {
     if (this.requiresRestart) throw fail('Backend .env changed after saving; restart to load it before saving again');
@@ -127,8 +128,8 @@ export class ProviderSettings {
   }
 }
 
-export function loadBackendConfig(env: NodeJS.ProcessEnv = process.env, filename = path.resolve('.env')) {
-  if (Object.keys(env).some(key => /^DOTENV_(?:CONFIG_)?(?:PATH|ENCODING|OVERRIDE|FAST)$/.test(key) && env[key] !== undefined)) throw new Error('Custom dotenv path, encoding, override and parser options are unsupported; start from the backend directory with its UTF-8 .env');
+export function loadBackendConfig(env: NodeJS.ProcessEnv = process.env, filename = profilePaths(applicationHome(env)).configFile) {
+  if (Object.keys(env).some(key => /^DOTENV_(?:CONFIG_)?(?:PATH|ENCODING|OVERRIDE|FAST)$/.test(key) && env[key] !== undefined)) throw new Error('Custom dotenv path, encoding, override and parser options are unsupported; use the selected profile config/.env');
   const file = new ProviderSettingsFile(filename,env);
   return {file, config:file.config()};
 }

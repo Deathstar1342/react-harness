@@ -61,3 +61,7 @@ export interface CommandEvent {
 export interface CommandOutput { agentId: string; commandId?: string; sessionId?: string; output: string; truncated?: boolean }
 export interface ChatDetail { chat: Chat; messages: Message[]; plan: Plan; approvals: Approval[]; events: RunEvent[]; eventsTruncated?: boolean; tests: TestReport[] }
 export interface PublicSettings { configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
+/** Private launcher protocol; keys and provider secrets are never included. */
+export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; profileId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }
+export interface BackendProofRequest { instanceId:string; nonce:string; expiresAt:number; mac:string }
+export interface BackendProof { action:'readiness'|'shutdown'; identity:BackendIdentity; nonce:string; mac:string }

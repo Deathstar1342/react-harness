@@ -11,6 +11,8 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "vite build",
     "start": "tsx server/index.ts",
+    "profile:init": "tsx server/profile-cli.ts init",
+    "profile:migrate": "tsx server/profile-cli.ts migrate",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
