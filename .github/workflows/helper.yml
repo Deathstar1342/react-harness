@@ -30,7 +30,7 @@ jobs:
           test "$(id -u)" != 0
       - run: npm ci
       - name: Portable helper state tests
-        run: python3 -m unittest discover -s helper -p test_core.py
+        run: python3 -m unittest discover -s helper -p 'test_*.py'
       - name: Build and explicitly stage trusted helper artifact
         run: |
           mkdir -p build/helper
@@ -56,6 +56,7 @@ jobs:
         if: failure()
         run: |
           sudo systemctl status abyssus-helper.service --no-pager || true
+          sudo find /etc/apt /var/lib/apt/lists /var/lib/dpkg/status /var/lib/apt/extended_states \( -type l -o ! -user root -o -perm /022 \) -printf '%u %m %p\n'
           # No config/descriptor, package output, journal, credentials or audit contents.
           sudo /usr/lib/abyssus-helper/launcher serve || true
         timeout-minutes: 1

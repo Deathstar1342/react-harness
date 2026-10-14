@@ -25,7 +25,7 @@ def hash_files(roots):
         path = Path(root)
         files = sorted(path.rglob("*")) if path.is_dir() else [path]
         for file in files:
-            if file.name in ("lock", "partial", "auxfiles") or not file.is_file():
+            if file.name == "lock" or (path.is_dir() and any(part in ("partial", "auxfiles") for part in file.relative_to(path).parts)) or not file.is_file():
                 continue
             require(not file.is_symlink(), "UNSAFE_APT_STATE")
             require(file.stat().st_uid == 0 and file.stat().st_mode & 0o022 == 0, "UNSAFE_APT_STATE")

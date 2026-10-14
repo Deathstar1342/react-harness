@@ -93,7 +93,7 @@ assert.equal((await prepare()).state,'noop');
 await assert.rejects(client.prepare({requestId:randomUUID(),targetId:hello.target.id,manager:'apt',packages:[{name:'hello',version:'0.0'}]}),/EXISTING_PACKAGE_CHANGE/);
 console.log('PASS real apt install, authenticated preview, forged/expired/reused decision, installed no-op');
 // Normal-user writable code/config must fail before Python imports.
-for(const file of ['/usr/lib/abyssus-helper/core.py','/usr/lib/abyssus-helper','/etc/abyssus-helper/config.json','/usr/share']){
+for(const file of ['/usr/lib/abyssus-helper/core.py','/usr/lib/abyssus-helper','/etc/abyssus-helper/config.json','/usr/share','/usr/lib/python3/dist-packages/apt/__init__.py','/usr/lib/x86_64-linux-gnu/libz.so.1']){
   sudo('/usr/bin/chmod','g+w',file);
   assert.throws(()=>admin('repair'),/UNTRUSTED_HELPER_PATH/);
   sudo('/usr/bin/chmod','g-w',file);
@@ -104,6 +104,7 @@ writeFileSync(hostileCwd+'/apt.py',"open('/tmp/abyssus-hostile-loaded','w').writ
 execFileSync('sudo',['/usr/bin/env',`PYTHONPATH=${hostileCwd}`,'APT_CONFIG=/tmp/nonexistent','LD_LIBRARY_PATH=/tmp','/usr/lib/abyssus-helper/launcher','repair'],{cwd:hostileCwd});
 assert(!existsSync('/tmp/abyssus-hostile-loaded'));
 client=await connect();
+assert.equal(JSON.stringify(client),'{}','helper credential must not be serializable');
 console.log('PASS writable code/config/parent rejection and hostile cwd/environment isolation');
 admin('repair');client=await connect();
 assert.equal((await client.status(record.requestId)).state,'succeeded');
