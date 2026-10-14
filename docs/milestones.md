@@ -16,7 +16,7 @@ First release planning target: Windows x64 Electron UI with a supported Ubuntu/D
 
 ### M16 — Durable application home and backend lifecycle
 
-Reviewed and integrated 2026-10-13: candidate `990a8e8`, merge `0b870f0`. Independent Windows checks passed (515 tests, 15 platform skips), candidate exact Linux CI passed; current main publication/CI gate is tracked in STATUS. Detailed evidence and limits: [M16 report](reports/milestone-16.md).
+Delivered on GitHub main `9a44265` on 2026-10-13: candidate `990a8e8`, merge `0b870f0`. Independent Windows checks passed (515 tests, 15 platform skips); exact main Linux CI passed [run 38498238317](https://github.com/Deathstar1342/react-harness/actions/runs/38498238317). M17 dependency released. Detailed evidence and limits: [M16 report](reports/milestone-16.md).
 
 - Separate installation files, persistent configuration/state, project folders and sandbox dependency/cache directories. Choose a stable platform-native home with an explicit override; startup must not depend on the launch directory. The Linux/WSL backend owns its state in its selected environment; Electron must not copy the database across Windows/WSL on each launch.
 - Preserve explicit existing environment overrides. Discover known legacy `.harness`/`.env` locations without scanning arbitrary personal files; migrate only an identified source. If multiple profiles exist, let the user choose rather than merge or start an apparently empty profile. Back up SQLite consistently, including WAL state; preserve chat/project IDs, model snapshots, approvals, plans and uncertain operations. Never publish or log configuration secrets.
