@@ -4,6 +4,7 @@ The service imports this only after the native launcher verifies runtime trees.
 No command string, supplied path, or subprocess environment crosses this API.
 """
 import hashlib
+import contextlib
 import os
 from pathlib import Path
 import platform
@@ -63,8 +64,10 @@ class AptAdapter:
         require(re.fullmatch(r"[a-f0-9]{32}", value["machineId"]), "UNSUPPORTED_TARGET")
         return {**value, "id": digest(value), "manager": "apt", "adapterVersion": 1}
 
+    @contextlib.contextmanager
     def lock(self):
-        return apt_pkg.SystemLock()
+        with apt_pkg.SystemLock(), apt_pkg.FileLock("/var/lib/apt/lists/lock"):
+            yield
 
     def healthy(self, cache):
         return not cache.broken_count and not cache.dpkg_journal_dirty and all(
@@ -111,7 +114,8 @@ class AptAdapter:
                                     for o in origins), "UNTRUSTED_PACKAGE")
             uris = sorted(version.uris)
             require(uris and all(urlsplit(uri).scheme in ("http", "https") and urlsplit(uri).hostname
-                                 and not urlsplit(uri).username and not urlsplit(uri).password for uri in uris), "UNTRUSTED_PACKAGE")
+                                 and not urlsplit(uri).username and not urlsplit(uri).password
+                                 and not urlsplit(uri).query and not urlsplit(uri).fragment for uri in uris), "UNTRUSTED_PACKAGE")
             sha = version.record.get("SHA256", "")
             require(re.fullmatch(r"[a-f0-9]{64}", sha) and version.size > 0 and version.installed_size > 0, "UNKNOWN_IMPACT")
             resolved.append({"name": package.name, "version": version.version, "architecture": version.architecture,
@@ -137,6 +141,7 @@ class AptAdapter:
         require(self.cache.commit(apt.progress.base.AcquireProgress(), apt.progress.base.InstallProgress()), "APT_FAILED")
 
     def reconcile(self, preview):
+        require(preview["target"]["id"] == self.target()["id"], "WRONG_TARGET")
         cache = apt.Cache()
         observed = []
         for item in preview["packages"]:

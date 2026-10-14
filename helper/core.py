@@ -91,6 +91,7 @@ class Audit:
         record["updatedAt"] = now()
         with self.db:
             if new:
+                require(self.db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] < 10000, "AUDIT_CAPACITY")
                 try:
                     self.db.execute("INSERT INTO requests VALUES(?,?)", (record["requestId"], canonical(record)))
                 except sqlite3.IntegrityError:
@@ -134,7 +135,7 @@ class Engine:
                 preview = self.adapter.preview(body)
             record = {"requestId": body["requestId"], "request": body, "preview": preview,
                       "previewDigest": digest(preview), "state": "noop" if not preview["packages"] else "prepared", "createdAt": now(),
-                      "expiresAt": now() + 120000, "code": "PREPARED"}
+                      "expiresAt": now() + 120000, "code": "PREPARED" if preview["packages"] else "ALREADY_INSTALLED"}
             self.audit.save(record, new=True)
             return record
         if action in ("status", "reconcile"):

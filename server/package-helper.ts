@@ -66,7 +66,11 @@ export class PackageHelperClient {
       socket.once('close',()=>{clearTimeout(timer);reject(new PackageHelperError('HELPER_REPLY_UNCERTAIN'));});
     });
   }
-  hello(){return this.request<{protocol:typeof helperProtocol;target:PackageHelperTarget}>('hello',{});}
+  async hello(){
+    const reply=await this.request<{protocol:typeof helperProtocol;target:PackageHelperTarget}>('hello',{});
+    if(reply.protocol!==helperProtocol||reply.target.installationId!==this.descriptor.installationId)throw new PackageHelperError('HELPER_TARGET_MISMATCH');
+    return reply;
+  }
   prepare(request:PackageHelperRequest){return this.request<PackageHelperRecord>('prepare',packageRequestSchema.parse(request));}
   authorize(decision:PackageHelperDecision){return this.request<PackageHelperRecord>('authorize',decisionSchema.parse(decision));}
   execute(decision:PackageHelperDecision){return this.request<PackageHelperRecord>('execute',decisionSchema.parse(decision));}
