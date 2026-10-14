@@ -111,8 +111,8 @@ try {
       const provider=createServer(async(req,res)=>{
         if(req.url==='/v1/models'){res.setHeader('content-type','application/json');res.end(JSON.stringify({data:['gemini-3.5-pro','gemini-3.5-flash-withtools'].map(id=>({id}))}));return;}
         let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw),result=diagnosticReply(body);
-        const message={role:'assistant',content:result.text,...(result.toolCalls?{tool_calls:result.toolCalls}:{})};
-        if(body.stream){res.setHeader('content-type','text/event-stream');res.end(`data: ${JSON.stringify({choices:[{index:0,delta:{...message,...(result.toolCalls?{tool_calls:result.toolCalls.map((call,index)=>({...call,index}))}:{})},finish_reason:result.finishReason}],usage:{prompt_tokens:10,completion_tokens:10}})}\n\ndata: [DONE]\n\n`);}
+        const message={role:'assistant',content:result.text,...(result.toolCalls.length?{tool_calls:result.toolCalls}:{})};
+        if(body.stream){res.setHeader('content-type','text/event-stream');res.end(`data: ${JSON.stringify({choices:[{index:0,delta:{...message,...(result.toolCalls.length?{tool_calls:result.toolCalls.map((call,index)=>({...call,index}))}:{})},finish_reason:result.finishReason}],usage:{prompt_tokens:10,completion_tokens:10}})}\n\ndata: [DONE]\n\n`);}
         else{res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message,finish_reason:result.finishReason}],usage:{prompt_tokens:10,completion_tokens:10}}));}
       });provider.listen(0,'127.0.0.1');await once(provider,'listening');
       try {
@@ -123,6 +123,9 @@ try {
         await expect(page.getByText('Provider settings saved. Model defaults apply to new chats only.')).toBeVisible();
         await page.getByRole('button',{name:'Test connection',exact:true}).click();
         await expect(page.getByText('Connection checks passed',{exact:true})).toBeVisible({timeout:30000});
+        for(const role of ['architect','coder','critic'])for(const evidence of ['ordinary','native','streaming']) {
+          await expect(page.getByText(`${role} · ${evidence} · passed`,{exact:true})).toBeVisible();
+        }
         await page.getByRole('button',{name:'Close',exact:true}).click();
         console.log('PASS blank-profile endpoint/key through real Settings and explicit synthetic HTTP connection test');
       }finally{provider.closeAllConnections();await new Promise<void>(resolve=>provider.close(()=>resolve()));}

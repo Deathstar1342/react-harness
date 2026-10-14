@@ -24,6 +24,59 @@ function fixture(replies:CompletionResult[]) {
 function batch(...replies:CompletionResult[]):CompletionResult {return {text:'',finishReason:'tool_calls',toolCalls:replies.flatMap(r=>r.toolCalls??[])};}
 
 describe('native runtime execution and evidence',()=>{
+  it('keeps an ordinary empty-call reply conversational',async()=>{
+    const t=fixture([{text:'Ordinary conversation',toolCalls:[],finishReason:'stop'}]);await t.run();
+    expect(t.store.chat(t.chat.id).status).toBe('idle');expect(t.tools.execute).not.toHaveBeenCalled();expect(t.store.messages(t.chat.id).some(m=>m.content==='Ordinary conversation')).toBe(true);
+  });
+  it('publishes committed native state even when an event subscriber throws',async()=>{
+    const t=fixture([delegate(),nativeReply('read_file',{path:'a'}),end(),verdict(),end()]);const observed=vi.fn(),once=vi.fn();
+    t.store.changes.on(t.chat.id,()=>{throw new Error('Disconnected subscriber');});t.store.changes.on(t.chat.id,observed);t.store.changes.once(t.chat.id,once);
+    await t.run();expect(observed.mock.calls.length).toBeGreaterThan(1);expect(once).toHaveBeenCalledTimes(1);expect(t.store.changes.rawListeners(t.chat.id)).toHaveLength(2);expect(t.store.chat(t.chat.id).status).toBe('idle');expect(t.tools.execute).toHaveBeenCalledTimes(1);
+    expect((t.runtime as any).runs.get(t.chat.id)).toEqual(t.store.getState(`run:${t.chat.id}`,null));
+  });
+  it('rejects a zero-call tool finish without effects',async()=>{
+    const t=fixture([{text:'',toolCalls:[],finishReason:'tool_calls'}]);await t.run();expect(t.store.chat(t.chat.id).status).toBe('error');expect(t.tools.execute).not.toHaveBeenCalled();
+  });
+  it('reports malformed post-effect handler results as uncertainty instead of success or replay',async()=>{
+    const t=fixture([delegate(),nativeReply('run_shell',{command:'one effect'}),end(),verdict(),end()]);
+    vi.mocked(t.tools.execute).mockResolvedValue({ok:true,output:42} as any);await t.run();
+    expect(t.tools.execute).toHaveBeenCalledTimes(1);const result=t.requests.flat().find(m=>m.role==='tool'&&m.content.includes('Invalid native tool result'));
+    expect(result).toBeDefined();expect(JSON.parse(result!.content)).toMatchObject({ok:false,data:{uncertain:true}});
+    expect(t.store.events(t.chat.id).filter(e=>e.type==='command').at(-1)?.data).toMatchObject({status:'uncertain'});
+  });
+  it.each(['executing-recovery','approval-denied','approval-stale','approval-reinspect','approval-waiting','install-waiting','install-result','plan-only','stale-file'].flatMap(kind=>['after-write','before-commit'].map(point=>[kind,point])))('rolls back pending %s at %s before publishing cache/history',async(kind,point)=>{
+    const t=fixture([]);const install=kind.startsWith('install-'),write=kind==='stale-file';
+    const action=install?{name:'recommend_packages',args:{packages:[{name:'hello'}],reason:'Required fixture dependency'}}:write?{name:'write_file',args:{path:'a',content:'new',baseHash:null}}:{name:'run_shell',args:{command:'never execute'}};
+    const state=nativeState<RunState>({frames:[{id:'parent',role:'architect',messages:[],repairs:0},{id:'frame',role:'coder',messages:[],repairs:0,pending:{id:'operation',stage:kind==='executing-recovery'?'executing':'prepared',action}}],steering:[],generation:0,steps:0,planOnly:kind==='plan-only'});
+    const frame=state.frames[1];
+    if(kind.startsWith('approval-')){
+      frame.pending!.approvalId='approval';
+      t.store.approval({id:'approval',chatId:t.chat.id,agentId:frame.id,action,createdAt:new Date().toISOString(),status:kind==='approval-denied'?'denied':kind==='approval-stale'?'stale':kind==='approval-waiting'?'pending':'approved',inspection:{effect:'execute',risk:'elevated',description:'Exact original'}});
+    }
+    if(install){vi.spyOn(t.store,'install').mockReturnValue({generation:0} as any);(t.runtime as any).installs={beginClose(){},close:async()=>{},advance:vi.fn(async()=>kind==='install-waiting'?null:{ok:false,output:'Helper outcome remains uncertain',data:{uncertain:true}})};}
+    if(write)vi.spyOn(t.tools,'read').mockResolvedValue({path:'a',content:'changed',hash:'b'.repeat(64)});
+    vi.spyOn(t.runtime as any,'refreshInstructions').mockResolvedValue(undefined);
+    (t.runtime as any).save(t.chat.id,state);(t.runtime as any).runs.set(t.chat.id,state);
+    const before=structuredClone(state),events=t.store.events(t.chat.id),chat=t.store.chat(t.chat.id),approvals=t.store.approvals(t.chat.id);
+    const writeState=t.store.setState.bind(t.store),exec=t.store.db.exec.bind(t.store.db);let armed=false;
+    vi.spyOn(t.store,'setState').mockImplementation((key,value)=>{writeState(key,value);if(key===`run:${t.chat.id}`){armed=true;if(point==='after-write')throw new Error('Injected pending write failure');}});
+    vi.spyOn(t.store.db,'exec').mockImplementation(sql=>{if(sql==='COMMIT'&&armed&&point==='before-commit')throw new Error('Injected pending commit failure');return exec(sql);});
+    await expect((t.runtime as any).executePending(t.chat.id,state,frame,new AbortController().signal)).rejects.toThrow(/Injected pending/);
+    expect(state).toEqual(before);expect((t.runtime as any).runs.get(t.chat.id)).toEqual(before);expect(t.store.getState(`run:${t.chat.id}`,null)).toEqual(before);
+    for(const original of before.frames)expect(t.store.getState(`native:frame:${t.chat.id}:${original.id}`,null)).toEqual(original.messages);
+    expect(t.store.events(t.chat.id)).toEqual(events);expect(t.store.chat(t.chat.id)).toEqual(chat);expect(t.store.approvals(t.chat.id)).toEqual(approvals);expect(t.tools.execute).not.toHaveBeenCalled();
+  });
+  it.each(['after-write','before-commit'])('retains executing uncertainty after a post-effect %s failure and never replays',async point=>{
+    const t=fixture([]);const state=nativeState<RunState>({frames:[{id:'parent',role:'architect',messages:[],repairs:0},{id:'frame',role:'coder',messages:[],repairs:0,pending:{id:'operation',stage:'prepared',action:{name:'run_shell',args:{command:'one effect'}}}}],steering:[],generation:0,steps:0,planOnly:false});
+    const frame=state.frames[1];vi.spyOn(t.runtime as any,'refreshInstructions').mockResolvedValue(undefined);(t.runtime as any).save(t.chat.id,state);(t.runtime as any).runs.set(t.chat.id,state);
+    const write=t.store.setState.bind(t.store),exec=t.store.db.exec.bind(t.store.db);let armed=false;
+    const writeSpy=vi.spyOn(t.store,'setState').mockImplementation((key,value)=>{write(key,value);if(key===`run:${t.chat.id}`&&(value as RunState).frames[1]?.pending?.stage==='done'){armed=true;if(point==='after-write')throw new Error('Outcome write failure');}});
+    const commitSpy=vi.spyOn(t.store.db,'exec').mockImplementation(sql=>{if(sql==='COMMIT'&&armed&&point==='before-commit')throw new Error('Outcome commit failure');return exec(sql);});
+    await expect((t.runtime as any).executePending(t.chat.id,state,frame,new AbortController().signal)).rejects.toThrow(/Outcome/);
+    expect(t.tools.execute).toHaveBeenCalledTimes(1);expect(frame.pending!.stage).toBe('executing');expect(frame.pending!.result).toBeUndefined();expect(t.store.getState(`run:${t.chat.id}`,null)).toEqual(state);expect(frame.messages.some(m=>m.role==='tool')).toBe(false);
+    writeSpy.mockRestore();commitSpy.mockRestore();await (t.runtime as any).executePending(t.chat.id,state,frame,new AbortController().signal);
+    expect(t.tools.execute).toHaveBeenCalledTimes(1);const result=frame.messages.find(m=>m.role==='tool');expect(result?.content).toContain('NOT been rerun');expect(result?.content).toContain('uncertain');
+  });
   it.each(['missing-id','changed-action','missing-original','already-resolved','wrong-order'])('refuses %s durable dispatch before effects',async kind=>{
     const t=fixture([]);const state=nativeState<RunState>({frames:[{id:'frame',role:'coder',messages:[],repairs:0,pending:{id:'operation',stage:'prepared',action:{name:'run_shell',args:{command:'never execute'}}}}],steering:[],generation:0,steps:0,planOnly:false});
     const frame=state.frames[0];

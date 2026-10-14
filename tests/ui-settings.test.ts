@@ -14,7 +14,9 @@ describe('focused chat and settings', () => {
     const html = renderToStaticMarkup(createElement(SettingsDialog, { onClose() {} }));
     for (const text of ['Current chat', 'Default for future chats', 'Debug mode off', 'Test connection', 'Default workspace', 'Save workspace', 'account request and token budgets', 'changes save immediately']) expect(html).toContain(text);
     expect(html).toContain('role="switch" aria-checked="false"');
-    expect(html).not.toMatch(/streaming|JSON mode/i);
+    expect(html).not.toMatch(/<(?:input|select|button)[^>]*(?:streaming|JSON mode)/i);
+    expect(html).not.toContain('JSON mode');
+    expect(html).toContain('up to 15 small requests');expect(html).toContain('up to 3 minutes');
     expect(html).toContain('aria-label="Replacement API key" type="password"');
     expect(html).toContain('Leave blank to keep the current key');
     expect(html).toContain('Model changes apply to new chats only');
@@ -68,6 +70,11 @@ describe('focused chat and settings', () => {
     const report: ConnectionReport = { ok: false, completedAt: '', checks: [{ target: 'catalog', status: 'failed', message: 'Catalog <error>' }, { target: 'coder', status: 'skipped', message: 'Reply test not sent.' }] };
     const html = renderToStaticMarkup(createElement(ConnectionResults, { report }));
     expect(html).toContain('did not all pass'); expect(html).toContain('not checked'); expect(html).toContain('&lt;error&gt;');
+  });
+  it('keeps ordinary, native and streaming evidence visibly distinct',()=>{
+    const report:ConnectionReport={ok:false,completedAt:'',checks:[{target:'coder',evidence:'ordinary',status:'passed',message:'Ordinary reply observed'},{target:'coder',evidence:'native',status:'failed',message:'Native call failed'},{target:'coder',evidence:'streaming',status:'skipped',message:'Not attempted'}]};
+    const html=renderToStaticMarkup(createElement(ConnectionResults,{report}));
+    for(const label of ['coder · ordinary · passed','coder · native · failed','coder · streaming · not checked'])expect(html).toContain(label);
   });
   it('uses disjoint preference and current-chat mutation endpoints and surfaces rejected writes', async () => {
     const fetcher = vi.fn().mockImplementation(async () => new Response('{}'));

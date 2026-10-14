@@ -194,7 +194,29 @@ export interface ToolDefinition {
   inspect: (dispatch: RegistryDispatch, action: Action) => Promise<ToolInspection>;
   handler: (dispatch: RegistryDispatch, action: Action) => Promise<ToolResult>;
 }
-const resultSchema = z.object({ok:z.boolean(),output:z.string(),data:z.unknown().optional()}).strict();
+export const RESULT_LIMITS=Object.freeze({outputBytes:2_100_000,dataBytes:16_000_000,dataNodes:100_000,depth:64});
+function boundedResultData(value:unknown):boolean {
+  let nodes=0;
+  const ancestors=new Set<object>();
+  const walk=(item:unknown,depth:number):boolean=>{
+    if(++nodes>RESULT_LIMITS.dataNodes || depth>RESULT_LIMITS.depth)return false;
+    if(item===null || item===undefined || typeof item==='boolean' || typeof item==='string')return true;
+    if(typeof item==='number')return Number.isFinite(item);
+    if(typeof item!=='object' || ancestors.has(item))return false;
+    if(!Array.isArray(item) && Object.getPrototypeOf(item)!==Object.prototype && Object.getPrototypeOf(item)!==null)return false;
+    ancestors.add(item);
+    const valid=Object.values(item).every(child=>walk(child,depth+1));
+    ancestors.delete(item);
+    return valid;
+  };
+  try{return walk(value,0) && Buffer.byteLength(JSON.stringify(value)??'null')<=RESULT_LIMITS.dataBytes;}catch{return false;}
+}
+const resultSchema = z.object({ok:z.boolean(),output:z.string().max(RESULT_LIMITS.outputBytes).refine(value=>Buffer.byteLength(value)<=RESULT_LIMITS.outputBytes),data:z.unknown().refine(boundedResultData).optional()}).strict();
+export function validateToolResult(result:unknown):ToolResult {
+  const parsed=resultSchema.safeParse(result);
+  if(!parsed.success)throw new Error('Invalid native tool result; effects may have occurred. Inspect state before deciding what work remains.');
+  return parsed.data;
+}
 const read = new Set(['list_files','read_file','search','git_status','git_diff']);
 const execute = new Set(['run_shell','execute_python','run_tests']);
 const terminal = new Set(['delegate','review','review_result','submit_completion','ask_user']);
@@ -229,9 +251,7 @@ export const toolRegistry: ReadonlyMap<string,ToolDefinition> = new Map(actionSc
     inspect:async (dispatch,action) => workspace ? dispatch.workspace.inspect(dispatch.context,action) : {effect,risk:effect === 'execute' ? 'elevated' : 'routine',description:descriptions[name]},
     handler:async (dispatch,action) => {
       const result=await (workspace ? dispatch.workspace.execute(dispatch.context,action) : dispatch.control(action));
-      const parsed=resultSchema.safeParse(result);
-      if(!parsed.success)throw new Error('Invalid native tool result');
-      return parsed.data;
+      return validateToolResult(result);
     },
   };
   return [name,definition];

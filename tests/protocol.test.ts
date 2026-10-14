@@ -1,5 +1,5 @@
 import { describe,expect,it } from 'vitest';
-import { actionSchema, parseToolArguments, publishedTools, validateAction, toolRegistry } from '../server/tool-registry.js';
+import { actionSchema, parseToolArguments, publishedTools, validateAction, toolRegistry, validateToolResult, RESULT_LIMITS } from '../server/tool-registry.js';
 import { parseNativeJSON } from '../server/native-json.js';
 import { protocolInstructions } from '../server/protocol.js';
 const action=(name:string,args:unknown)=>({name,args});
@@ -56,5 +56,13 @@ describe('single native tool registry',()=>{
    for(const role of ['architect','coder','critic'] as const){expect(protocolInstructions(role)).toContain('native tools');expect(protocolInstructions(role)).not.toContain('JSON recommendation');}
    expect(protocolInstructions('coder','Preserve manual work')).toContain('Preserve manual work');
    expect(()=>protocolInstructions('coder','x'.repeat(32001))).toThrow();
+ });
+ it('enforces output bytes and finite bounded serializable result data',()=>{
+   const cyclic:any={};cyclic.self=cyclic;
+   let deep:any={};for(let i=0;i<RESULT_LIMITS.depth+1;i++)deep={child:deep};
+   for(const data of [cyclic,deep,BigInt(1),()=>{},NaN,{value:Infinity},'x'.repeat(RESULT_LIMITS.dataBytes),Array(RESULT_LIMITS.dataNodes+1).fill(null)])expect(()=>validateToolResult({ok:true,output:'evidence',data})).toThrow(/Invalid native tool result/);
+   expect(()=>validateToolResult({ok:true,output:'é'.repeat(Math.floor(RESULT_LIMITS.outputBytes/2)+1)})).toThrow();
+   expect(()=>validateToolResult({ok:true,output:'valid',unexpected:true})).toThrow();
+   expect(validateToolResult({ok:false,output:'Observed failure',data:{exitCode:1,optional:undefined}}).ok).toBe(false);
  });
 });

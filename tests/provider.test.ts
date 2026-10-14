@@ -216,6 +216,14 @@ describe('StarkProvider ordinary HTTP completions', () => {
 
 
 describe('native transport boundaries',()=>{
+ it.each([undefined,null,[]])('accepts an ordinary reply with zero native calls (%j)',async tool_calls=>{
+   const baseUrl=await fake((_req,res)=>json(res,{choices:[{message:{role:'assistant',content:'Ordinary conversation',tool_calls},finish_reason:'stop'}]}));
+   expect(await new StarkProvider({baseUrl,apiKey:key,streaming:false}).complete(input)).toMatchObject({text:'Ordinary conversation',finishReason:'stop'});
+ });
+ it('rejects a tool_calls finish with an empty list',async()=>{
+   const baseUrl=await fake((_req,res)=>json(res,{choices:[{message:{role:'assistant',content:'',tool_calls:[]},finish_reason:'tool_calls'}]}));
+   await expect(new StarkProvider({baseUrl,apiKey:key,streaming:false}).complete(input)).rejects.toMatchObject({code:'malformed'});
+ });
  const call=(id='call_1',name='read_file',args='{"path":"a"}')=>({id,type:'function',function:{name,arguments:args}});
  it.each(['','Inspecting'])('accepts tool-only and text plus multiple calls: %s',async text=>{
    let request:Record<string,unknown>={};

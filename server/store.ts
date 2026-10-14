@@ -182,8 +182,12 @@ export class Store {
     return event;
   }
   private emitEvent(event: RunEvent) {
-    this.changes.emit(event.chatId, event);
-    this.changes.emit('event', event);
+    // Notifications follow persistence. A disconnected/throwing subscriber must
+    // not turn a committed transition into an apparent rollback or block peers.
+    // Durable events remain available for SSE replay.
+    for(const channel of [event.chatId,'event'])for(const listener of this.changes.rawListeners(channel)) {
+      try{listener.call(this.changes,event);}catch{/* Delivery failure is not an execution outcome. */}
+    }
   }
   recentEvents(chatId: string, limit = 1000): RunEvent[] {
     return this.db.prepare('SELECT * FROM (SELECT * FROM events WHERE chat_id=? ORDER BY id DESC LIMIT ?) ORDER BY id').all(chatId,limit).map(row => ({ id:Number(row.id), chatId:String(row.chat_id), type:String(row.type), data:JSON.parse(String(row.data)), createdAt:String(row.created_at) }));

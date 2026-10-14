@@ -8,7 +8,7 @@ export function ConnectionResults({ report }: { report: ConnectionReport }) {
   return <div className="connection-results" role="status">
     <strong>{report.ok ? 'Connection checks passed' : 'Connection checks did not all pass'}</strong>
     <ul>{report.checks.map(check => <li key={`${check.target}:${check.evidence ?? 'catalog'}`}>
-      <strong>{check.target === 'catalog' ? 'Model catalog' : check.target} · {check.status === 'skipped' ? 'not checked' : check.status}</strong>
+      <strong>{check.target === 'catalog' ? 'Model catalog' : `${check.target}${check.evidence ? ` · ${check.evidence}` : ''}`} · {check.status === 'skipped' ? 'not checked' : check.status}</strong>
       <span>{check.message}</span>
     </li>)}</ul>
   </div>;
@@ -58,7 +58,7 @@ export function SettingsControls({ chatId, onPreferences, providerRevision = 0 }
   return <>
     <section className="settings-section">
       <h3>Connection</h3>
-      <p className="field-help">Checks the model catalog and sends up to three small model requests using your normal connection. Uses account request and token budgets; may take up to 25 seconds.</p>
+      <p className="field-help">Checks the catalog and each role's ordinary replies, native tool round trips and streaming. Sends up to 15 small requests using account request and token budgets; may take up to 3 minutes.</p>
       <button type="button" className="button" disabled={checking} onClick={() => {
         if (check.current) return;
         const controller = new AbortController(); check.current = controller;

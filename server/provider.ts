@@ -47,7 +47,7 @@ function checkFinish(reason: unknown, calls: number): asserts reason is 'stop' |
 }
 export function validateNativeCalls(value: unknown): NativeToolCall[] {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || !value.length || value.length > NATIVE_LIMITS.calls) throw malformed();
+  if (!Array.isArray(value) || value.length > NATIVE_LIMITS.calls) throw malformed();
   const ids = new Set<string>();
   return value.map(call => {
     if (!record(call) || call.type !== 'function' || typeof call.id !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(call.id) || ids.has(call.id) || !record(call.function)) throw malformed();

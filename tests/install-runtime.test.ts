@@ -27,6 +27,21 @@ async function fixture(responses=[recommendation,nativeReply('submit_completion'
   return {...t,helper,records,config,provider,tools,project,chat,start};
 }
 describe('system install runtime and public API',()=>{
+  it.each(['after-write','before-commit'])('never repeats helper effects after native outcome %s failure',async point=>{
+    const t=await fixture();t.installs.update({policy:'auto',revision:0});
+    const write=t.store.setState.bind(t.store),exec=t.store.db.exec.bind(t.store.db);let armed=false,failed=false;
+    const writeSpy=vi.spyOn(t.store,'setState').mockImplementation((key,value)=>{
+      write(key,value);
+      if(!failed&&key===`run:${t.chat.id}`&&(value as any).frames?.some((frame:any)=>frame.pending?.action.name==='recommend_packages'&&frame.pending.stage==='done')){
+        armed=true;if(point==='after-write'){failed=true;throw new Error('Injected install outcome failure');}
+      }
+    });
+    const commitSpy=vi.spyOn(t.store.db,'exec').mockImplementation(sql=>{if(sql==='COMMIT'&&armed&&!failed&&point==='before-commit'){failed=true;throw new Error('Injected install outcome failure');}return exec(sql);});
+    await t.start();expect(failed).toBe(true);expect(t.helper.execute).toHaveBeenCalledTimes(1);expect(t.store.installs()[0].state).toBe('succeeded');
+    const durable=t.store.getState<any>(`run:${t.chat.id}`,null);expect(durable.frames[0].pending.stage).toBe('prepared');expect(durable.frames[0].pending.result).toBeUndefined();expect((t.runtime as any).runs.get(t.chat.id)).toEqual(durable);
+    writeSpy.mockRestore();commitSpy.mockRestore();await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
+    expect(t.helper.execute).toHaveBeenCalledTimes(1);expect(t.store.chat(t.chat.id).status).toBe('idle');expect(t.store.messages(t.chat.id).some(m=>m.role==='tool'&&m.metadata?.name==='recommend_packages')).toBe(true);
+  });
   it('workspace autonomy still asks and ordinary approval executes exactly once',async()=>{
     const t=await fixture();await t.start();const [item]=t.store.installs();
     expect(t.store.chat(t.chat.id).status).toBe('awaiting_approval');expect(t.helper.execute).not.toHaveBeenCalled();
