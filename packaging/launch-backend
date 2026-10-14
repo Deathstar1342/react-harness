@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+exec 9</var/lib/abyssus-package/runtime.lock
+/usr/bin/flock -sn 9 || exit 73
+if test -e /var/lib/abyssus-package/maintenance; then
+  printf '%s\n' '{"error":"Linux package maintenance is incomplete. Finish configuring the matching reviewed packages before reopening this profile."}'
+  exit 73
+fi
+test "$(id -u)" != 0 || exit 73
+expected=$1
+shift
+if ! /usr/bin/python3 -I -c 'import json,sys; assert json.load(open("/opt/abyssus/app/release.json"))["source"] == sys.argv[1]' "$expected" 2>/dev/null; then
+  printf '%s\n' '{"error":"Desktop and Linux backend packages do not match. Install the backend bundled with this desktop version in the selected environment."}'
+  exit 73
+fi
+case "${1-}" in backend-entry.js|helper-entry.js) entry=$1 ;; *) exit 64 ;; esac
+shift
+exec /opt/abyssus/runtime/bin/node "/opt/abyssus/app/desktop/$entry" "$@"

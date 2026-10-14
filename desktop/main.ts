@@ -13,11 +13,16 @@ app.setName('abysSUS');
 nativeTheme.themeSource='dark';
 app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}}]);
+if(app.isPackaged&&process.platform==='linux') {
+  const desktopRelease=JSON.parse(readFileSync(path.join(appRoot,'release.json'),'utf8'));
+  const backendRelease=JSON.parse(readFileSync('/opt/abyssus/app/release.json','utf8'));
+  if(desktopRelease.source!==backendRelease.source)throw new Error('Desktop/backend package versions differ. Install the matching reviewed package set.');
+}
 let window:BrowserWindow|undefined,quitting=false,closing=false;
 const documents=new DocumentGuard();
-const controller=new DesktopController(appRoot);
+const controller=new DesktopController(app.isPackaged&&process.platform==='linux'?'/opt/abyssus/app':appRoot);
 const selectionSchema=z.object({environment:environmentSchema,home:linuxPath}).strict();
-if(!app.requestSingleInstanceLock())app.quit();
+if(!app.isPackaged&&!app.requestSingleInstanceLock())app.quit();
 else {
   app.on('second-instance',()=>{window?.show();window?.focus();});
   await app.whenReady();

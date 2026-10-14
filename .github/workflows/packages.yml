@@ -1,0 +1,141 @@
+name: Installer candidates
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    if: ${{ !contains(github.event.head_commit.message, '[windows-diagnostic]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ABYSSUS_PACKAGE_TEST_HOME: /home/runner/abyssus-package-acceptance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: npm
+      - name: Disposable build and acceptance prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-apt acl bubblewrap socat python3-venv pkexec xvfb libgbm1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # Hosted images make tool-install roots writable; production refuses that.
+          # Normalize only these two roots on this disposable runner, not recursively.
+          stat -c '%U %G %a %n' / /opt /usr /usr/share /var /var/lib
+          sudo chown root:root /usr/share /opt
+          sudo setfacl -b -k /usr/share /opt
+          sudo chmod 0755 /usr/share /opt
+          stat -c '%U %G %a %n' / /opt /usr /usr/share /var /var/lib
+          getfacl -p /opt /usr/share
+          python3 -m unittest discover -s tests -p 'test_package_*.py'
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npm run desktop:stage-runtime
+      - run: build/runtime/bin/node tests/desktop-runtime-probe.mjs
+      - name: Build actual Ubuntu payloads
+        run: |
+          node scripts/backend-package.mjs
+          node scripts/helper-stage.mjs --release
+          cp build/abyssus-helper-staging.deb build/bundled/
+          npm run package:prepare
+          node scripts/package-manifest.mjs build/bundled
+          npm run package:linux
+      - name: Install actual backend and desktop in disposable runner
+        timeout-minutes: 5
+        run: |
+          sudo apt-get install -y ./build/bundled/abyssus-backend_0.1.0_amd64.deb
+          sudo apt-get install -y ./build/release/*.deb
+          xvfb-run -a node tests/packaged-smoke.ts /opt/abysSUS/abysSUS create
+      - name: Preserve data through package removal and reinstall
+        timeout-minutes: 5
+        run: |
+          sudo apt-get remove -y react-harness
+          sudo apt-get remove -y abyssus-backend
+          sudo apt-get install -y ./build/bundled/abyssus-backend_0.1.0_amd64.deb
+          sudo apt-get install -y ./build/release/*.deb
+          xvfb-run -a node tests/packaged-smoke.ts /opt/abysSUS/abysSUS verify
+      - name: Actual maintenance refusal, interruption and helper dependency ordering
+        timeout-minutes: 5
+        run: node tests/package-maintenance-linux.mjs
+      - name: Actual main crash and surviving backend lease
+        timeout-minutes: 3
+        run: |
+          xvfb-run -a node tests/packaged-crash.ts /opt/abysSUS/abysSUS
+          xvfb-run -a node tests/packaged-smoke.ts /opt/abysSUS/abysSUS verify
+      - run: node scripts/package-manifest.mjs build/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer-candidate
+          path: |
+            build/release/*.deb
+            build/release/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundled-linux-payload
+          path: build/bundled/
+  windows:
+    needs: linux
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundled-linux-payload
+          path: build/bundled
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npm run package:prepare
+      - run: npm run package:windows
+      - name: Actual packaged executable (no WSL provisioning)
+        run: node tests/packaged-smoke.ts build/release/win-unpacked/abysSUS.exe
+      - name: Actual disposable NSIS install and manual upgrade
+        timeout-minutes: 10
+        run: ./tests/windows-installer.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-phase-diagnostics
+          path: test-results/m21-windows/
+      - run: node scripts/package-manifest.mjs build/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-candidate
+          path: |
+            build/release/*setup.exe
+            build/release/SHA256SUMS
+  windows-diagnostic:
+    if: ${{ contains(github.event.head_commit.message, '[windows-diagnostic]') }}
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npm run package:prepare
+      - name: Build diagnostic executable only (no release candidate)
+        run: npx electron-builder --config packaging/electron-builder.cjs --win dir --x64 --publish never
+      - name: Focused owned-process crash observations
+        timeout-minutes: 4
+        run: ./tests/windows-crash-diagnostic.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-crash-diagnostics-only
+          path: test-results/m21-windows/
