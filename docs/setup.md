@@ -37,15 +37,14 @@ cd ~/apps
 git clone https://github.com/Deathstar1342/react-harness.git
 cd react-harness
 npm ci
-cp .env.example .env
-chmod 600 .env
+npm run profile:init
 ```
 
-Copy `.env.example` only on initial setup; copying it again overwrites your local settings. No separate database service or Python backend is required: Node creates the local SQLite database on startup.
+`profile:init` prints the private configuration path and creates a new profile only when no known legacy source needs selection. For an existing installation, use the migration instructions below instead. Use `.env.example` as a reference; never copy over saved settings. No separate database service or Python backend is required.
 
 ## 3. Configure STARK
 
-Open `.env` in your preferred local editor. Set your work provider's URL and key:
+Open the path printed by `profile:init`, normally `~/.local/share/abyssus/profile/config/.env` (or `$XDG_DATA_HOME/abyssus/profile/config/.env`), in your local editor. Set your work provider's URL and key:
 
 ```dotenv
 STARK_BASE_URL=https://your-provider.example/v1
@@ -68,7 +67,7 @@ Open Settings to select architect/coder/critic defaults from the discovered cata
 
 The password field always starts empty. Leaving it blank keeps the saved key. Enter a replacement or explicitly select **Clear saved API key**, then save. The input is cleared after submission and the saved key is never sent back to the browser. A replacement/clear affects the next dispatched provider request in every chat; in-flight requests retain their captured credentials. Test connection remains a separate operation, and saving provider settings clears results that describe an older configuration. Approval, Debug and workspace controls retain their existing behavior.
 
-Settings updates this backend directory's `.env`, preserving unrelated configuration. Original process environment variables take precedence and lock the corresponding model/key controls, including externally supplied empty values. Remove such overrides from the launching shell/service and restart before editing those fields in Settings. A launcher that preloads dotenv also creates process overrides. Custom `DOTENV_PATH`, `DOTENV_ENCODING`, `DOTENV_OVERRIDE`, `DOTENV_FAST` and their `DOTENV_CONFIG_*` variants are unsupported; use the ordinary UTF-8 `.env` in the directory where you start the backend. Provider URL and transport remain backend-only configuration requiring restart.
+Settings updates the selected profile's `config/.env`, preserving unrelated configuration. Original process environment variables take precedence and lock the corresponding model/key controls, including externally supplied empty values. Remove such overrides from the launching shell/service and restart before editing those fields in Settings. A launcher that preloads dotenv also creates process overrides. Custom `DOTENV_PATH`, `DOTENV_ENCODING`, `DOTENV_OVERRIDE`, `DOTENV_FAST` and their `DOTENV_CONFIG_*` variants are unsupported; use the UTF-8 `profile/config/.env` in the selected application home. Provider URL and transport remain backend-only configuration requiring restart.
 
 Use a regular private `.env`, not a symlink or hardlink, in a trusted writable backend folder. Values entered in Settings must be single-line; unsupported quote combinations/syntax reject explicitly. External edits while the backend is running cause saves to reject; restart to load those edits. A rare error saying **settings saved and active** means replacement completed but a subsequent file check failed: inspect the local file and restart before saving again. Do not run multiple backend instances against the same configuration/data directory. Windows file privacy depends on the directory ACL; Linux replacements use mode 0600.
 
@@ -78,12 +77,13 @@ Useful optional settings:
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Local-only listener; the app requires a loopback address |
 | `PORT` | `3000` | Backend and built UI port |
-| `HARNESS_DATA_DIR` | `.harness` | Chat database, durable runtime state, and local artifacts |
+| `HARNESS_HOME` | `$XDG_DATA_HOME/abyssus` or `~/.local/share/abyssus` on Linux | Absolute private application home; set in the launching environment |
+| `HARNESS_DATA_DIR` | `HARNESS_HOME/profile/state` | Explicit state-directory override; prefer an absolute path |
 | `HARNESS_WORKSPACE_ROOT` | `~/React Harness Projects` when unset | Initial destination for new projects; use an absolute Linux path if setting it |
 | `APPROVAL_MODE` | `balanced` | Default for new chats: `balanced`, `review`, or `autonomous` |
 | `MODEL_STREAMING` | `true` | Set `false` if the provider does not support streaming |
 
-Settings in the UI can override the new-project workspace locally. Existing projects stay in place. Relative data and prompt-file paths resolve from the directory where you start the backend, so run the commands from the repository root. Use `.env.example` for token budgets, request limits, and optional per-role prompt files.
+Settings in the UI can override the new-project workspace locally. Existing projects stay in place. Relative paths saved in the profile `.env` resolve from `profile/config`; relative paths explicitly supplied in the process environment retain launch-directory semantics. Migration normalizes legacy paths against their source root. Use absolute override paths for stable launches. Use `.env.example` for token budgets, request limits, and optional per-role prompt files.
 
 ## 4. Build and start
 
@@ -154,7 +154,7 @@ These are content-snapshot checks, not an atomic lock against external filesyste
 ## Updating and keeping your data
 
 
-Stop the backend before making a consistent backup. Back up the complete configured data directory, your separate project folders, and local configuration to private storage. `.harness` contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again.
+Stop the backend before making a consistent backup. Back up the selected application home, any external data override, and your separate project folders to private storage. `profile/state` (or the explicit override) contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again. For the first M16 upgrade from a legacy checkout, follow the migration section before ordinary startup.
 
 From the repository root, update with:
 
@@ -171,7 +171,7 @@ Preserve your `.env` and data directory. Compare `.env.example` for new options 
 
 | Symptom | What to check |
 | --- | --- |
-| UI reports missing STARK configuration | Set both URL and key in the checkout's `.env`, then restart the backend from that directory. |
+| UI reports missing STARK configuration | Set both URL and key in the selected home's `profile/config/.env`, then restart the backend. |
 | Model discovery fails | Confirm you are on the work network/VPN, the URL includes the correct API prefix, and the key is valid. WSL must have its own working network and certificate trust; Windows browser access alone is not sufficient. |
 | Certificate validation fails | Use your organization's approved CA configuration for Node/WSL; do not disable TLS verification. |
 | Model is missing or completions fail | Compare exact model IDs with `/api/models`. Confirm the provider supports Chat Completions and the requested streaming/output limits. |
@@ -234,3 +234,26 @@ Progress reflects associated work and review evidence. A coder reporting complet
 The panel is closed initially, has its own height/scroll bound, and can be closed with Escape while focus is inside it. Composer drafts and mounted file editors remain intact. Narrow layouts wrap the header controls. Recent history can omit older source events; SQLite retains them.
 
 For a credential-free browser smoke test, build the UI, then run `node --import tsx tests/planning-browser-fixture.ts` and open the printed localhost URL. It creates only a disposable temporary project/database and uses explicit synthetic responses. Press Enter in the fixture terminal to stop and remove that fixture, or allow its 30-minute shutdown. It is not a live STARK or Linux PTY acceptance test.
+
+
+## Durable profile, migration and lifecycle
+
+Installation files stay in the checkout or future installation directory. Linux/WSL owns its database inside the selected Linux environment; no launch-time Windows/WSL database copying occurs. `HARNESS_HOME` is an absolute, persistent launcher override. Its default is `${XDG_DATA_HOME:-~/.local/share}/abyssus` on Linux and `%LOCALAPPDATA%/abysSUS` on Windows (portable development only). The home contains `profile/config/.env`, `profile/state/state.sqlite`, migration receipts and a private runtime descriptor. `cache/sandboxes` is a reserved future location; M16 does not create a sandbox. Projects remain in their original locations, or the separate configured workspace.
+
+For a **new installation**, run `npm run profile:init`, edit the printed `.env`, then `npm run build` and `npm start`. An alternative first launch is `HARNESS_INIT=1 npm start`. Later launches need neither command nor one-time flag. A missing initialized database/configuration fails closed instead of creating an apparently empty account.
+
+For an **upgrade from a legacy checkout**:
+
+1. Stop every old backend using that checkout/config/data. Preserve a backup. The legacy version does not hold the new ownership lock while idle, so automatic detection cannot prove that an idle legacy backend is stopped.
+2. From the updated installation, run `npm run profile:migrate -- /absolute/path/to/legacy/checkout`. Alternatively use `HARNESS_LEGACY_ROOT=/absolute/path/to/legacy/checkout npm start`. Only the selected root's known `.env` and `.harness` are inspected. Discovery checks launch cwd and installation root; it does not search your home or disk. Multiple detected sources require selecting exactly one, never merging.
+3. Start normally with `npm start`. Keep any intentional `HARNESS_HOME`, process provider overrides and external data override in the launcher environment. Do not persist initialization/migration flags in `.env`.
+
+Migration uses SQLite's backup API to include committed WAL contents, checks database integrity/tables, copies bounded regular artifacts, and atomically publishes configuration, database and profile identity together. IDs, project registrations, models, approvals, plans, change snapshots and uncertain action evidence stay intact. SQLite stores existing summary artifacts in its state table. Legacy relative data/workspace/prompt paths become absolute source-based paths. An explicit legacy `HARNESS_DATA_DIR` stays in place rather than being copied; its missing database is an error. Source files and imported projects are never deleted. Stop legacy processes before migration: a source ownership lock and active SQLite write transaction are detected, but older idle processes and external artifact editors cannot be conclusively detected.
+
+`migration.json` records preparing/ready/committed state without credentials. Interrupted staging is retained. Before publication, retry with `HARNESS_MIGRATION_RETRY=1 npm run profile:migrate -- /same/source`; a fresh snapshot avoids accepting writes lost after a prior backup. Previous receipts and staging directories remain for inspection. After publication, matching metadata completes the receipt on restart. Damaged/missing metadata, modified staging, missing sources and unsupported versions fail for explicit recovery. Never manually merge databases. Regular artifact copying is bounded to 10,000 entries, depth 64 and 1 GiB; oversized or linked trees require explicit external recovery. Unix files are flushed and directory metadata is synced; Windows file contents are flushed, without a universal power-loss guarantee for directory metadata.
+
+The backend locks the canonical home and effective data/config directories with persistent SQLite ownership files. Different homes sharing data collide; process exit releases locks without stale PID cleanup. Never remove ownership files to bypass a running instance. A port collision fails and releases startup resources without attaching to or killing that listener. A successful launch remembers its effective data directory. Losing/changing an override fails; restore the old value or deliberately select the new location with `HARNESS_SELECT_DATA=1 HARNESS_DATA_DIR=/absolute/selected/state npm start`. This selects a profile target and does not copy or merge old chats. A failed listen does not replace a previously working data binding.
+
+Ctrl+C/SIGTERM and the authenticated shutdown contract stop new work, close event streams and await runtime/tool/store cleanup before releasing ownership. A hanging/failed drain retains ownership; it is never reported as successful shutdown and uncertain operations are not replayed. If the process must be terminated externally, inspect uncertain records after restart. The private `backend.json` descriptor is for a trusted launcher; a plain `/api/health` response or matching port does not authenticate a backend. See the API contract for nonce/HMAC readiness and shutdown. Never include the descriptor in diagnostics, browser payloads or published files.
+
+Unix home/config directories must be owned by the current user with mode 0700; config and descriptors use 0600. Windows inherits the user's directory ACLs. Trusted local directory/OS locking semantics are required; network filesystems and arbitrary external path substitution are not supported security boundaries. The current same-user unsandboxed shell can read private files despite environment filtering. M17 owns process isolation; M20 will translate the one-time bootstrap controls into setup choices. No Electron, privileged helper, sandbox, or installed-desktop acceptance is claimed here.

@@ -57,7 +57,7 @@ export class Removal {
     const project=this.store.project(projectId),root=path.resolve(project.path);
     if (!path.isAbsolute(project.path) || root!==project.path) throw conflict('Registered project path is not canonical');
     const stamp=ancestry(root);
-    const protectedTrees=[path.resolve(fileURLToPath(new URL('..',import.meta.url))),process.cwd(),this.config.dataDir,
+    const protectedTrees=[path.resolve(fileURLToPath(new URL('..',import.meta.url))),process.cwd(),this.config.dataDir,...(this.config.appHome?[this.config.appHome]:[]),
       ...(this.store.filename===':memory:' ? [] : [path.dirname(path.resolve(this.store.filename))]),
       ...Object.values(this.config.promptFiles).map(file=>path.dirname(file!)),path.join(homedir(),'.config')];
     const protectedRoots=[path.parse(root).root,homedir(),this.locations.settings().workspaceRoot,this.locations.settings().defaultWorkspaceRoot];

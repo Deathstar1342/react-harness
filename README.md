@@ -14,10 +14,10 @@ Prerequisites: Node.js 24 or newer, npm, Git, Bash, and Python 3 for Python tool
 git clone https://github.com/Deathstar1342/react-harness.git
 cd react-harness
 npm ci
-cp .env.example .env
+npm run profile:init
 ```
 
-Edit `.env` locally:
+Edit the configuration path printed by `profile:init` (normally `~/.local/share/abyssus/profile/config/.env` in Linux/WSL). Use `.env.example` as a reference; never overwrite an existing profile's settings:
 
 ```dotenv
 STARK_BASE_URL=https://your-provider.example/v1
@@ -31,13 +31,15 @@ npm run build
 npm start
 ```
 
-Open http://localhost:3000. For development, `npm run dev` runs the backend on port 3000 and Vite on port 5173. Restart the backend after changing `.env`.
+Open http://localhost:3000. For development, `npm run dev` runs the backend on port 3000 and Vite on port 5173. Restart the backend after changing its profile `.env`. Configuration, state and built UI lookup no longer depend on the backend launch directory.
+
+For an existing installation, stop its old backend, then run `npm run profile:migrate -- /absolute/path/to/old/checkout` instead of `profile:init`. This selects only that checkout's known `.env`/`.harness` source, retains originals, and never merges profiles. Explicit legacy data overrides stay in place. Ambiguous sources, interrupted migration and missing state stop with recovery guidance. See [migration and lifecycle](docs/setup.md#durable-profile-migration-and-lifecycle) before upgrading. Keep `HARNESS_HOME=/absolute/private/path` consistent on every command if selecting a nondefault home.
 
 The UI opens without credentials so you can manage projects and files. Sending model messages requires the STARK URL and key. Windows can run the UI and portable tests, but persistent shell/Python/test execution requires the Linux backend; unsupported PTY execution returns an explicit error.
 
 ## Work with projects and chats
 
-Create or import local projects, then keep separate conversations for separate tasks. Chats, plans, approvals, tool evidence, and model context are stored in `.harness/state.sqlite` by default. Keep this local data private. You can set `HARNESS_DATA_DIR` to another location.
+Create or import local projects, then keep separate conversations for separate tasks. Chats, plans, approvals, tool evidence, and model context are stored in the selected home's `profile/state/state.sqlite`. Keep this local data private. `HARNESS_DATA_DIR` overrides the state directory; its effective identity is remembered to detect lost overrides. Imported projects remain outside the profile and are never moved by migration.
 
 The dark chat interface includes a folder explorer for imports and Settings for the default workspace. Create a project with just a name under `~/React Harness Projects` (or `HARNESS_WORKSPACE_ROOT`); the backend chooses a unique folder. Change the default workspace in Settings without moving existing projects. See [current validation status](docs/STATUS.md).
 
@@ -81,7 +83,7 @@ Default roles are configurable in `.env`:
 | Coder | `gemini-3.8-flash` |
 | Critic | `gemini-3.6-flash` |
 
-To customize role guidance without editing code, create local UTF-8 text files and set `ARCHITECT_PROMPT_FILE`, `CODER_PROMPT_FILE`, or `CRITIC_PROMPT_FILE` in `.env`. Relative paths resolve from the backend working directory; `.harness/prompts/` is ignored by Git. Each file must be nonempty and at most 32,000 bytes. Restart after edits. Guidance is appended to the fixed JSON instructions; schema validation, approvals and file checks still apply. Prompt contents and filenames are excluded from frontend settings.
+To customize role guidance without editing code, create local UTF-8 text files and set `ARCHITECT_PROMPT_FILE`, `CODER_PROMPT_FILE`, or `CRITIC_PROMPT_FILE` in the profile `.env`. Relative file values resolve from `profile/config`; explicit process environment paths retain launch-directory semantics. Migration converts legacy relative paths to absolute paths. Each file must be nonempty and at most 32,000 bytes. Restart after edits. Guidance is appended to the fixed JSON instructions; schema validation, approvals and file checks still apply. Prompt contents and filenames are excluded from frontend settings.
 
 The current implementation delegates to one coder at a time. Parallel coders/worktree integration remain a later extension.
 
