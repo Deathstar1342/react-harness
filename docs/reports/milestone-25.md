@@ -49,4 +49,3 @@ Original source [Validate 38654209027](https://github.com/Deathstar1342/react-ha
 Images were inspected for visible running/Stop/interrupted states and paired move/undone diffs; m25-process-running.png, m25-process-stopped.png, m25-move-preview.png and m25-move-undone.png remain alongside copied frozen Electron/goal screenshots. Receipt hashes are stored externally. No credentials, environment files, local databases, project content or generated build output were staged.
 
 Live STARK, untouched-device/WSL installation and human acceptance remain deferred; no credentials were supplied and no such success is claimed. Generic process uncertainty reconciliation, atomic rename/full metadata preservation and repository-wide instruction discovery are deliberate limits, not completed capabilities. Coordinator owns independent review, main integration and successor dispatch. This task does not merge main, start M26 or resume M21.
-
