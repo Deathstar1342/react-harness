@@ -5,6 +5,8 @@ const root=path.resolve(import.meta.dirname,'..'),stage=path.join(root,'build/de
 // Fixed generated directory only. Never package a checkout or a runtime profile.
 await rm(stage,{recursive:true,force:true});await mkdir(stage,{recursive:true});
 for(const name of ['desktop','server','shared','dist'])await cp(path.join(root,'build/app',name),path.join(stage,name),{recursive:true});
+execFileSync(process.execPath,[path.join(root,'scripts/build-package-lease.mjs')],{cwd:root,stdio:'inherit'});
+await cp(path.join(root,'build/native/package-lease.node'),path.join(stage,'desktop/package-lease.node'));
 const pkg=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
 const sha=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
 await writeFile(path.join(stage,'release.json'),JSON.stringify({source:sha,target:'ubuntu-24.04-x64'}));

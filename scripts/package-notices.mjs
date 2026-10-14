@@ -12,4 +12,4 @@ for(const base of ['build/app/node_modules','build/desktop-app/node_modules']){
   }}try{await walk(path.join(root,base));}catch(error){if(error.code!=='ENOENT')throw error;}
 }
 try{text+='\n## Node.js bundled runtime\n'+await readFile(root+'/build/runtime/LICENSE','utf8');}catch(error){if(error.code!=='ENOENT')throw error;}
-await writeFile(root+'/build/bundled/THIRD-PARTY-NOTICES.txt',text);
+await writeFile(root+`/build/bundled/THIRD-PARTY-NOTICES-${process.platform}.txt`,text);

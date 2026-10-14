@@ -31,6 +31,19 @@ Var PackageMutex
     ${EndIf}
     StrCpy $PackageMutex $0
   ${EndIf}
+  !ifndef BUILD_UNINSTALLER
+    InitPluginsDir
+    File /oname=$PLUGINSDIR\windows-preflight.ps1 "${PROJECT_DIR}\packaging\windows-preflight.ps1"
+    ReadRegStr $2 HKCU "Software\abysSUS\Storage" "DataFolder"
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-preflight.ps1" -DataFolder "$DataFolder" -InstallFolder "$INSTDIR" -PreviousFolder "$2"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      MessageBox MB_OK "$1" /SD IDOK
+      SetErrorLevel 76
+      Quit
+    ${EndIf}
+  !endif
 !macroend
 
 !ifndef BUILD_UNINSTALLER
@@ -82,7 +95,6 @@ Function DataLeave
       MessageBox MB_OK "The saved data folder is missing. Reconnect its drive before continuing; Setup will not create an empty replacement."
       Abort
   ${EndIf}
-  CreateDirectory "$DataFolder"
 FunctionEnd
 !macro customInstall
   ${If} $DataFolder == ""
@@ -93,8 +105,18 @@ FunctionEnd
       Quit
     ${EndIf}
   ${EndIf}
+  ClearErrors
   WriteINIStr "$INSTDIR\desktop-location.ini.new" "desktop" "path" "$DataFolder"
+  IfErrors location_failed
   Rename "$INSTDIR\desktop-location.ini.new" "$INSTDIR\desktop-location.ini"
+  IfErrors location_failed
   WriteRegStr HKCU "Software\abysSUS\Storage" "DataFolder" "$DataFolder"
+  IfErrors location_failed
+  Goto location_done
+  location_failed:
+    MessageBox MB_OK "Saving the data location failed. Setup is incomplete; inspect the application folder and retry. No profile data was moved." /SD IDOK
+    SetErrorLevel 77
+    Quit
+  location_done:
 !macroend
 !endif

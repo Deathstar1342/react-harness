@@ -14,6 +14,7 @@ function Install-Candidate {
 }
 Install-Candidate
 $env:ABYSSUS_PACKAGE_TEST_HOME = $data
+$env:ABYSSUS_TEST_INSTALLER = $setup
 node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Installed executable check failed' }
 $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru -Wait

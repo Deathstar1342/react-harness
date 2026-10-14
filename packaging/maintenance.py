@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import json
 import hashlib
+import subprocess
 
 base = Path('/var/lib/abyssus-package')
 def trusted_directory(p):
@@ -37,6 +38,8 @@ try:
     # Every launcher checks this marker under its shared lease. Interrupted dpkg
     # leaves it in place; only successful explicit configuration clears it.
     marker = base / 'maintenance'
+    actor = sys.argv[2]
+    if actor not in ('backend', 'desktop', 'helper'): raise RuntimeError('Invalid package actor')
     if sys.argv[1] == 'finish':
         # Configuration must verify the actual installed payload before allowing
         # starts after interruption. No blind marker deletion.
@@ -45,10 +48,36 @@ try:
             p = Path('/opt/abyssus') / relative
             if '..' in Path(relative).parts or Path(relative).is_absolute() or p.is_symlink() or hashlib.sha256(p.read_bytes()).hexdigest() != digest:
                 raise RuntimeError('Installed backend payload is incomplete')
-        if marker.is_symlink(): raise RuntimeError('Untrusted maintenance marker')
-        marker.unlink(missing_ok=True)
+        source = json.loads(Path('/opt/abyssus/app/release.json').read_text())['source']
+        desktop = Path('/opt/abysSUS')
+        if desktop.exists():
+            receipt = json.loads((desktop / 'package-integrity.json').read_text())
+            for relative, digest in receipt.items():
+                p = desktop / relative
+                if '..' in Path(relative).parts or Path(relative).is_absolute() or p.is_symlink() or hashlib.sha256(p.read_bytes()).hexdigest() != digest:
+                    raise RuntimeError('Desktop package is incomplete')
+            if json.loads((desktop / 'resources/app/release.json').read_text())['source'] != source:
+                raise RuntimeError('Mismatched desktop/backend source')
+        helper_manifest = Path('/usr/share/abyssus/helper-manifest.json')
+        if helper_manifest.exists():
+            for relative, digest in json.loads(helper_manifest.read_text()).items():
+                p = Path('/usr/lib/abyssus-helper') / relative
+                if '..' in Path(relative).parts or Path(relative).is_absolute() or p.is_symlink() or hashlib.sha256(p.read_bytes()).hexdigest() != digest:
+                    raise RuntimeError('Helper package is incomplete')
+        packages = {'backend': 'abyssus-backend', 'desktop': 'react-harness', 'helper': 'abyssus-helper-staging'}
+        for key, package in packages.items():
+            if key == actor: continue  # dpkg is executing this package's configuration hook
+            if (marker / key).exists(): continue  # its durable marker still blocks all starts
+            query = subprocess.run(['/usr/bin/dpkg-query', '-W', '-f=${Status}', package], capture_output=True, text=True)
+            if query.returncode == 0 and query.stdout not in ('install ok installed', 'deinstall ok config-files', 'unknown ok not-installed'):
+                raise RuntimeError('Another package transaction is unfinished')
+        if marker.exists():
+            trusted_directory(marker)
+            (marker / actor).unlink(missing_ok=True)
+            if not any(marker.iterdir()): marker.rmdir()
     else:
-        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        trusted_directory(marker)
+        fd = os.open(marker / actor, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
         os.write(fd, b'Package maintenance incomplete. Configure or reinstall the matching packages.\n')
         os.fsync(fd)
         os.close(fd)

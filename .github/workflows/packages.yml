@@ -33,11 +33,13 @@ jobs:
           node scripts/package-manifest.mjs build/bundled
           npm run package:linux
       - name: Install actual backend and desktop in disposable runner
+        timeout-minutes: 5
         run: |
           sudo apt-get install -y ./build/bundled/abyssus-backend_0.1.0_amd64.deb
           sudo apt-get install -y ./build/release/*.deb
           xvfb-run -a node tests/packaged-smoke.ts /opt/abysSUS/abysSUS
       - name: Preserve data through package removal and reinstall
+        timeout-minutes: 5
         run: |
           mkdir -p "$HOME/abyssus-preservation"
           printf 'preserve\n' > "$HOME/abyssus-preservation/fixture"

@@ -8,26 +8,25 @@ import { DocumentGuard } from './document-guard.js';
 import { DesktopController } from './controller.js';
 import { desktopOrigin, environmentSchema, isDesktopURL, linuxPath, pickerPath, validateSender } from './policy.js';
 import { desktopResponse } from './proxy.js';
-import { packageLease } from './package-lease.js';
+import { createRequire } from 'node:module';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 app.setName('abysSUS');
 nativeTheme.themeSource='dark';
 app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}}]);
-const maintenanceLease=app.isPackaged?await packageLease():undefined;
 if(app.isPackaged&&process.platform==='linux') {
   const desktopRelease=JSON.parse(readFileSync(path.join(appRoot,'release.json'),'utf8'));
   const backendRelease=JSON.parse(readFileSync('/opt/abyssus/app/release.json','utf8'));
   if(desktopRelease.source!==backendRelease.source)throw new Error('Desktop/backend package versions differ. Install the matching reviewed package set.');
 }
-maintenanceLease?.once('exit',()=>{dialog.showErrorBox('abysSUS package guard stopped','Close the application normally before changing installation files. The package guard stopped unexpectedly.');});
-app.once('quit',()=>maintenanceLease?.stdin.end());
 let window:BrowserWindow|undefined,quitting=false,closing=false;
 const documents=new DocumentGuard();
 const controller=new DesktopController(app.isPackaged&&process.platform==='linux'?'/opt/abyssus/app':appRoot);
 const selectionSchema=z.object({environment:environmentSchema,home:linuxPath}).strict();
 if(!app.requestSingleInstanceLock())app.quit();
 else {
+  if(app.isPackaged&&!createRequire(import.meta.url)('./package-lease.node').held)throw new Error('Package maintenance exclusion is unavailable.');
+  if(app.isPackaged&&process.platform==='win32')createRequire(import.meta.url)('./bootstrap.cjs').validateLocation(app.getPath('userData'),path.dirname(process.execPath));
   app.on('second-instance',()=>{window?.show();window?.focus();});
   await app.whenReady();
   const partition=session.fromPartition('abyssus-desktop'); // in memory, one isolated application session

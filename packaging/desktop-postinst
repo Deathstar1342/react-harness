@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
-/usr/bin/python3 -I /usr/lib/abyssus/maintenance.py finish
+/usr/bin/python3 -I /usr/lib/abyssus/maintenance.py finish desktop
 update-desktop-database -q || true

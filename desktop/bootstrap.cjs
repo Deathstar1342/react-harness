@@ -3,14 +3,16 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 function within(a, b) { return a === b || a.startsWith(b + path.win32.sep); }
-function validateLocation(value, install) {
+function validateLocation(value, install, probeWrite = true) {
   if (typeof value !== 'string' || value.length > 240 || !/^[A-Za-z]:\\/.test(value) || /[\x00-\x1f<>"|?*]/.test(value) || value.slice(2).includes(':') || value.split(/[\\/]/).some(p => p === '.' || p === '..' || /[. ]$/.test(p))) throw new Error('Choose an absolute local drive folder without traversal or device paths.');
   const resolved = fs.realpathSync.native(value).replace(/\\$/, '').toLowerCase();
   if (!/^[a-z]:\\/.test(resolved) || resolved.length < 4 || !fs.statSync(value).isDirectory()) throw new Error('The saved desktop data folder is unavailable. Restore its drive or repair the location; no replacement profile was created.');
   const protectedPaths = [install, process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map(p => fs.realpathSync.native(p).replace(/\\$/, '').toLowerCase());
   if (protectedPaths.some(p => within(resolved, p) || within(p, resolved))) throw new Error('Desktop data must be separate from application and Windows installation folders, including linked folders.');
-  const probe = path.join(value, '.abyssus-write-' + crypto.randomUUID());
-  const fd = fs.openSync(probe, 'wx', 0o600); fs.closeSync(fd); fs.unlinkSync(probe);
+  if (probeWrite) {
+    const probe = path.join(value, '.abyssus-write-' + crypto.randomUUID());
+    const fd = fs.openSync(probe, 'wx', 0o600); fs.closeSync(fd); fs.unlinkSync(probe);
+  }
   return fs.realpathSync.native(value);
 }
 
@@ -32,10 +34,10 @@ function configure(app) {
     const text = bytes[0] === 255 && bytes[1] === 254 ? bytes.subarray(2).toString('utf16le') : bytes.toString('utf8');
     const match = text.match(/^\[desktop\]\r?\npath=([^\r\n]+)\r?\n?$/);
     if (!match) throw new Error('Invalid desktop location file. Repair the installation.');
-    saved = validateLocation(match[1], install);
+    saved = validateLocation(match[1], install, false);
   }
   const override = app.commandLine.getSwitchValue('user-data-dir');
-  const selected = override ? validateLocation(override, install) : saved;
+  const selected = override ? validateLocation(override, install, false) : saved;
   if (!selected || (saved && selected.toLowerCase() !== saved.toLowerCase())) throw new Error('Choose the desktop data folder in Setup. A launch override may not change the saved profile.');
   app.setPath('userData', selected);
   app.setPath('sessionData', selected);
