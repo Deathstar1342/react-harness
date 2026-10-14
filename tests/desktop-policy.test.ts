@@ -5,7 +5,8 @@ describe('desktop trust policy',()=>{
     expect(parseDistributions('* podman-machine-default Stopped 2\n Ubuntu-24.04 Stopped 2\n Debian Running 1\n Debian Running 2')).toEqual(['Ubuntu-24.04','Debian']);
   });
   it('validates sender contents, top frame and exact origin',()=>{
-    const contents={};expect(()=>validateSender({sender:contents,senderFrame:{url:'abyssus://app/',parent:null}},contents)).not.toThrow();
+    const frame={url:'abyssus://app/',parent:null},contents={mainFrame:frame};expect(()=>validateSender({sender:contents,senderFrame:frame},contents)).not.toThrow();
+    expect(()=>validateSender({sender:contents,senderFrame:{...frame}},contents)).toThrow(); // stale document, same origin/contents
     for(const url of ['file:///app','https://app','abyssus://app.evil/','abyssus://user@app/','abyssus://app:42/'])expect(isDesktopURL(url)).toBe(false);
     expect(()=>validateSender({sender:{},senderFrame:{url:'abyssus://app/',parent:null}},contents)).toThrow();
     expect(()=>validateSender({sender:contents,senderFrame:{url:'abyssus://app/',parent:{}}},contents)).toThrow();

@@ -13,7 +13,7 @@ export function isDesktopURL(raw:string):boolean {
   try {const u=new URL(raw);return u.protocol==='abyssus:'&&u.host==='app'&&!u.username&&!u.password&&!u.port;}catch{return false;}
 }
 export function validateSender(event:{sender:unknown;senderFrame:{url:string;parent:unknown}|null},contents:unknown) {
-  if(event.sender!==contents||!event.senderFrame||event.senderFrame.parent!==null||!isDesktopURL(event.senderFrame.url))throw new Error('Untrusted desktop sender');
+  if(event.sender!==contents||!event.senderFrame||event.senderFrame!==(contents as {mainFrame?:unknown}|undefined)?.mainFrame||event.senderFrame.parent!==null||!isDesktopURL(event.senderFrame.url))throw new Error('Untrusted desktop sender');
 }
 export function parseDistributions(output:string):string[] {
   return output.replaceAll('\0','').split(/\r?\n/).flatMap(line=>{
