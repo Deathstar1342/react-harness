@@ -12,6 +12,8 @@ Every required exact-source job/step verified successful: [Validate 38637910623]
 
 Integration into main is approved; publication and exact-main CI are pending. No M23 dispatch before those steps pass. Preserve M22 branch/worktree and M21's paused uncommitted work. No release publication or installed-app update.
 
+Publication checkpoint: main integration `773dbf8443ee1ea4f0a3f08a8f94f9a825bf0030` is pushed. Implementation matches independently tested `6ee864e`; only documentation differs. Fresh exact-main [Validate 38638628832](https://github.com/Deathstar1342/react-harness/actions/runs/38638628832), [Desktop 38638629114](https://github.com/Deathstar1342/react-harness/actions/runs/38638629114) and [helper 38638629041](https://github.com/Deathstar1342/react-harness/actions/runs/38638629041) are running at this checkpoint. No successor dispatch until required steps pass.
+
 ## Earlier candidate review (retained failures)
 
 Candidate source `01ff6a8fd5c74af642d521c8e0a770aa7406960f`, assigned `codex/milestone-22`, isolated worktree `8cbf`, baseline `7bee8bc`. Not accepted or integrated. M21 packaging and its separate uncommitted source/notices work remain paused and untouched.
