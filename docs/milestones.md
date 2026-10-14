@@ -26,7 +26,7 @@ Delivered on GitHub main `9a44265` on 2026-10-13: candidate `990a8e8`, merge `0b
 
 ### M17 — Sandboxed Linux tools and project-local dependencies
 
-Reviewed and integrated 2026-10-13: candidate `73f0328`, merge `ab165b6`. Independent Windows checks passed (524 tests, 32 platform/optional skips), exact candidate Linux CI passed [run 38502165612](https://github.com/Deathstar1342/react-harness/actions/runs/38502165612); main publication/CI gate is tracked in STATUS. Detailed evidence and restrictions: [M17 report](reports/milestone-17.md).
+Delivered on GitHub main `94ad705` on 2026-10-13: candidate `73f0328`, merge `ab165b6`. Independent Windows checks passed (524 tests, 32 platform/optional skips), exact main Linux CI passed [run 38502382308](https://github.com/Deathstar1342/react-harness/actions/runs/38502382308). M18 dependency released. Detailed evidence and restrictions: [M17 report](reports/milestone-17.md).
 
 - Implement a Bubblewrap-backed execution adapter around persistent shells, Python and tests. Keep existing ToolService contracts compatible where possible. All agent-controlled command descendants stay inside the boundary; a failed/unavailable sandbox must fail closed, never silently run a host shell.
 - Explicitly expose the selected project writable, private per-project dependency/cache/home/temp storage, and the minimum read-only toolchain files. Exclude application state, provider keys, personal home, host-control sockets and other projects. Handle protected credential paths and project symlinks without exposing their external targets. Verify WSL interop and Windows paths cannot bypass the boundary.
