@@ -115,8 +115,10 @@ class AptAdapter:
         requested = {p["name"]: p.get("version") for p in request["packages"]}
         for package in changes:
             require(not package.is_installed and package.marked_install and not package.marked_delete
-                    and not package.essential and not package.marked_downgrade and not package.marked_upgrade,
+                    and not package.essential and not package.marked_downgrade and not package.marked_reinstall,
                     "EXISTING_PACKAGE_CHANGE")
+            # python-apt can report marked_upgrade=True for a NEW install;
+            # absence of installed state above is the authoritative boundary.
             version = package.candidate
             require(version is not None and version.architecture in ("amd64", "all"), "UNBOUNDED_PLAN")
             if requested.get(package.name) is not None:

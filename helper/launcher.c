@@ -17,6 +17,8 @@
 static unsigned long visited = 0;
 static struct { dev_t dev; ino_t ino; } directories[50000];
 static size_t directory_count=0;
+static unsigned symlink_depth=0;
+static void hierarchy(const char *path);
 static void fail(const char *path) {
     fprintf(stderr, "UNTRUSTED_HELPER_PATH: %s\n", path);
     exit(78);
@@ -29,6 +31,19 @@ static void check_one(const char *path) {
     if (!S_ISLNK(st.st_mode) && (st.st_mode & 0022)) fail(path);
     if (S_ISDIR(st.st_mode) && getxattr(path,"system.posix_acl_default",NULL,0)>0) fail(path);
     if (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) fail(path);
+    if(S_ISLNK(st.st_mode)) {
+        char target[PATH_MAX],joined[PATH_MAX];
+        ssize_t length=readlink(path,target,sizeof(target)-1);
+        if(length<1 || length>=(ssize_t)sizeof(target)-1 || ++symlink_depth>64) fail(path);
+        target[length]=0;
+        if(target[0]=='/') hierarchy(target);
+        else {
+            const char *slash=strrchr(path,'/');
+            if(!slash || snprintf(joined,sizeof(joined),"%.*s/%s",(int)(slash-path),path,target)>=(int)sizeof(joined)) fail(path);
+            hierarchy(joined);
+        }
+        symlink_depth--;
+    }
 }
 static void hierarchy(const char *path) {
     char copy[PATH_MAX], resolved[PATH_MAX];
