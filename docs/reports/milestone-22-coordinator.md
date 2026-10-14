@@ -2,6 +2,8 @@
 
 ## Corrected source approved for integration
 
+Final integration acceptance: GitHub main `773dbf8443ee1ea4f0a3f08a8f94f9a825bf0030` is delivered. Coordinator independently verified every applicable exact-main job/step green in [Validate 38638628832](https://github.com/Deathstar1342/react-harness/actions/runs/38638628832), [Desktop Windows/Ubuntu 38638629114](https://github.com/Deathstar1342/react-harness/actions/runs/38638629114) and [helper 38638629041](https://github.com/Deathstar1342/react-harness/actions/runs/38638629041). Earlier pending-integration paragraphs below are historical checkpoints. M23 dispatch is authorized; M21 stays paused. Live STARK, actual installed-device and native-human dialog evidence remain explicitly deferred rather than implied by these passes.
+
 Final handoff `ff18d124e57978ad0764009f440e850991bdfe45`, tested source `6ee864eb182ee44a1e4059aca99b978efa6f24bb`. Independently verified that their only difference is the child report and that the source worktree was clean. The earlier findings below are retained history and are addressed in this corrected source.
 
 Coordinator reviewed the 13-file correction delta: pending transitions now clone and publish after COMMIT across interruption/approval/install/stale-file/refresh branches; result schemas bound UTF-8 output and finite JSON data and retain uncertainty after malformed post-effect results; empty call lists with ordinary replies are accepted without execution; one-time/normal event listener semantics survive isolated subscriber failures. Meaningful tests cover after-write/pre-COMMIT faults, post-effect uncertainty without replay, independent helper-state success after failed native result persistence, ordinary zero-call replies and diagnostic lane presentation.
