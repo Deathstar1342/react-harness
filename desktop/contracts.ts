@@ -8,6 +8,7 @@ export interface DesktopStatus {
   selection?:DesktopSelection;
   message:string;
   sessionId?:string;
+  transitioning?:boolean;
   checks?:{ name:string; ok:boolean; message:string }[];
   helper?:{available:boolean; target?:string};
 }

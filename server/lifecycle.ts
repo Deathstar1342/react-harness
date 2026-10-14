@@ -25,16 +25,18 @@ export class BackendLifecycle {
   private state:BackendIdentity['state']='starting';
   private used=new Map<string,number>();
   private shutdown?:Promise<void>;
+  private failureListeners=new Set<()=>void>();
   constructor(readonly profileId:string,key=randomBytes(32).toString('hex')) {
     if(!/^[a-f0-9]{64}$/.test(key))throw new Error('HARNESS_LAUNCH_KEY must be 32 random bytes encoded as lowercase hex');
     this.key=key;
   }
   ready(){this.state='ready';}
   identity():BackendIdentity{return {protocol,instanceId:this.instanceId,profileId:this.profileId,pid:process.pid,platform:process.platform,state:this.state};}
+  onFailure(listener:()=>void) {this.failureListeners.add(listener);if(this.state==='failed')listener();return()=>{this.failureListeners.delete(listener);};}
   stop(close:()=>Promise<void>):Promise<void> {
     if(this.shutdown)return this.shutdown;
     this.state='stopping';
-    this.shutdown=Promise.resolve().then(close).then(()=>{this.state='stopped';},error=>{this.state='failed';throw error;});
+    this.shutdown=Promise.resolve().then(close).then(()=>{this.state='stopped';},error=>{this.state='failed';for(const listener of this.failureListeners)try{listener();}catch{/* Observers cannot change ownership or the cleanup result. */}throw error;});
     return this.shutdown;
   }
   register(app:FastifyInstance,close:()=>Promise<void>) {
@@ -50,7 +52,7 @@ export class BackendLifecycle {
       if(this.used.size>=4096)return reply.code(429).send({error:'Too many lifecycle requests'});
       this.used.set(input.nonce,input.expiresAt);
       if(action==='shutdown') {
-        this.state='stopping';
+        if(!this.shutdown)this.state='stopping';
         reply.raw.once('finish',()=>{void this.stop(close).catch(()=>{ /* failure retains ownership */ });});
       }
       const identity=this.identity();

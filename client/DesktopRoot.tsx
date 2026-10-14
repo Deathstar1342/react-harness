@@ -34,7 +34,7 @@ export function DesktopRoot() {
     {needsSetup&&<div className={opened?'desktop-overlay':''}><main className="desktop-setup" aria-label="Desktop setup">
       <img src={logo} alt="abysSUS"/><h1>{status?.phase==='ready'?'Desktop environment':'Open your workspace'}</h1>
       <p>{status?.message??'Reading desktop setup…'}</p>
-      {opened&&status?.phase!=='ready'&&<button className="button" onClick={()=>{setShowSetup(false);setOfflineEditor(true);}}>Return to editor buffers</button>}
+      {opened&&status?.phase!=='ready'&&<button className="button" disabled={busy||status?.transitioning} onClick={()=>{setShowSetup(false);setOfflineEditor(true);}}>Return to editor buffers</button>}
       {status?.phase!=='ready'&&<form onSubmit={e=>{e.preventDefault();void run(async()=>{
         const result=await bridge.start({environment:environment==='linux'?{kind:'linux'}:{kind:'wsl',distribution:environment},home,mode,...(mode==='migrate'?{legacyRoot}:{})});setStatus(result);if(result.phase==='ready'){setOpened(true);setShowSetup(true);}
       });}}>

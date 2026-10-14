@@ -18,6 +18,10 @@ lines.once('line',async line=>{
       env:{...process.env,HARNESS_HOME:input.home,HARNESS_LAUNCH_KEY:input.key,
         ...(input.mode==='initialize'?{HARNESS_INIT:'1'}:{}),...(input.mode==='migrate'?{HARNESS_LEGACY_ROOT:input.legacyRoot}:{})}});
     process.stdout.write(JSON.stringify({address:backend.address,identity:backend.lifecycle.identity(),checks})+'\n');
+    // This private pipe belongs only to the verified launcher child. It survives
+    // HTTP listener teardown, so a rejected drain cannot become an endless wait.
+    process.stdout.on('error',()=>{});
+    backend.lifecycle.onFailure(()=>{if(!process.stdout.destroyed)process.stdout.write(JSON.stringify({type:'cleanup-failed',instanceId:backend.lifecycle.instanceId})+'\n');});
     const close=()=>{void backend.close().then(()=>process.exit(0),()=>{process.stderr.write('Backend cleanup failed; ownership retained.\n');});};
     // Main crash/pipe loss drains tools and helper calls. It never replays them.
     process.stdin.once('end',close);process.once('SIGTERM',close);process.once('SIGINT',close);

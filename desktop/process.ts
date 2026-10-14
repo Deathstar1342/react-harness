@@ -1,4 +1,14 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { Readable } from 'node:stream';
+/** Bounded private child-pipe notice, never an HTTP/model/renderer message. */
+export function observeCleanupFailure(stdout:Readable,failed:(instanceId:string)=>void) {
+  let line='',oversize=false;
+  const read=(chunk:Buffer)=>{for(const part of chunk.toString().split(/(?<=\n)/)){
+    if(!oversize){if(Buffer.byteLength(line)+Buffer.byteLength(part)>1024){oversize=true;line='';}else line+=part;}
+    if(part.endsWith('\n')){if(!oversize)try{const frame=JSON.parse(line);if(frame.type==='cleanup-failed'&&Object.keys(frame).length===2&&typeof frame.instanceId==='string'&&/^[0-9a-f-]{36}$/.test(frame.instanceId))failed(frame.instanceId);}catch{}line='';oversize=false;}
+  }};
+  stdout.on('data',read);return()=>{stdout.off('data',read);};
+}
 /** Fixed executable/argv are chosen by trusted main. Never exposed as IPC. */
 export function boundedProcess(file:string,args:string[],options:{input?:string;env?:NodeJS.ProcessEnv;timeout?:number;cwd?:string}={}):Promise<string> {
   return new Promise((resolve,reject)=>{

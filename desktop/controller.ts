@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { boundedProcess, firstLine } from './process.js';
+import { boundedProcess, firstLine, observeCleanupFailure } from './process.js';
 import { descriptorSchema, failureSchema, loopbackAddress } from './backend-wire.js';
 import { parseDistributions, startSchema } from './policy.js';
 import { signBackendRequest, verifyBackendProof } from '../server/lifecycle.js';
@@ -20,6 +20,8 @@ export class DesktopController {
   private identity?:BackendIdentity;
   private active?:BackendTarget;
   private busy=false;
+  private cleanupFailed=false;
+  private failureWaiters=new Set<()=>void>();
   constructor(private readonly appRoot:string,private readonly changed:()=>void=()=>{}){}
   target(){return this.state.phase==='ready'?this.active:undefined;}
   private wsl(){return path.join(process.env.SystemRoot??'C:\\Windows','System32','wsl.exe');}
@@ -39,6 +41,22 @@ export class DesktopController {
     if(createHash('sha256').update(readFileSync(node)).digest('hex')!==manifest.nodeSha256)throw new Error('Packaged Node runtime hash mismatch. Repair installation.');
     return {file:node,args:[path.join(this.appRoot,'desktop',entry),...args],cwd:this.appRoot};
   }
+  private trackChild(child:ChildProcessWithoutNullStreams) {
+    this.child=child;
+    this.cleanupFailed=false;
+    const unwatch=observeCleanupFailure(child.stdout,instanceId=>{
+      if(this.child!==child||(this.identity&&this.identity.instanceId!==instanceId))return;
+      this.cleanupFailed=true;this.state.phase='failed';this.state.message='Backend cleanup failed. Ownership and editor buffers remain retained. Inspect recovery before closing; no action will be replayed.';this.changed();
+      for(const failed of this.failureWaiters)failed();
+    });
+    child.stderr.on('data',()=>{});
+    child.once('close',()=>{
+      unwatch();
+      if(this.child!==child)return;this.child=undefined;this.active=undefined;this.key=undefined;this.identity=undefined;
+      const deliberate=this.state.phase==='stopping';this.state.phase=deliberate?'setup':'failed';
+      this.state.message=deliberate?'Backend stopped after local cleanup.':'Backend exited. Keep this profile selected and explicitly reopen it to inspect recovery; no actions will be replayed.';this.changed();
+    });
+    }
   async start(raw:unknown) {
     if(this.busy||this.child)throw new Error('An owned backend is still starting, running or draining. Finish its shutdown first.');
     const input=startSchema.parse(raw);this.busy=true;
@@ -50,12 +68,7 @@ export class DesktopController {
       // remain backend-only; no credentials are supplied to project processes.
       const env={...process.env};for(const name of ['NODE_OPTIONS','NODE_PATH','ELECTRON_RUN_AS_NODE','HARNESS_INIT','HARNESS_LEGACY_ROOT','HARNESS_MIGRATION_RETRY','HARNESS_LAUNCH_KEY'])delete env[name];
       const child=spawn(command.file,command.args,{cwd:command.cwd,env,windowsHide:true,stdio:'pipe'});this.child=child;
-      child.stderr.on('data',()=>{});
-      child.once('close',()=>{
-        if(this.child!==child)return;this.child=undefined;this.active=undefined;this.key=undefined;this.identity=undefined;
-        const deliberate=this.state.phase==='stopping';this.state.phase=deliberate?'setup':'failed';
-        this.state.message=deliberate?'Backend stopped after local cleanup.':'Backend exited. Keep this profile selected and explicitly reopen it to inspect recovery; no actions will be replayed.';this.changed();
-      });
+      this.trackChild(child);
       const response=firstLine(child);child.stdin.write(JSON.stringify({home:input.home,mode:input.mode,legacyRoot:input.legacyRoot,key,token})+'\n');
       const frame=await response,failure=failureSchema.safeParse(frame);
       if(failure.success){this.state.checks=failure.data.checks;throw new Error(failure.data.error);}
@@ -72,14 +85,21 @@ export class DesktopController {
   async stop() {
     if(this.busy)throw new Error('Wait for setup to finish before closing.');
     const child=this.child;if(!child)return;
+    if(this.cleanupFailed)throw new Error('Backend cleanup failed; ownership remains retained. Inspect recovery before closing.');
     this.state.phase='stopping';this.state.message='Waiting for tools and system-install calls to finish. Closing does not roll back changes.';this.changed();
-    const exited=child.exitCode!==null||child.signalCode!==null||!child.pid?Promise.resolve():once(child,'close');
+    let onExit!:()=>void,onFailure!:()=>void;
+    const completion=new Promise<void>((resolve,reject)=>{onExit=resolve;onFailure=()=>reject(new Error('Backend cleanup failed; ownership remains retained.'));child.once('close',onExit);this.failureWaiters.add(onFailure);if(child.exitCode!==null||child.signalCode!==null||!child.pid)resolve();});
+    // Register before requesting shutdown: failure can follow the ack immediately.
+    void completion.catch(()=>{});
+    try {
     if(this.key&&this.identity&&this.active) {
       const request=signBackendRequest(this.key,'shutdown',this.identity.instanceId);
       const proof=await fetch(this.active.address+'/api/backend/shutdown',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request),redirect:'error',signal:AbortSignal.timeout(5000)}).then(r=>r.json());
       if(!verifyBackendProof(this.key,'shutdown',request,proof))throw new Error('Shutdown identity could not be verified');
     } else child.stdin.end(); // Owned process pipe EOF requests cleanup; never kill by PID/port.
-    await exited;
+    await completion;
+    } catch(error) {this.state.phase='failed';this.state.message=this.cleanupFailed?'Backend cleanup failed; ownership and buffers remain retained. Inspect recovery before closing.':'Backend shutdown is unverified; ownership and buffers remain retained. Retry the close check after inspecting recovery.';this.changed();throw error;}
+    finally{child.off('close',onExit);this.failureWaiters.delete(onFailure);}
   }
   async helper(action:'setup'|'repair'|'uninstall') {
     if(this.busy||this.state.phase!=='ready'||!this.state.selection)throw new Error('Open the selected profile before helper setup.');

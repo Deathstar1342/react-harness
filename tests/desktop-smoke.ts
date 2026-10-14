@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 const root=path.resolve(import.meta.dirname,'..'),home=mkdtempSync(path.join(tmpdir(),'abyssus-electron-'));
 mkdirSync(path.join(root,'test-results'),{recursive:true});
 const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],chromiumSandbox:true,cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home,MODEL_STREAMING:'false'},timeout:30000});
@@ -135,6 +136,19 @@ try {
       await page.screenshot({path:path.join(root,'test-results/electron-linux-connected.png')});
       console.log('PASS real Linux staged Node/SQLite/PTY prerequisites, authenticated API+streaming SSE, unauthenticated denial, native-picker cancellation adapter and dirty setup guard');
       console.log('CHECK waiting deliberate backend shutdown');
+      await app.evaluate(async(_electron,url)=>{
+        const {DesktopController}=await import(url),original=DesktopController.prototype.stop;
+        const probe=globalThis as unknown as {m20Stopped?:boolean;m20StopRelease?:()=>void};probe.m20Stopped=false;
+        DesktopController.prototype.stop=async function(){DesktopController.prototype.stop=original;await original.call(this);probe.m20Stopped=true;await new Promise<void>(resolve=>{probe.m20StopRelease=resolve;});};
+      },pathToFileURL(path.join(root,'build/app/desktop/controller.js')).href);
+      await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());
+      await expect.poll(()=>app.evaluate(()=>Boolean((globalThis as unknown as {m20Stopped?:boolean}).m20Stopped))).toBe(true);
+      assert.equal(await page.evaluate(()=>document.documentElement.inert),true);
+      await page.evaluate(()=>window.abyssusDesktop!.dirty(true));
+      await app.evaluate(()=>{(globalThis as unknown as {m20StopRelease:()=>void}).m20StopRelease();});
+      await expect.poll(()=>page.evaluate(()=>document.documentElement.inert)).toBe(false);
+      assert.equal(page.isClosed(),false);await page.evaluate(()=>window.abyssusDesktop!.dirty(false));
+      console.log('PASS edit arriving during delayed cleanup vetoes destructive close and allows explicit retry');
       await close();
       app=await launch();const reopened=await app.firstWindow();
       await expect(reopened.getByLabel('Persistent profile home (Linux path)')).toHaveValue(profile);
@@ -148,10 +162,48 @@ try {
       // Each restart must replace the document, even when reopening the same profile.
       let oldSession=(await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId;
       for(const nextHome of [profile,path.join(home,'second-profile')]) {
+        if(nextHome===profile){
+          await page.getByRole('button',{name:'Toggle files',exact:true}).click();
+          await page.getByRole('button',{name:'sample.json',exact:true}).click();
+          await expect(page.locator('.monaco-editor textarea').first()).toBeVisible();
+        }
         const receipt=JSON.parse(readFileSync(path.join(profile,'backend.json'),'utf8'));
         const parent=readFileSync(`/proc/${receipt.identity.pid}/status`,'utf8').match(/^PPid:\s+(\d+)/m)?.[1];
         assert.equal(Number(parent),app.process().pid);process.kill(receipt.identity.pid,'SIGKILL');
         await expect.poll(()=>page.evaluate(()=>window.abyssusDesktop!.status()).then(s=>s.phase)).toBe('failed');
+        if(nextHome===profile){
+          await page.getByRole('button',{name:'Return to editor buffers'}).click();
+          const oldEditor=await page.locator('.monaco-editor').first().elementHandle();
+          await app.evaluate(async(_electron,url)=>{
+            const {DesktopController}=await import(url),original=DesktopController.prototype.start;
+            const probe=globalThis as unknown as {m20Prepared?:boolean;m20Release?:()=>void};probe.m20Prepared=false;
+            DesktopController.prototype.start=async function(input:unknown){
+              DesktopController.prototype.start=original;const result=await original.call(this,input);
+              probe.m20Prepared=true;await new Promise<void>(resolve=>{probe.m20Release=resolve;});return result;
+            };
+          },pathToFileURL(path.join(root,'build/app/desktop/controller.js')).href);
+          await page.evaluate(home=>{
+            (window as unknown as {m20Start?:Promise<string>}).m20Start=window.abyssusDesktop!.start({environment:{kind:'linux'},home,mode:'existing'}).then(()=> 'unexpected commit',e=>String(e));
+          },profile);
+          await expect.poll(()=>app.evaluate(()=>Boolean((globalThis as unknown as {m20Prepared?:boolean}).m20Prepared))).toBe(true);
+          assert.equal(await page.evaluate(()=>document.documentElement.inert),true);
+          assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,oldSession);
+          assert.equal(await page.evaluate(()=>fetch('/api/projects').then(r=>r.status)),503);
+          // Cross the real two-second status-poll interval; a prepared session
+          // must not remount React and lose the original editor element/buffer.
+          await page.waitForTimeout(2200);
+          assert(await oldEditor!.evaluate(element=>element.isConnected));
+          await page.evaluate(()=>window.abyssusDesktop!.dirty(true));
+          await app.evaluate(()=>{(globalThis as unknown as {m20Release:()=>void}).m20Release();});
+          const rejected=await page.evaluate(()=>(window as unknown as {m20Start:Promise<string>}).m20Start);
+          assert.match(rejected,/editor changed/);assert.equal(page.isClosed(),false);
+          assert(await oldEditor!.evaluate(element=>element.isConnected));
+          assert.equal(await page.evaluate(()=>document.documentElement.inert),false);
+          assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,oldSession);
+          await page.evaluate(()=>window.abyssusDesktop!.dirty(false));
+          await page.getByRole('button',{name:/^Desktop ·/}).click();
+          console.log('PASS delayed startup freezes input, quarantines API/session, preserves polled editor and rejects late dirty commit');
+        }
         await page.getByLabel('Persistent profile home (Linux path)').fill(nextHome);
         await page.getByLabel('Profile action').selectOption(nextHome===profile?'existing':'initialize');
         const priorPage=page,replacement=app.waitForEvent('window');
