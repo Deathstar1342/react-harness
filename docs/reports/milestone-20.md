@@ -60,7 +60,7 @@ Still actually unverified: Windows/WSL selected-distro startup/readiness/API/SSE
 
 ## Coordinator handoff
 
-Review the transport and document-session boundaries, atomic endpoint/key extension, trusted helper staging and the exact final CI evidence before integration. The additive interfaces are `PublicProviderSettings.baseUrl` / patch `baseUrl`, private desktop preload/status/session contracts and `PackageHelperClient.installationId()`; public model/runtime protocols remain compatible. Browser access now deliberately requires one-time pairing; desktop API/SSE capability remains main-owned. The narrowly authorized M19 change is fixture/test-only, not production policy.
+Review the transport and document-session boundaries, atomic endpoint/key extension, trusted helper staging and the exact final CI evidence before integration. The additive interfaces are `ProviderSettings.baseUrl` / patch `baseUrl`, private desktop preload/status/session contracts and `PackageHelperClient.installationId()`; public model/runtime protocols remain compatible. Browser access now deliberately requires one-time pairing; desktop API/SSE capability remains main-owned. The narrowly authorized M19 change is fixture/test-only, not production policy.
 
 This child owns no milestone closeout or platform waiver. Retain the isolated branch and failed evidence; leave main integration and any decision about outstanding acceptance with the coordinator/user. Heartbeat remains paused for the provisioned Windows/WSL environment gate. No successor work is started; child returns idle after handoff.
 
