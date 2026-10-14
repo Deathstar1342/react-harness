@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import type { IPty } from 'node-pty';
 import type { ToolContext } from '../../shared/types.js';
 import { rootPathSync, key, ToolError } from './paths.js';
+import { LinuxSandbox, type SandboxLaunch } from './sandbox.js';
 
 export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const result: Record<string, string> = {};
@@ -12,7 +13,7 @@ export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Recor
   return { ...result, TERM: 'dumb', PS1: '', PS2: '', PROMPT_COMMAND: '', NO_COLOR: '1' };
 }
 export interface CommandResult { output: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean; truncated?: boolean; error?: string; backgroundPids?: number[]; shellReset?: boolean }
-export interface ShellOptions { maxOutputBytes: number; maxQueue: number; maxSessions: number; defaultTimeoutMs: number; maxTimeoutMs: number; shell: string }
+export interface ShellOptions { maxOutputBytes: number; maxQueue: number; maxSessions: number; defaultTimeoutMs: number; maxTimeoutMs: number; shell: string; sandbox?: LinuxSandbox }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 class PersistentShell {
   private active?: { nonce: string; output: string; buffer: string; bytes: number; truncated: boolean; finish: (result: CommandResult) => void; onOutput?: (output: string) => void };
@@ -20,25 +21,29 @@ class PersistentShell {
   private terminated = false;
   private backgroundPids: number[] = [];
   get hasBackgroundWork(): boolean {
-    return this.backgroundPids.some(pid=>{try {process.kill(pid,0);return true;} catch(error) {return (error as NodeJS.ErrnoException).code!=='ESRCH';}});
+    // These are namespace PIDs, never signal/probe them as host PIDs.
+    return this.backgroundPids.length>0;
   }
   private readyResolve?: () => void;
   private readyReject?: (error: Error) => void;
   private startup = '';
   private readyNonce = randomBytes(24).toString('hex');
   private disposables: { dispose(): void }[] = [];
-  private constructor(readonly pty: IPty, private limit: number) {}
+  private constructor(readonly pty: IPty, private limit: number, private launch:SandboxLaunch) {}
   static async create(root: string, options: ShellOptions): Promise<PersistentShell> {
     if (process.platform !== 'linux') throw new ToolError('Persistent shells require Linux/WSL and optional node-pty. Start this backend inside a Linux/WSL environment.', 'PTY_UNAVAILABLE');
     let native;
     try { native = await import('node-pty'); } catch { throw new ToolError('node-pty is unavailable. Install optional dependencies and build prerequisites in Linux/WSL, then restart the backend.', 'PTY_UNAVAILABLE'); }
+    if(options.shell!=='/bin/bash' && options.shell!=='/usr/bin/bash')throw new ToolError('Only the trusted distro bash is supported.','SANDBOX_UNAVAILABLE');
+    const launch=await (options.sandbox ?? new LinuxSandbox()).launch(root,['/usr/bin/bash','--noprofile','--norc','--noediting','-i'],true);
     let terminal: IPty;
-    try { terminal = native.spawn(options.shell, ['--noprofile', '--norc', '--noediting', '-i'], { cwd: root, env: childEnvironment(), name: 'dumb', cols: 120, rows: 30 }); }
-    catch { throw new ToolError('Cannot start bash PTY. Verify bash, node-pty, and Linux build prerequisites.', 'PTY_UNAVAILABLE'); }
-    const session = new PersistentShell(terminal, options.maxOutputBytes);
+    try { terminal = native.spawn(launch.file, launch.args, { cwd: '/', env: launch.env, name: 'dumb', cols: 120, rows: 30 }); }
+    catch { await launch.close();throw new ToolError('Cannot start sandbox PTY. Verify Bubblewrap, user namespaces, socat and node-pty. Host execution is disabled.', 'SANDBOX_UNAVAILABLE'); }
+    const session = new PersistentShell(terminal, options.maxOutputBytes,launch);
     session.disposables.push(terminal.onData(data => session.receive(data)), terminal.onExit(({ exitCode }) => {
       session.dead = true;
-      session.readyReject?.(new ToolError('Shell exited during startup.', 'PTY_UNAVAILABLE'));
+      void launch.close();
+      session.readyReject?.(new ToolError('Sandbox startup failed. Verify unprivileged user namespaces, Bubblewrap and socat; host execution is disabled.', 'SANDBOX_UNAVAILABLE'));
       session.active?.finish({ output: session.active.output, truncated:session.active.truncated, exitCode, error: 'Persistent shell exited before a command boundary; outcome may be uncertain. Shell state was lost.', shellReset: true });
     }));
     await new Promise<void>((resolve, reject) => {
@@ -123,6 +128,7 @@ class PersistentShell {
       this.dead = true;
       try { process.kill(-this.pty.pid, 'SIGKILL'); } catch { /* May already have exited. */ }
       try { this.pty.kill('SIGKILL'); } catch { /* May already have exited. */ }
+      void this.launch.close();
     }
   }
   dispose(): void {
@@ -133,6 +139,7 @@ class PersistentShell {
 }
 export class ShellPool {
   private sessions = new Map<string, PersistentShell>();
+  private layouts = new Map<string,string>();
   private queues = new Map<string, { tail: Promise<void>; count: number; generation: number }>();
   private disposed = false;
   constructor(readonly options: ShellOptions) {}
@@ -149,8 +156,10 @@ export class ShellPool {
       if (this.disposed || context.signal?.aborted) return { output: '', cancelled: true, error: 'Cancelled before execution.' };
       if (generation !== queue.generation) return { output: '', error: 'A prior command lost shell state; queued command was not executed. Submit again explicitly.', shellReset: true };
       let session = this.sessions.get(id);
+      const layout=(this.options.sandbox ?? new LinuxSandbox()).layout(root).stamp;
+      if(session && this.layouts.get(id)!==layout){session.dispose();this.sessions.delete(id);queue.generation++;return {output:'',error:'Protected project layout changed; shell discarded. Submit explicitly to start a fresh sandbox.',shellReset:true};}
       if (session && !session.alive) { session.dispose(); this.sessions.delete(id); queue.generation++; return { output: '', error: 'Shell exited between commands. Submit again explicitly to start a fresh shell.', shellReset: true }; }
-      if (!session) { session = await PersistentShell.create(root, this.options); this.sessions.set(id, session); }
+      if (!session) { session = await PersistentShell.create(root, this.options); this.sessions.set(id, session);this.layouts.set(id,layout); }
       if (this.disposed) { session.dispose(); this.sessions.delete(id); return { output: '', cancelled: true, error: 'Tool service disposed before execution.' }; }
       await beforeRun?.();
       const outcome = await session.run(command, Math.min(timeoutMs, this.options.maxTimeoutMs), context.signal, context.onOutput);
@@ -171,23 +180,23 @@ export class ShellPool {
   async dispose(): Promise<void> { this.disposed = true; for (const session of this.sessions.values()) session.dispose(); await Promise.all([...this.queues.values()].map(q => q.tail)); this.sessions.clear(); this.queues.clear(); }
 }
 // Direct execution is reserved for fixed, read-only Git argv; model commands use the PTY.
-export async function gitCommand(root: string, args: string[], maxBytes: number, signal?: AbortSignal): Promise<CommandResult> {
+export async function gitCommand(root: string, args: string[], maxBytes: number, signal?: AbortSignal, sandbox=new LinuxSandbox()): Promise<CommandResult> {
   if (signal?.aborted) return { output: '', cancelled: true };
   // Git diff/status may execute configured clean filters even with --no-textconv.
   // Discover only config key names, never values (which may contain credentials).
   const overrides: string[] = [];
   if (args[0] !== 'config') {
-    const config = await gitCommand(root, ['config', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(clean|smudge|process|required)$'], maxBytes, signal);
+    const config = await gitCommand(root, ['config', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(clean|smudge|process|required)$'], maxBytes, signal,sandbox);
     if (config.error || config.cancelled || config.timedOut || (config.exitCode !== 0 && config.exitCode !== 1)) return { output: '', error: 'Cannot safely inspect Git filter configuration.' };
     for (const name of new Set(config.output.split('\0').filter(Boolean).map(key => key.replace(/\.(clean|smudge|process|required)$/, '')))) {
       for (const operation of ['clean', 'smudge', 'process']) overrides.push('-c', `${name}.${operation}=`);
       overrides.push('-c', `${name}.required=false`);
     }
   }
+  const launch=await sandbox.launch(root,['/usr/bin/git','--no-optional-locks','--literal-pathspecs','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.hooksPath=/dev/null',...overrides,...args],false,true);
   return new Promise(resolve => {
     let output = '', bytes = 0, truncated = false, done = false;
-    const env = { ...childEnvironment(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0' };
-    const child = spawn('git', ['--no-optional-locks', '--literal-pathspecs', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...overrides, ...args], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(launch.file,launch.args,{cwd:'/',env:launch.env,stdio:['ignore','pipe','pipe']});
     const finish = (result: CommandResult) => { if (done) return; done = true; clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(result); };
     const abort = () => { child.kill(); finish({ output, cancelled: true, error: 'Git command cancelled.' }); };
     const timer = setTimeout(() => { child.kill(); finish({ output, timedOut: true, error: 'Git command timed out.' }); }, 15000);

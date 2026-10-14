@@ -102,7 +102,7 @@ describe('workspace file correctness', () => {
 });
 
 describe('read-only Git and environment', () => {
-  it('preserves dirty work and excludes credential content from status and staged/unstaged diffs', async () => {
+  it.skipIf(process.platform !== 'linux')('preserves dirty work and excludes credential content from status and staged/unstaged diffs', async () => {
     git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
     await writeFile(path.join(root, 'a.txt'), 'old\n'); await writeFile(path.join(root, '.env'), 'SECRET=old\n');
     git('add', '.'); git('commit', '-m', 'base');
@@ -114,7 +114,7 @@ describe('read-only Git and environment', () => {
     expect(diff.ok).toBe(true); expect(diff.output).toContain('+manual'); expect(diff.output).toContain('+staged'); expect(diff.output).not.toContain('SECRET');
     expect(await readFile(path.join(root, 'a.txt'), 'utf8')).toBe('manual\n');
   });
-  it('does not invoke repository clean filters during read-only Git tools', async () => {
+  it.skipIf(process.platform !== 'linux')('does not invoke repository clean filters during read-only Git tools', async () => {
     git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
     await writeFile(path.join(root, 'a.txt'), 'old\n'); git('add', '.'); git('commit', '-m', 'base');
     await writeFile(path.join(root, '.gitattributes'), '*.txt filter=evil\n');

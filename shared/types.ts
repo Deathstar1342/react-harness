@@ -39,6 +39,8 @@ export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }
 export interface TestReport { id: string; runner: string; command: string; createdAt: string; status: 'passed' | 'failed' | 'error' | 'cancelled'; tests: TestCase[]; output: string; exitCode?: number }
 export interface ToolService {
+  /** Trusted backend-only policy, never accepted from model/browser input. */
+  configureSandbox?(policy:{home:string;protectedPaths:string[];projects:()=>string[]}):void;
   inspect(context: ToolContext, action: Action): Promise<ToolInspection>;
   execute(context: ToolContext, action: Action): Promise<ToolResult>;
   read(root: string, path: string): Promise<FileSnapshot>;

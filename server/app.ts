@@ -2,9 +2,7 @@ import Fastify from 'fastify';
 import staticFiles from '@fastify/static';
 import { z } from 'zod';
 import { existsSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, realpath, readdir, stat } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { mkdir, realpath, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ServerResponse } from 'node:http';
 import type { Config } from './config.js';
@@ -19,15 +17,18 @@ import { Changes } from './changes.js';
 import { Removal } from './removal.js';
 import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
-import { installationRoot } from './locations.js';
+import { installationRoot, applicationHome } from './locations.js';
+import { LinuxSandbox } from './tools/sandbox.js';
 import type { BackendLifecycle } from './lifecycle.js';
 
-const executeFile = promisify(execFile);
 const approvalMode = z.enum(['autonomous','balanced','review']);
 export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>} }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
+  const sandbox=new LinuxSandbox();
+  const sandboxPolicy={home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
+  sandbox.configure(sandboxPolicy);tools.configureSandbox?.(sandboxPolicy);
   store.initializeModels(config.models);
   store.recover();
   const runtime = new Runtime(store,provider,tools,config,hooks);
@@ -175,11 +176,16 @@ export async function createApp(options: AppOptions) {
     if (body.mode==='import' && !body.path) throw new Error('Select the existing project folder to import');
     if (body.path && (!path.isAbsolute(body.path) || body.path.includes('\0'))) throw new Error('Use an absolute project folder path');
     let root = body.path ? path.resolve(body.path) : await locations.allocate(body.name);
+    sandbox.validateRoot(root);
     if (root === path.parse(root).root) throw new Error('Choose a project folder, not the filesystem root');
     if (body.mode === 'create') {
       if (existsSync(root) && (await readdir(root)).length) throw new Error('New project folder must be empty; import an existing project instead');
       await mkdir(root,{recursive:true});
-      await executeFile('git',['init','--initial-branch=main',root],{timeout:15000,windowsHide:true});
+      // Empty repositories have a fixed portable layout. Do not run host Git:
+      // ambient templates/config can execute or copy untrusted user content.
+      for(const directory of ['objects','refs/heads','refs/tags'])await mkdir(path.join(root,'.git',directory),{recursive:true});
+      await writeFile(path.join(root,'.git','HEAD'),'ref: refs/heads/main\n',{flag:'wx'});
+      await writeFile(path.join(root,'.git','config'),'[core]\n\trepositoryformatversion = 0\n\tbare = false\n',{flag:'wx'});
     } else if (!(await stat(root)).isDirectory()) throw new Error('Project path must be a directory');
     root = await realpath(root);
     if (root === path.parse(root).root) throw new Error('Choose a project folder, not the filesystem root');
