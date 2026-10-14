@@ -273,14 +273,14 @@ it.skipIf(process.platform!=='linux')('scoped PTY cleanup preserves sibling sess
   expect((await t.tools.execute(otherProject,shell('export REMOVAL_TEST=other-project'))).ok).toBe(true);
   await expect(t.removal.project(t.project.id,{mode:'disk',canonicalPath:t.root,confirmationToken:'invalid'})).rejects.toThrow('confirmation');
   expect((await t.tools.execute(context,shell('printf "%s" "$REMOVAL_TEST"'))).output).toContain('first');
-  t.tools.removeScope(t.root,t.chat.id,()=>{});
+  await t.tools.removeScope(t.root,t.chat.id,()=>{});
   expect((await t.tools.execute(context,shell('printf "%s" "${REMOVAL_TEST-fresh}"'))).output).toContain('fresh');
   expect((await t.tools.execute(sibling,shell('printf "%s" "$REMOVAL_TEST"'))).output).toContain('sibling');
   const running=t.tools.execute(context,shell('sleep 0.2'));expect(()=>t.tools.removeScope(t.root,undefined,()=>{})).toThrow('pending');await running;
   expect((await t.tools.execute(context,shell('sleep 30 &'))).ok).toBe(true);
   expect(()=>t.tools.removeScope(t.root,undefined,()=>{})).toThrow('background');
   expect((await t.tools.execute(context,shell('kill $(jobs -pr); wait'))).ok).toBe(true);
-  t.tools.removeScope(t.root,undefined,()=>{});
+  await t.tools.removeScope(t.root,undefined,()=>{});
   expect((await t.tools.execute(otherProject,shell('printf "%s" "$REMOVAL_TEST"'))).output).toContain('other-project');
 });
 

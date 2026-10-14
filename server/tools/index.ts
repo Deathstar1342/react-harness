@@ -38,20 +38,24 @@ export class WorkspaceTools implements ToolService {
   private shells: ShellPool;
   readonly sandbox = new LinuxSandbox();
   private disposed = false;
+  private removing=new Set<string>();
   private operations = new Map<string,number>();
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
     this.sandbox.validateRoot(root);
     const id = key(path.resolve(root));
+    if(this.removing.has(id))throw new ToolError('Workspace cleanup is pending.','CONFLICT');
     this.operations.set(id,(this.operations.get(id) ?? 0)+1);
     try { return await operation(); }
     finally { const count = this.operations.get(id)!-1; if (count) this.operations.set(id,count); else this.operations.delete(id); }
   }
-  removeScope<T>(root: string, chatId: string | undefined, mutation: () => T): T {
+  removeScope<T>(root: string, chatId: string | undefined, mutation: () => T): Promise<T> {
     this.check();
-    if (this.operations.has(key(path.resolve(root)))) throw new ToolError('A workspace operation is still pending.','CONFLICT');
+    const id=key(path.resolve(root));
+    if (this.operations.has(id) || this.removing.has(id)) throw new ToolError('A workspace operation is still pending.','CONFLICT');
     this.files.assertRemovable(root);
-    this.shells.removeScope(root,chatId);
-    return mutation();
+    const cleanup=this.shells.removeScope(root,chatId);
+    this.removing.add(id);
+    return cleanup.then(()=>{this.files.assertRemovable(root);return mutation();}).finally(()=>this.removing.delete(id));
   }
   private maxOutputBytes: number;
   private maxReportBytes: number;
@@ -63,12 +67,12 @@ export class WorkspaceTools implements ToolService {
     this.shells = new ShellPool({ maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash', sandbox:this.sandbox });
   }
   configureSandbox(policy:SandboxPolicy){this.sandbox.configure(policy);}
-  resetSandbox(root:string){this.removeScope(root,undefined,()=>this.sandbox.reset(root));}
+  resetSandbox(root:string){return this.removeScope(root,undefined,()=>this.sandbox.reset(root));}
   private check(): void { if (this.disposed) throw new ToolError('Tool service has been disposed.'); }
   read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.tracked(root,()=>this.files.read(root, path)); }
   list(root: string, path = '') { this.check(); return this.tracked(root,()=>this.files.list(root, path)); }
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.tracked(root,()=>this.files.save(root, path, content, baseHash, owner)); }
-  setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); this.sandbox.validateRoot(root);this.files.setDirty(root, path, owner, dirty); }
+  setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); if(this.removing.has(key(rootPathSync(root))))throw new ToolError('Workspace cleanup is pending.','CONFLICT');this.sandbox.validateRoot(root);this.files.setDirty(root, path, owner, dirty); }
   restore(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void) {
     this.check();
     return this.tracked(root,()=>this.files.save(root, path, before.content, expectedHash, undefined, beforeMutation, before.hash === null));

@@ -17,7 +17,7 @@ export class LinuxSandbox {
   configure(policy:SandboxPolicy){this.policy=policy;}
   validateRoot(input:string):string {
     const root=canonical(path.resolve(input));
-    const protectedPaths=[this.policy.home,installationRoot,...this.policy.protectedPaths].map(p=>canonical(path.resolve(p)));
+    const protectedPaths=[this.policy.home,installationRoot,path.dirname(path.dirname(realpathSync(process.execPath))),...this.policy.protectedPaths].map(p=>canonical(path.resolve(p)));
     if([path.parse(root).root,canonical(homedir())].some(p=>inside(root,p)) || protectedPaths.some(p=>overlap(root,p)))throw new ToolError('Project overlaps application, configuration, home or state paths. Select a separate project folder.','SANDBOX_UNSAFE_PROJECT');
     if(process.platform==='linux' && ['/usr','/bin','/sbin','/lib','/lib64','/etc','/proc','/sys','/dev','/run','/mnt','/media','/opt'].some(p=>overlap(root,p)))throw new ToolError('System, mounted Windows and toolchain roots cannot be projects. Select a Linux project folder.','SANDBOX_UNSAFE_PROJECT');
     if(this.policy.projects().map(p=>canonical(path.resolve(p))).some(p=>p!==root && overlap(root,p)))throw new ToolError('Project overlaps another registered project. Select separate project folders.','SANDBOX_UNSAFE_PROJECT');
@@ -26,8 +26,8 @@ export class LinuxSandbox {
   /** Scan before each command; mount masks enforce existing protected paths.
    * Concurrent trusted host writes introducing secrets/links require stopping
    * execution. This is not a defense against a hostile same-user host process. */
-  layout(input:string,git=false):{root:string;masks:{path:string;directory:boolean}[];stamp:string} {
-    const root=this.validateRoot(input),masks:{path:string;directory:boolean}[]=[];
+  layout(input:string,git=false):{root:string;masks:{path:string;directory:boolean;identity:string}[];stamp:string} {
+    const root=this.validateRoot(input),masks:{path:string;directory:boolean;identity:string}[]=[];
     if(!lstatSync(root).isDirectory() || canonical(root)!==root)throw new ToolError('Project root is not a canonical directory.');
     if(process.platform==='linux') {
       const mounts=readFileSync('/proc/self/mountinfo','utf8').trim().split('\n').map(line=>line.split(' ')[4].replace(/\\([0-7]{3})/g,(_,v:string)=>String.fromCharCode(parseInt(v,8))));
@@ -38,13 +38,14 @@ export class LinuxSandbox {
       if(++count>200_000 || depth>128)throw new ToolError('Sandbox project scan limit exceeded.','SANDBOX_UNSAFE_PROJECT');
       const stat=lstatSync(file),name=path.basename(file);
       if(stat.isSymbolicLink()) {
+        if(isProtected(name))throw new ToolError('Protected symlinks are unsupported; replace them with a regular protected file or directory before execution.','SANDBOX_UNSAFE_PROJECT');
         const target=canonical(file);
         if(!inside(root,target) && !(process.platform==='linux' && ['/usr/bin','/usr/lib','/bin','/lib'].some(p=>inside(p,target))))throw new ToolError('External project symlink is unsupported; remove it before execution.','SANDBOX_UNSAFE_PROJECT');
         return;
       }
       if(!stat.isDirectory() && (!stat.isFile() || stat.nlink>1))throw new ToolError('Hardlinks, sockets and special project files are unsupported.','SANDBOX_UNSAFE_PROJECT');
       const protectedName=isProtected(name) && !(git && name==='.git');
-      if(file!==root && protectedName){masks.push({path:file,directory:stat.isDirectory()});return;}
+      if(file!==root && protectedName){masks.push({path:file,directory:stat.isDirectory(),identity:`${stat.dev}:${stat.ino}:${stat.birthtimeMs}`});return;}
       if(stat.isDirectory())for(const child of readdirSync(file))visit(path.join(file,child),depth+1);
     };
     visit(root,0);
@@ -72,10 +73,10 @@ export class LinuxSandbox {
     const layout=this.layout(root,git);
     for(const file of ['/usr/bin/bwrap','/usr/bin/bash','/usr/bin/socat'])if(!existsSync(file))throw new ToolError('Sandbox prerequisites missing: install Bubblewrap, socat, bash and Python venv through trusted setup. Host execution is disabled.','SANDBOX_UNAVAILABLE');
     const base=this.storage(layout.root);
-    const args=['--unshare-all','--die-with-parent','--new-session','--disable-userns','--cap-drop','ALL','--clearenv'];
+    const args=['--unshare-all','--unshare-user','--die-with-parent','--new-session','--disable-userns','--cap-drop','ALL','--clearenv'];
     // Distro-managed tools only. No /usr/local, personal prefixes, host /etc,
     // /proc, /sys, /run, network, interop or parent-home bind.
-    for(const dir of ['/usr/bin','/usr/lib','/usr/lib64','/usr/share/nodejs','/usr/share/git-core','/usr/share/zoneinfo'])if(existsSync(dir))args.push('--ro-bind',dir,dir);
+    for(const dir of ['/usr/bin','/usr/lib','/usr/lib64','/usr/share/nodejs','/usr/share/git-core','/usr/share/zoneinfo','/usr/share/python-wheels','/usr/share/python3'])if(existsSync(dir))args.push('--ro-bind',dir,dir);
     for(const [dest,source] of [['/bin','usr/bin'],['/lib','usr/lib'],['/lib64','usr/lib64']])if(existsSync(dest))args.push('--symlink',source,dest);
     // The backend's exact Node binary and adjacent npm distribution; no whole
     // toolcache/personal directory is exposed. Setup owns these trusted files.

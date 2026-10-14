@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink, rename } from 'node:fs/promises';
+import { readdirSync, readlinkSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -125,7 +126,7 @@ PY`);
     const use=await run(`node -e "if(!require('is-number')(42)) process.exit(1)" && .venv/bin/python -c "import six; print(six.__version__)"`);expect(use.ok,use.output).toBe(true);
     await run('exit 0');await run('true'); // acknowledge uncertain shell exit
     const again=await run('.venv/bin/python -c "import six; print(six.__version__)" && test -d node_modules/is-number');expect(again.ok,again.output).toBe(true);
-    tools.resetSandbox(root);expect(await readFile(path.join(root,'package.json'),'utf8')).toContain('is-number');
+    await tools.resetSandbox(root);expect(await readFile(path.join(root,'package.json'),'utf8')).toContain('is-number');
     const afterReset=await run('.venv/bin/python -c "import six"');expect(afterReset.ok,afterReset.output).toBe(true);
   },180_000);
   it('runs hostile offline npm install hooks inside the same boundary',async()=>{
@@ -137,11 +138,34 @@ PY`);
   });
   it('kills setsid/double-fork descendants on cancellation and revokes bridge tunnels',async()=>{
     const {tools,context,root}=await execution();const controller=new AbortController();
+    let ready=false;const descendants:number[]=[],sockets:string[]=[];
     const code=`import os,time,pathlib\nif os.fork()==0:\n os.setsid()\n if os.fork()==0:\n  pathlib.Path('child-ready').write_text('yes')\n  time.sleep(2)\n  pathlib.Path('escaped-after-cancel').write_text('bad')\n  os._exit(0)\n os._exit(0)\nwhile not pathlib.Path('child-ready').exists(): time.sleep(.01)\nprint('READY',flush=True)\ntime.sleep(30)`;
-    const result=await tools.execute({...context,signal:controller.signal,onOutput:text=>{if(text.includes('READY'))controller.abort();}},{name:'execute_python',args:{code,timeoutMs:8000}});
-    expect(result.ok).toBe(false);await new Promise(r=>setTimeout(r,2500));await expect(readFile(path.join(root,'escaped-after-cancel'))).rejects.toThrow();
+    const result=await tools.execute({...context,signal:controller.signal,onOutput:text=>{if(text.includes('READY')){
+      ready=true;
+      for(const pid of readdirSync('/proc').filter(p=>/^\d+$/.test(p))){
+        try{if(readlinkSync(`/proc/${pid}/cwd`)===root)descendants.push(Number(pid));}catch{}
+        try{const argv=readFileSync(`/proc/${pid}/cmdline`,'utf8').split('\0');if(argv.includes(root) && argv.includes('/usr/bin/bwrap'))sockets.push(...argv.filter(a=>a.startsWith('/tmp/abyssus-registry-')).map(a=>path.join(a,'proxy.sock')));}catch{}
+      }
+      controller.abort();
+    }}},{name:'execute_python',args:{code,timeoutMs:8000}});
+    expect(ready,result.output).toBe(true);expect(await readFile(path.join(root,'child-ready'),'utf8')).toBe('yes');expect(descendants.length).toBeGreaterThanOrEqual(3);expect(sockets.length).toBeGreaterThan(0);
+    expect(result.ok).toBe(false);for(const socket of sockets)expect(existsSync(socket)).toBe(false);
+    await new Promise(r=>setTimeout(r,2500));for(const pid of descendants)expect(existsSync(`/proc/${pid}`),`host descendant ${pid}`).toBe(false);await expect(readFile(path.join(root,'escaped-after-cancel'))).rejects.toThrow();
   });
   it('cannot create nested user namespaces or recover host execution',async()=>{
-    const {run}=await execution();const result=await run('unshare -Ur /usr/bin/true');expect(result.ok).toBe(false);
+    const {run}=await execution();const result=await run('printf NAMESPACE_READY; unshare -Ur /usr/bin/true');expect(result.output).toContain('NAMESPACE_READY');expect(result.ok).toBe(false);
+  });
+  it('rejects internal protected symlinks before any project code executes',async()=>{
+    const {root,run}=await execution();await writeFile(path.join(root,'internal'),'secret');await symlink('internal',path.join(root,'.env'));
+    const result=await run('cat .env; touch executed');expect(result.ok).toBe(false);expect(result.output).toContain('Protected symlinks');expect(result.output).not.toContain('secret');expect(existsSync(path.join(root,'executed'))).toBe(false);
+  });
+  it('discards idle sessions after atomic protected file and directory replacement',async()=>{
+    const {root,run}=await execution();await writeFile(path.join(root,'.env'),'first-secret');await mkdir(path.join(root,'.ssh'));await writeFile(path.join(root,'.ssh','key'),'first-key');
+    expect((await run('test ! -s .env && test -z "$(ls -A .ssh)"')).ok).toBe(true);
+    await writeFile(path.join(root,'replacement'),'new-secret');await rename(path.join(root,'replacement'),path.join(root,'.env'));
+    const changed=await run('cat .env');expect(changed.ok).toBe(false);expect(changed.output).toContain('layout changed');expect(changed.output).not.toContain('new-secret');
+    expect((await run('test ! -s .env')).ok).toBe(true);
+    await rename(path.join(root,'.ssh'),path.join(root,'.ssh-old'));await mkdir(path.join(root,'.ssh'));await writeFile(path.join(root,'.ssh','key'),'new-key');
+    expect((await run('cat .ssh/key')).output).toContain('layout changed');expect((await run('test -z "$(ls -A .ssh)"')).ok).toBe(true);
   });
 });

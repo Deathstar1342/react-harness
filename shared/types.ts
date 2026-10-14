@@ -48,8 +48,9 @@ export interface ToolService {
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot>;
   setDirty(root: string, path: string, owner: string, dirty: boolean): void;
   restore?(root: string, path: string, before: FileSnapshot, expectedHash: string, beforeMutation: () => void): Promise<FileSnapshot>;
-  // Trusted synchronous lifecycle boundary; reject active operations and dirty leases.
-  removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T;
+  // Trusted lifecycle boundary; reject active operations/leases, await resource
+  // teardown, then revalidate and invoke the mutation synchronously under a gate.
+  removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T | Promise<T>;
   dispose(): Promise<void>;
 }
 export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string }
