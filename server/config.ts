@@ -10,13 +10,20 @@ export interface Config {
   appHome?: string;
   limits: PublicSettings['limits']; contextLimits: Record<AgentRole, number>; maxOutputTokens: number;
 }
+export function normalizeProviderEndpoint(input:string):string {
+  if(input.length>2048||input!==input.trim()||/[\x00-\x20\x7f\u2028\u2029\\?#]/.test(input))throw new Error('STARK_BASE_URL must be a bounded single-line URL without whitespace, query or fragment');
+  if(!input)return '';
+  const url=new URL(input);
+  if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('STARK_BASE_URL must be HTTP(S) without credentials, query or fragment');
+  return input.replace(/\/+$/,'');
+}
 export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory = process.cwd()): Config {
   const positive = (key: string, fallback: number) => {
     const value = Number(env[key] ?? fallback);
     if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${key} must be a positive integer`);
     return value;
   };
-  const baseUrl = (env.STARK_BASE_URL ?? '').replace(/\/+$/, '');
+  const baseUrl = normalizeProviderEndpoint(env.STARK_BASE_URL ?? '');
   if (baseUrl) {
     const url = new URL(baseUrl);
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('STARK_BASE_URL must be an HTTP(S) API URL without credentials, query, or fragment');

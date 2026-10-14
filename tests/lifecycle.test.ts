@@ -25,6 +25,22 @@ async function fixture() {
 async function start(options:Parameters<typeof startBackend>[0]) {const backend=await startBackend(options);cleanups.push(()=>backend.close());return backend;}
 const headers={host:'127.0.0.1','content-type':'application/json'};
 
+it('rejects encoded route aliases before auth, Host/Origin or JSON policies can be bypassed',async()=>{
+  const t=await fixture(),backend=await start(t.options);
+  const store=new Store(path.join(backend.config.dataDir,'state.sqlite'));
+  const project=store.createProject('Auth fixture',t.other),chat=store.createChat(project.id,'Events','review');store.close();
+  for(const prefix of ['/%61pi','/a%70i','/ap%69','/%61%70%69']) {
+    expect((await backend.app.inject({url:prefix+'/projects',headers})).statusCode).toBe(400);
+    expect((await backend.app.inject({method:'POST',url:prefix+'/projects',headers:{host:'evil.example',origin:'https://evil.example','content-type':'text/plain'},payload:'bad'})).statusCode).toBe(400);
+    expect((await backend.app.inject({method:'POST',url:prefix+'/auth/pair',headers,payload:{code:backend.auth.pairingCode}})).statusCode).toBe(400);
+    expect((await fetch(backend.address+prefix+`/chats/${chat.id}/events`)).status).toBe(400);
+  }
+  expect((await fetch(backend.address+`/api/chats/${chat.id}/events`)).status).toBe(401);
+  expect((await backend.app.inject({method:'POST',url:'/api/projects',headers:{host:'evil.example','content-type':'application/json'},payload:{}})).statusCode).toBe(403);
+  expect((await backend.app.inject({method:'POST',url:'/api/projects',headers:{...headers,origin:'https://evil.example'},payload:{}})).statusCode).toBe(403);
+  expect((await backend.app.inject({method:'POST',url:'/api/projects',headers:{host:'127.0.0.1','content-type':'text/plain'},payload:'bad'})).statusCode).toBe(415);
+});
+
 it('authenticates readiness without sending the key, rejects replay, expiry, wrong instance/action and origin',async()=>{
   const t=await fixture(),backend=await start(t.options),id=backend.lifecycle.instanceId,key=backend.lifecycle.key;
   const request=signBackendRequest(key,'readiness',id);
@@ -52,7 +68,7 @@ it('keeps selected data/config across cwd changes and refuses a missing database
   const id=first.profile.id;await first.close();
   writeFileSync(path.join(t.other,'.env'),'STARK_API_KEY=wrong-profile');
   const next=await start({...t.options,cwd:t.other,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT}});expect(next.profile.id).toBe(id);
-  expect((await next.app.inject({url:`/api/chats/${chat.id}`,headers})).statusCode).toBe(200);
+  expect((await next.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${next.auth.token}`}})).statusCode).toBe(200);
   await next.close();
   renameSync(path.join(next.config.dataDir,'state.sqlite'),path.join(next.config.dataDir,'retained.sqlite'));
   await expect(startBackend(t.options)).rejects.toThrow('missing');
@@ -68,14 +84,14 @@ it('migrates through startBackend, saves provider settings in stable config, and
   const project=old.createProject('Imported',t.other),chat=old.createChat(project.id,'Original','review');old.close();
   writeFileSync(path.join(t.cwd,'.env'),'ARCHITECT_MODEL=legacy\nSTARK_API_KEY=legacy-synthetic\n');
   const first=await start({...t.options,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT,HARNESS_LEGACY_ROOT:t.cwd}});
-  const response=await first.app.inject({method:'PATCH',url:'/api/provider-settings',headers,payload:{apiKey:'new-synthetic',models:{architect:'new-default'}}});
+  const response=await first.app.inject({method:'PATCH',url:'/api/provider-settings',headers:{...headers,authorization:'Bearer '+first.auth.token},payload:{apiKey:'new-synthetic',models:{architect:'new-default'}}});
   expect(response.statusCode).toBe(200);expect(response.body).not.toContain('new-synthetic');
   expect(readFileSync(first.profile.paths.configFile,'utf8')).toContain('new-synthetic');
   expect(readFileSync(path.join(t.cwd,'.env'),'utf8')).toContain('legacy-synthetic');
   await first.close();
   const next=await start({...t.options,cwd:t.other,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT}});
   expect(next.config.apiKey).toBe('new-synthetic');
-  const detail=(await next.app.inject({url:`/api/chats/${chat.id}`,headers})).json();
+  const detail=(await next.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${next.auth.token}`}})).json();
   expect(detail.chat.models.architect).toBe('legacy');
 });
 it('failed startup never replaces a working data binding; retry after port collision remains possible',async()=>{

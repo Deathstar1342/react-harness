@@ -13,7 +13,8 @@ export function fakeHelper(now:()=>number=Date.now) {
     prepare:vi.fn<InstallHelper['prepare']>(async request=>{
       const packages=request.packages.map(p=>({name:p.name,version:p.version??'1.0',architecture:'amd64',sha256:'c'.repeat(64),downloadBytes:100,installedBytes:200,requested:true,uris:[`https://archive.ubuntu.com/${p.name}.deb`],repositories:[{origin:'Ubuntu',label:'Ubuntu',archive:'noble',component:'main',site:'archive.ubuntu.com',trusted:true}]}));
       const preview:PackageHelperRecord['preview']={target:structuredClone(target),packages,stateDigest:'d'.repeat(64),repositoryDigest:'e'.repeat(64),impact:{newPackages:packages.length,downloadBytes:packages.length*100,installedBytes:packages.length*200,removals:0,upgrades:0,downgrades:0,maintainerScripts:'trusted-package-root-execution',triggers:'may-modify-existing-packages-and-services',serviceChanges:'package-defined'}};
-      const record:PackageHelperRecord={requestId:request.requestId,request,preview,previewDigest:createHash('sha256').update(helperCanonical(preview)).digest('hex'),state:'prepared',createdAt:now(),updatedAt:now(),expiresAt:now()+120000,code:'PREPARED'};
+      const preparedAt=now();
+      const record:PackageHelperRecord={requestId:request.requestId,request,preview,previewDigest:createHash('sha256').update(helperCanonical(preview)).digest('hex'),state:'prepared',createdAt:preparedAt,updatedAt:preparedAt,expiresAt:preparedAt+120000,code:'PREPARED'};
       records.set(request.requestId,record);return structuredClone(record);
     }),
     authorize:vi.fn<InstallHelper['authorize']>(async decision=>{const record=records.get(decision.requestId)!;Object.assign(record,{state:'authorized',decision,code:'AUTHORIZED'});return structuredClone(record);}),

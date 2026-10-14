@@ -27,6 +27,7 @@ export class PackageHelperError extends Error {
 export class PackageHelperClient {
   #descriptor:z.infer<typeof descriptorSchema>;
   private constructor(descriptor:z.infer<typeof descriptorSchema>){this.#descriptor=descriptor;}
+  installationId(){return this.#descriptor.installationId;}
   static async connect():Promise<PackageHelperClient> {
     if(process.platform!=='linux'||!process.getuid?.())throw new PackageHelperError('HELPER_UNSUPPORTED_CLIENT');
     const file='/etc/abyssus-helper/client.json';

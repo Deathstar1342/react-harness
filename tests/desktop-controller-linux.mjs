@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync,rmSync,mkdirSync,writeFileSync,readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { once } from 'node:events';
+import { DesktopController } from '../build/app/desktop/controller.js';
+import { ProfileOwnership } from '../build/app/server/profile.js';
+import { Store } from '../build/app/server/store.js';
+assert.equal(process.platform,'linux');
+const root=mkdtempSync(tmpdir()+'/abyssus-controller-'),appRoot=path.resolve(import.meta.dirname,'../build/app');
+const first=new DesktopController(appRoot),second=new DesktopController(appRoot);
+const input={environment:{kind:'linux'},home:root+'/first',mode:'initialize'};
+try {
+  await first.start(input);const original=first.state.sessionId;
+  assert(first.target());
+  await assert.rejects(second.start({...input,mode:'existing'}),/owned/);
+  await second.stop();assert.equal(first.state.phase,'ready');
+  // Kill only this controller's exact spawned child to exercise actual crash release.
+  const child=first.child;assert(child?.pid);const exited=once(child,'close');child.kill('SIGKILL');await exited;
+  assert.equal(first.state.phase,'failed');assert.equal(first.target(),undefined);
+  const lock=new ProfileOwnership(input.home);lock.close();
+  await first.start({...input,mode:'existing'});assert.notEqual(first.state.sessionId,original);
+  assert.equal(first.state.sessionId.split('/')[0],original.split('/')[0]);
+  await first.stop();assert.equal(first.target(),undefined);
+  await first.start({...input,home:root+'/second'});assert.notEqual(first.state.sessionId.split('/')[0],original.split('/')[0]);
+  await first.stop();
+  await assert.rejects(first.start({...input,home:root+'/missing',mode:'existing'}),/missing|No initialized/i);await first.stop();
+  console.log('PASS real controller occupied-profile refusal, exact owned-child crash, lock release, explicit same-profile recovery, distinct profile session and failed startup cleanup');
+  const legacy=root+'/legacy';mkdirSync(legacy);mkdirSync(root+'/project');
+  const old=new Store(legacy+'/.harness/state.sqlite');old.initializeModels({architect:'legacy-a',coder:'legacy-c',critic:'legacy-r'});
+  const project=old.createProject('Legacy fixture',root+'/project'),chat=old.createChat(project.id,'Migrated record','review');
+  old.message(chat.id,'user','Preserve the original fixture');old.close();
+  writeFileSync(legacy+'/.env','ARCHITECT_MODEL=legacy-a\n');writeFileSync(legacy+'/.harness/evidence.txt','original evidence');
+  const originalDatabase=readFileSync(legacy+'/.harness/state.sqlite');
+  await first.start({...input,home:root+'/migrated',mode:'migrate',legacyRoot:legacy});
+  const migrated=first.target();const response=await fetch(migrated.address+`/api/projects/${project.id}/chats`,{headers:{authorization:'Bearer '+migrated.token}});
+  assert.equal(response.status,200);assert((await response.json()).some(c=>c.id===chat.id));
+  await first.stop();assert.deepEqual(readFileSync(legacy+'/.harness/state.sqlite'),originalDatabase);
+  assert.equal(readFileSync(legacy+'/.harness/evidence.txt','utf8'),'original evidence');
+  await first.start({...input,home:root+'/migrated',mode:'existing'});await first.stop();
+  console.log('PASS actual desktop controller migration, authenticated migrated chat read, restart and byte-preserved legacy database/evidence');
+}finally{await first.stop().catch(()=>{});await second.stop().catch(()=>{});rmSync(root,{recursive:true,force:true});}

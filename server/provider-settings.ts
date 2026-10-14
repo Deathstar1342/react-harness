@@ -3,15 +3,15 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parse } from 'dotenv';
 import { z } from 'zod';
-import { readConfig, type Config } from './config.js';
+import { readConfig, normalizeProviderEndpoint, type Config } from './config.js';
 import type { ProviderSettings as PublicProviderSettings, ProviderSettingsPatch } from '../shared/types.js';
 import type { Store } from './store.js';
 import { applicationHome, profilePaths } from './locations.js';
 
-const fields = { architect: 'ARCHITECT_MODEL', coder: 'CODER_MODEL', critic: 'CRITIC_MODEL', apiKey: 'STARK_API_KEY' } as const;
+const fields = { architect: 'ARCHITECT_MODEL', coder: 'CODER_MODEL', critic: 'CRITIC_MODEL', apiKey: 'STARK_API_KEY',baseUrl:'STARK_BASE_URL' } as const;
 const value = z.string().max(1024).regex(/^[^\x00-\x1f\x7f\u2028\u2029]*$/, 'Use a single line without control characters');
 const model = value.min(1).refine(s => s === s.trim(), 'Remove surrounding whitespace');
-const patchSchema = z.object({ models: z.object({architect:model.optional(),coder:model.optional(),critic:model.optional()}).strict().optional(), apiKey:value.refine(s=>s==='' || !!s.trim(), 'Use a nonblank key or an empty string to clear it').optional() }).strict();
+const patchSchema = z.object({ models: z.object({architect:model.optional(),coder:model.optional(),critic:model.optional()}).strict().optional(), apiKey:value.refine(s=>s==='' || !!s.trim(), 'Use a nonblank key or an empty string to clear it').optional(),baseUrl:z.string().max(2048).optional() }).strict();
 const fail = (message: string) => Object.assign(new Error(message), {statusCode:409});
 const same = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
 
@@ -56,6 +56,7 @@ export class ProviderSettingsFile {
     const updates: Record<string,string> = {};
     for (const [role,id] of Object.entries(patch.models ?? {})) updates[fields[role as keyof typeof fields]] = id;
     if (patch.apiKey !== undefined) updates.STARK_API_KEY = patch.apiKey;
+    if (patch.baseUrl !== undefined) updates.STARK_BASE_URL = patch.baseUrl;
     for (const key of Object.keys(updates)) if (this.overrides[key] !== undefined) throw fail(`${key} is set by the process environment; remove that override and restart before saving this field`);
     const current = this.read();
     if (current.text !== this.snapshot.text || Boolean(current.stat) !== Boolean(this.snapshot.stat) || current.stat && this.snapshot.stat && !same(current.stat,this.snapshot.stat)) throw fail('Backend .env changed outside Settings; restart to load it before saving');
@@ -111,16 +112,23 @@ export class ProviderSettingsFile {
 export class ProviderSettings {
   constructor(private config: Config, private store: Store, private file?: ProviderSettingsFile) {}
   get(): PublicProviderSettings {
-    return {models:{...this.config.models},apiKeyConfigured:!!this.config.apiKey,lockedFields:this.file?.lockedFields() ?? ['architect','coder','critic','apiKey']};
+    return {models:{...this.config.models},baseUrl:this.config.baseUrl,apiKeyConfigured:!!this.config.apiKey,lockedFields:this.file?.lockedFields() ?? ['architect','coder','critic','apiKey','baseUrl']};
   }
   update(input: unknown): PublicProviderSettings {
     const patch = patchSchema.parse(input);
     if (!this.file) throw fail('Provider settings persistence is unavailable in this backend');
+    if(patch.baseUrl!==undefined) {
+      patch.baseUrl=normalizeProviderEndpoint(patch.baseUrl);
+      const equivalent=(v:string)=>v?new URL(v).href.replace(/\/+$/,''):'';
+      if(equivalent(patch.baseUrl)===equivalent(this.config.baseUrl))patch.baseUrl=this.config.baseUrl;
+      else if(this.config.apiKey&&patch.apiKey===undefined)throw fail('Changing the endpoint requires an explicit replacement API key or Clear saved API key. An existing key is never forwarded to a new endpoint.');
+    }
     const models = {...this.config.models,...patch.models};
     this.store.initializeModels(this.config.models);
     this.file.write(patch);
     this.config.models = models;
     if (patch.apiKey !== undefined) this.config.apiKey = patch.apiKey;
+    if (patch.baseUrl !== undefined) this.config.baseUrl = patch.baseUrl;
     this.store.setModelDefaults(models);
     try { this.file.refreshIdentity(); }
     catch { throw fail('Settings saved and active, but the file changed immediately afterward; restart after checking backend .env'); }

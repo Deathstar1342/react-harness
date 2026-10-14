@@ -458,7 +458,12 @@ export function FilePanel({
                   theme="harness"
                   language={languageFor(snapshot.path)}
                   value={content}
-                  onChange={(value) => setContent(value ?? "")}
+                  onChange={(value) => {
+                    // Publish edits synchronously before a main-process transition
+                    // can freeze/replace the document; React effects may run later.
+                    void window.abyssusDesktop?.dirty((value??'')!==state.current.snapshot?.content).catch(()=>{});
+                    setContent(value ?? "");
+                  }}
                   options={{
                     ...editorOptions,
                     ariaLabel: `Edit ${snapshot.path}`,

@@ -21,9 +21,10 @@ import { installationRoot, applicationHome } from './locations.js';
 import { LinuxSandbox } from './tools/sandbox.js';
 import type { BackendLifecycle } from './lifecycle.js';
 import { InstallService, type InstallHelper } from './installs.js';
+import type { TransportAuth } from './transport-auth.js';
 
 const approvalMode = z.enum(['autonomous','balanced','review']);
-export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper> }
+export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
@@ -99,6 +100,9 @@ export async function createApp(options: AppOptions) {
     } catch { /* File hash checks remain authoritative when watching is unavailable. */ }
   };
   app.addHook('onRequest',async (request,reply)=> {
+    // Fastify decodes static segments before routing. Reject encoded path spelling
+    // before any raw-prefix policy; query values (including file paths) stay valid.
+    if(request.url.split('?')[0].includes('%'))return reply.code(400).send({error:'Encoded route paths are not accepted'});
     if (!request.url.startsWith('/api')) return;
     let hostname: string;
     try { hostname = new URL(`http://${request.headers.host ?? ''}`).hostname; } catch { return reply.code(403).send({error:'Invalid host'}); }
@@ -119,6 +123,7 @@ export async function createApp(options: AppOptions) {
     const statusCode = conflict ? 409 : e.statusCode ?? (e.code === 'ENOENT' ? 404 : 400);
     reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({error:e.message.replaceAll(config.apiKey || '\u0000','[redacted]')});
   });
+  options.transportAuth?.register(app);
   options.lifecycle?.identity.register(app,options.lifecycle.close);
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
   // Track complete request lifetimes, including awaits before a save or registration.

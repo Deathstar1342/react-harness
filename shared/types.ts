@@ -10,8 +10,8 @@ export interface ConnectionCheck { target: 'catalog' | AgentRole; status: 'passe
 export interface ConnectionReport { ok: boolean; checks: ConnectionCheck[]; completedAt: string }
 export interface DirectoryListing { path: string; parentPath: string | null; entries: {name:string;path:string}[]; roots: {name:string;path:string}[]; truncated: boolean }
 export type RoleModels = Record<AgentRole, string>;
-export interface ProviderSettings { models: RoleModels; apiKeyConfigured: boolean; lockedFields: string[] }
-export interface ProviderSettingsPatch { models?: Partial<RoleModels>; apiKey?: string }
+export interface ProviderSettings { models: RoleModels; apiKeyConfigured: boolean; lockedFields: string[]; baseUrl?:string }
+export interface ProviderSettingsPatch { models?: Partial<RoleModels>; apiKey?: string; baseUrl?:string }
 export type ChatMode = 'plan' | 'execute';
 export interface Chat { mode?: ChatMode; modeVersion?: number; id: string; projectId: string; title: string; status: ChatStatus; approvalMode: ApprovalMode; createdAt: string; updatedAt: string; models?: RoleModels }
 export interface Message { id: string; chatId: string; role: 'user' | AgentRole | 'tool' | 'system'; content: string; createdAt: string; metadata?: Record<string, unknown> }
