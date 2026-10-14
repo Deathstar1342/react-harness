@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { InstallService } from '../server/installs.js';
+import { checkedRecord } from '../server/install-validation.js';
 import { packageRecommendation } from '../server/install-review.js';
 import type { PackageHelperRecord } from '../shared/types.js';
 import { deferred, installFixture, target } from './install-fixture.js';
@@ -11,6 +12,14 @@ afterEach(async()=>{for(const t of fixtures.splice(0)){await t.service.close();t
 const policy=(t:ReturnType<typeof fixture>,value:'ask'|'auto'|'ai')=>t.service.update({policy:value,revision:t.service.settings().revision});
 
 describe('independent system install decisions',()=>{
+  it('keeps helper preview TTL valid when the clock advances on every read',async()=>{
+    let clock=Date.now();const t=fixture({now:()=>clock++}),item=t.create();
+    const result=await t.advance(item.id);
+    expect(result).toBeNull();expect(t.store.install(item.id).state).toBe('pending');
+    const record=t.records.get(item.id)!;expect(record.expiresAt-record.createdAt).toBe(120000);
+    expect(()=>checkedRecord({...record,expiresAt:record.expiresAt+2},t.store.install(item.id))).toThrow();
+    expect(t.helper.execute).not.toHaveBeenCalled();
+  });
   it('defaults independently to Ask, persists reviewer once, requires one exact human decision',async()=>{
     const t=fixture(),item=t.create();
     expect(t.service.settings()).toMatchObject({policy:'ask',reviewerModel:'initial-critic'});
