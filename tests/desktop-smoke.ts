@@ -1,5 +1,5 @@
 import { _electron as electron, expect } from '@playwright/test';
-import { mkdtempSync, mkdirSync, rmSync,writeFileSync,readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync,writeFileSync,readFileSync,existsSync,unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
@@ -135,16 +135,12 @@ try {
       await page.screenshot({path:path.join(root,'test-results/electron-linux-connected.png')});
       console.log('PASS real Linux staged Node/SQLite/PTY prerequisites, authenticated API+streaming SSE, unauthenticated denial, native-picker cancellation adapter and dirty setup guard');
       console.log('CHECK waiting deliberate backend shutdown');
-      await app.evaluate(()=>{
-        const DesktopController=(globalThis as unknown as {m20Controller:typeof import('../desktop/controller.js').DesktopController}).m20Controller,original=DesktopController.prototype.stop;
-        const probe=globalThis as unknown as {m20Stopped?:boolean;m20StopRelease?:()=>void};probe.m20Stopped=false;
-        DesktopController.prototype.stop=async function(){DesktopController.prototype.stop=original;await original.call(this);probe.m20Stopped=true;await new Promise<void>(resolve=>{probe.m20StopRelease=resolve;});};
-      });
+      writeFileSync(path.join(home,'hold-stop'),'hold');
       await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());
-      await expect.poll(()=>app.evaluate(()=>Boolean((globalThis as unknown as {m20Stopped?:boolean}).m20Stopped))).toBe(true);
+      await expect.poll(()=>existsSync(path.join(home,'ready-stop'))).toBe(true);
       assert.equal(await page.evaluate(()=>document.documentElement.inert),true);
       await page.evaluate(()=>window.abyssusDesktop!.dirty(true));
-      await app.evaluate(()=>{(globalThis as unknown as {m20StopRelease:()=>void}).m20StopRelease();});
+      unlinkSync(path.join(home,'hold-stop'));
       await expect.poll(()=>page.evaluate(()=>document.documentElement.inert)).toBe(false);
       assert.equal(page.isClosed(),false);await page.evaluate(()=>window.abyssusDesktop!.dirty(false));
       console.log('PASS edit arriving during delayed cleanup vetoes destructive close and allows explicit retry');
@@ -174,19 +170,12 @@ try {
         if(nextHome===profile){
           await page.getByRole('button',{name:'Return to editor buffers'}).click();
           const oldEditor=await page.locator('.monaco-editor').first().elementHandle();
-          await app.evaluate(()=>{
-            const DesktopController=(globalThis as unknown as {m20Controller:typeof import('../desktop/controller.js').DesktopController}).m20Controller,original=DesktopController.prototype.start;
-            const probe=globalThis as unknown as {m20Prepared?:boolean;m20Release?:()=>void};probe.m20Prepared=false;
-            DesktopController.prototype.start=async function(input:unknown){
-              DesktopController.prototype.start=original;const result=await original.call(this,input);
-              probe.m20Prepared=true;await new Promise<void>(resolve=>{probe.m20Release=resolve;});return result;
-            };
-          });
+          writeFileSync(path.join(home,'hold-start'),'hold');
           await page.evaluate(home=>{
             (window as unknown as {m20Start?:Promise<string>}).m20Start=window.abyssusDesktop!.start({environment:{kind:'linux'},home,mode:'existing'}).then(()=> 'unexpected commit',e=>String(e));
           },profile);
           console.log('CHECK waiting for held prepared backend');
-          await expect.poll(()=>app.evaluate(()=>Boolean((globalThis as unknown as {m20Prepared?:boolean}).m20Prepared)),{timeout:30000}).toBe(true);
+          await expect.poll(()=>existsSync(path.join(home,'ready-start')),{timeout:30000}).toBe(true);
           console.log('CHECK prepared backend held; verifying old editor/session');
           assert.equal(await page.evaluate(()=>document.documentElement.inert),true);
           assert.equal((await page.evaluate(()=>window.abyssusDesktop!.status())).sessionId,oldSession);
@@ -197,7 +186,7 @@ try {
           assert(await oldEditor!.evaluate(element=>element.isConnected));
           console.log('CHECK polled editor retained; injecting late edit');
           await page.evaluate(()=>window.abyssusDesktop!.dirty(true));
-          await app.evaluate(()=>{(globalThis as unknown as {m20Release:()=>void}).m20Release();});
+          unlinkSync(path.join(home,'hold-start'));
           const rejected=await page.evaluate(()=>(window as unknown as {m20Start:Promise<string>}).m20Start);
           assert.match(rejected,/editor changed/);assert.equal(page.isClosed(),false);
           assert(await oldEditor!.evaluate(element=>element.isConnected));
@@ -233,7 +222,7 @@ try {
   console.error('SMOKE assertion failed before cleanup:',error);throw error;
 } finally {
   if(!completed)await app.windows()[0]?.screenshot({path:path.join(root,`test-results/electron-${process.platform}-failure.png`)}).catch(()=>{});
-  await app.evaluate(()=>{const probe=globalThis as unknown as {m20Release?:()=>void;m20StopRelease?:()=>void};probe.m20Release?.();probe.m20StopRelease?.();}).catch(()=>{});
+  for(const operation of ['start','stop']){const marker=path.join(home,'hold-'+operation);if(existsSync(marker))unlinkSync(marker);}
   await close().catch(()=>{});
   clearTimeout(deadline);
   if(completed)rmSync(home,{recursive:true,force:true});
