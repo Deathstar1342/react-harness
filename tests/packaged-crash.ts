@@ -1,7 +1,7 @@
 /** Deliberately crash only this disposable fixture's owned installed app. */
 import { _electron as electron, expect } from '@playwright/test';
 import { readFileSync, readdirSync, realpathSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 if(process.env.GITHUB_ACTIONS!=='true')throw new Error('Authorized disposable CI only');
@@ -12,6 +12,7 @@ let backend:number|undefined;
 const deadline=setTimeout(()=>{console.error('FAIL owned crash recovery timed out');if(backend)try{process.kill(backend,'SIGCONT');}catch{}process.exit(1);},60000);
 try {
   const page=await app.firstWindow();
+  assert.equal(await app.evaluate(()=>process.pid),app.process().pid,'Crash must target the actual Electron main process');
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
   if(process.platform==='linux'){
     await page.getByLabel('Persistent profile home (Linux path)').fill(path.join(home,'linux-profile'));
@@ -35,8 +36,15 @@ try {
     backend=undefined;
     console.log('PASS abnormal main exit retains surviving backend lease until actual pipe-loss drain completes');
   }else{
-    execFileSync(process.execPath,['-e',`if(!require(${JSON.stringify(path.join(path.dirname(executable),'resources/app/desktop/package-lease.node'))}).held)process.exit(1)`],{stdio:'pipe'});
-    console.log('PASS abnormal Windows main exit releases its native OS lease; no WSL backend was launched');
+    const started=Date.now();let attempts=0,lastError='';
+    // TerminateProcess completion and kernel-handle teardown may be observed at
+    // different times. Require actual reacquisition, never assume from exit alone.
+    await expect.poll(()=>{
+      attempts++;
+      const probe=spawnSync(process.execPath,['-e',`if(!require(${JSON.stringify(path.join(path.dirname(executable),'resources/app/desktop/package-lease.node'))}).held)process.exit(1)`],{encoding:'utf8',timeout:3000});
+      lastError=probe.stderr??String(probe.error??'');return probe.status;
+    },{timeout:15000,intervals:[100,250,500],message:'Native lease must become acquirable after actual main exit'}).toBe(0).catch(error=>{console.error(lastError);throw error;});
+    console.log('PASS abnormal Windows main exit releases its native OS lease after',Date.now()-started,'ms across',attempts,'probe(s); no WSL backend was launched');
   }
 }finally{
   if(backend)try{process.kill(backend,'SIGCONT');}catch{}
