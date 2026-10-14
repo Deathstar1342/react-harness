@@ -25,7 +25,8 @@ export class PackageHelperError extends Error {
   constructor(readonly code:string){super(code);this.name='PackageHelperError';}
 }
 export class PackageHelperClient {
-  private constructor(private descriptor:z.infer<typeof descriptorSchema>){}
+  #descriptor:z.infer<typeof descriptorSchema>;
+  private constructor(descriptor:z.infer<typeof descriptorSchema>){this.#descriptor=descriptor;}
   static async connect():Promise<PackageHelperClient> {
     if(process.platform!=='linux'||!process.getuid?.())throw new PackageHelperError('HELPER_UNSUPPORTED_CLIENT');
     const file='/etc/abyssus-helper/client.json';
@@ -40,10 +41,10 @@ export class PackageHelperClient {
   private async request<T>(action:string,body:unknown):Promise<T> {
     const nonce=randomBytes(32).toString('hex');
     const unsigned={protocol:helperProtocol,nonce,expiresAt:Date.now()+15000,action,body};
-    const wire=helperCanonical({...unsigned,mac:helperMac(unsigned,this.descriptor.key)})+'\n';
+    const wire=helperCanonical({...unsigned,mac:helperMac(unsigned,this.#descriptor.key)})+'\n';
     return new Promise((resolve,reject)=>{
       let size=0,parts:Buffer[]=[];
-      const socket=connect(this.descriptor.socket);
+      const socket=connect(this.#descriptor.socket);
       // Timeout never implies cancellation; no automatic reconnect/retry.
       const timer=setTimeout(()=>socket.destroy(new PackageHelperError('HELPER_REPLY_UNCERTAIN')),300_000);
       socket.once('connect',()=>socket.write(wire));
@@ -57,7 +58,7 @@ export class PackageHelperClient {
           if(!raw.endsWith('\n')||raw.slice(0,-1).includes('\n'))throw new Error();
           const response=JSON.parse(raw) as Record<string,unknown>;
           const mac=response.mac;delete response.mac;
-          if(typeof mac!=='string'||!/^[a-f0-9]{64}$/.test(mac)||!timingSafeEqual(Buffer.from(mac,'hex'),Buffer.from(helperMac(response,this.descriptor.key),'hex'))||response.protocol!==helperProtocol||response.nonce!==nonce)throw new Error();
+          if(typeof mac!=='string'||!/^[a-f0-9]{64}$/.test(mac)||!timingSafeEqual(Buffer.from(mac,'hex'),Buffer.from(helperMac(response,this.#descriptor.key),'hex'))||response.protocol!==helperProtocol||response.nonce!==nonce)throw new Error();
           if(response.ok!==true)throw new PackageHelperError(typeof response.error==='string'&&/^[A-Z_]{1,64}$/.test(response.error)?response.error:'HELPER_FAILED');
           resolve(response.result as T);socket.end();
         }catch(error){socket.destroy(error instanceof PackageHelperError?error:new PackageHelperError('HELPER_INVALID_REPLY'));}
@@ -68,7 +69,7 @@ export class PackageHelperClient {
   }
   async hello(){
     const reply=await this.request<{protocol:typeof helperProtocol;target:PackageHelperTarget}>('hello',{});
-    if(reply.protocol!==helperProtocol||reply.target.installationId!==this.descriptor.installationId)throw new PackageHelperError('HELPER_TARGET_MISMATCH');
+    if(reply.protocol!==helperProtocol||reply.target.installationId!==this.#descriptor.installationId)throw new PackageHelperError('HELPER_TARGET_MISMATCH');
     return reply;
   }
   prepare(request:PackageHelperRequest){return this.request<PackageHelperRecord>('prepare',packageRequestSchema.parse(request));}

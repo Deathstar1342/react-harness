@@ -49,7 +49,9 @@ jobs:
           sudo install -m 0600 tests/helper-root-fixture.py /root/abyssus-helper-ci.py
           sudo touch /root/abyssus-ci-authorized
       - name: Required real helper service/install/repair/removal tests
-        run: node --import tsx tests/helper-linux.ts
+        run: |
+          /usr/bin/python3 -I -S tests/helper-resolver-probe.py
+          node --import tsx tests/helper-linux.ts
       - name: Safe service failure diagnostics
         if: failure()
         run: |

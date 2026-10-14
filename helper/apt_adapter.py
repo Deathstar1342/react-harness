@@ -46,6 +46,8 @@ class AptAdapter:
         require(apt_pkg.config.find("Dir::Etc::main") == "/dev/null", "UNSAFE_APT_CONFIG")
         apt_pkg.config.set("APT::Install-Recommends", "false")
         apt_pkg.config.set("APT::Install-Suggests", "false")
+        apt_pkg.config.set("Dir::Cache::pkgcache", "")
+        apt_pkg.config.set("Dir::Cache::srcpkgcache", "")
         apt_pkg.config.set("Acquire::AllowInsecureRepositories", "false")
         apt_pkg.config.set("Acquire::AllowDowngradeToInsecureRepositories", "false")
         apt_pkg.config.set("APT::Get::AllowUnauthenticated", "false")
