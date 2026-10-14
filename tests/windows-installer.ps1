@@ -6,7 +6,6 @@ $data = Join-Path $testRoot 'data'
 New-Item -ItemType Directory -Force $data | Out-Null
 New-Item 'HKCU:\Software\abysSUS\Storage' -Force | Out-Null
 Set-ItemProperty 'HKCU:\Software\abysSUS\Storage' -Name DataFolder -Value $data
-Set-Content -LiteralPath (Join-Path $data 'preserve.txt') -Value 'package-preservation-fixture' -NoNewline
 $setup = (Get-Item 'build/release/*setup.exe').FullName
 function Install-Candidate {
   $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru -Wait
@@ -15,7 +14,7 @@ function Install-Candidate {
 Install-Candidate
 $env:ABYSSUS_PACKAGE_TEST_HOME = $data
 $env:ABYSSUS_TEST_INSTALLER = $setup
-node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe')
+node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') create
 if ($LASTEXITCODE -ne 0) { throw 'Installed executable check failed' }
 $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru -Wait
 if ($p.ExitCode -eq 0) { throw 'In-place replacement was not refused' }
@@ -25,6 +24,6 @@ if ($p.ExitCode -ne 0) { throw 'Uninstall failed' }
 if ((Get-Content -LiteralPath (Join-Path $data 'preserve.txt') -Raw) -ne 'package-preservation-fixture') { throw 'Desktop data lost' }
 if ((Get-ItemProperty 'HKCU:\Software\abysSUS\Storage').DataFolder -ne $data) { throw 'Saved location lost' }
 Install-Candidate
-node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe')
+node tests/packaged-smoke.ts (Join-Path $install 'abysSUS.exe') verify
 if ($LASTEXITCODE -ne 0) { throw 'Reinstalled executable check failed' }
 Write-Output 'PASS actual NSIS install, repeat-install refusal, uninstall/reinstall and data-location preservation'

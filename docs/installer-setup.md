@@ -22,7 +22,7 @@ Install the separate matching helper-staging .deb only if system-wide package in
 
 ## Manual upgrades, repair and removal
 
-Close abysSUS normally and wait for tool/backend cleanup. Disable helper authority through the trusted setup **before** changing Linux packages, including repairing a damaged client descriptor through the existing helper UI. Do not delete its credentials/code manually.
+Close abysSUS normally and wait for tool/backend cleanup. Disable helper authority through the trusted setup **before** changing Linux packages, including repairing a damaged client descriptor through the existing helper UI. This trusted operation removes helper code/credentials. Then remove the optional helper-staging package through the OS package manager before replacing the backend; reinstall its matching package afterward only if wanted. Do not delete its credentials/code manually.
 
 Windows upgrades use **close → uninstall application files → install the new version**. In-place replacement and forced termination are disabled. The separate desktop data folder and saved location remain. Reinstall uses that location; it does not merge or migrate data. Use matching desktop/backend packages; do not mix candidate releases.
 

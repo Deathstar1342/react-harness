@@ -25,6 +25,7 @@ public static class CanonicalFolder {
 }
 '@
   function Canonical([string]$value) {
+    if ($value.TrimEnd('\','/').Length -le 2) { throw 'Drive root is not a data folder' }
     if ($value.Length -gt 240 -or $value -notmatch '^[A-Za-z]:\\' -or $value.Substring(2) -match '[\x00-\x1f<>:"|?*]' -or ($value -split '[\\/]' | Where-Object { $_ -in '.', '..' -or $_ -match '[. ]$' })) { throw 'Invalid local folder' }
     $candidate = [IO.Path]::GetFullPath($value).TrimEnd('\')
     $suffix = [Collections.Generic.List[string]]::new()

@@ -1,7 +1,8 @@
-import { cp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { cp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
+await rm(root+'build/app',{recursive:true,force:true});
 execFileSync(process.execPath,[root+'node_modules/typescript/bin/tsc','-p',root+'desktop/tsconfig.json'],{cwd:root,stdio:'inherit'});
 await mkdir(root+'build/app/dist',{recursive:true});
 await cp(root+'dist/client',root+'build/app/dist/client',{recursive:true});

@@ -15,7 +15,9 @@ await writeFile(path.join(stage,'package.json'),JSON.stringify({name:'abyssus-de
 await cp(path.join(root,'package-lock.json'),path.join(stage,'package-lock.json'));
 const original=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));delete original.devDependencies;delete original.optionalDependencies;
 await writeFile(path.join(stage,'package.json'),JSON.stringify({...original,name:pkg.name,main:'desktop/entry.cjs',description:'abysSUS desktop workspace',author:'abysSUS contributors'}));
-execFileSync(process.platform==='win32'?'npm.cmd':'npm',['ci','--omit=dev','--omit=optional','--ignore-scripts','--no-audit','--no-fund'],{cwd:stage,stdio:'inherit',shell:process.platform==='win32'});
+// npm_execpath is set by npm run; execute its JS CLI directly, never shell text.
+const npm=process.env.npm_execpath;if(!npm)throw new Error('Run through npm run package:prepare');
+execFileSync(process.execPath,[npm,'ci','--omit=dev','--omit=optional','--ignore-scripts','--no-audit','--no-fund'],{cwd:stage,stdio:'inherit'});
 await mkdir(path.join(root,'build/bundled'),{recursive:true});
 await cp(path.join(root,'docs/installer-setup.md'),path.join(root,'build/bundled/SETUP.md'));
 console.log('Desktop package allowlist staged; no runtime profile or developer tools.');

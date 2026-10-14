@@ -8,7 +8,12 @@ if(process.platform!=='linux'||process.arch!=='x64')throw new Error('Build helpe
 const code=stage+'/usr/lib/abyssus-helper';
 await rm(stage,{recursive:true,force:true});
 await mkdir(code+'/python',{recursive:true});await mkdir(code+'/empty-apt-config',{recursive:true});await mkdir(stage+'/DEBIAN',{recursive:true});
-execFileSync('/usr/bin/cc',['-O2','-Wall','-Wextra','-Werror','-static',root+'helper/launcher.c','-o',code+'/launcher'],{stdio:'inherit'});
+const notices=stage+'/usr/share/doc/abyssus-helper-staging';await mkdir(notices,{recursive:true});
+await cp(root+'helper/launcher.c',notices+'/launcher.c');
+execFileSync('/usr/bin/cc',['-O2','-Wall','-Wextra','-Werror','-c',root+'helper/launcher.c','-o',notices+'/launcher.o'],{stdio:'inherit'});
+execFileSync('/usr/bin/cc',['-static',notices+'/launcher.o','-o',code+'/launcher'],{stdio:'inherit'});
+await cp('/usr/share/doc/libc6/copyright',notices+'/glibc-copyright');
+await writeFile(notices+'/BUILD.txt','Relink the supplied launcher source/object with your compatible libc: cc -static launcher.o -o launcher\n'+execFileSync('/usr/bin/cc',['--version'],{encoding:'utf8'})+'\n'+execFileSync('/usr/bin/dpkg-query',['-W','-f=${Package} ${Version}\\n','libc6','libc6-dev'],{encoding:'utf8'})+'\nUbuntu provides the matching glibc source through its source repositories (apt source glibc). Final redistribution review must retain the library notice and corresponding-source availability.\n');
 for(const file of ['core.py','service.py','admin.py','apt_adapter.py','apt.conf','abyssus-helper.service'])await cp(root+'helper/'+file,code+'/'+file);
 const modules=(await readdir('/usr/lib/python3/dist-packages')).filter(name=>/^apt_(pkg|inst)\..*\.so$/.test(name));
 if(modules.length!==2)throw new Error('Exactly one distro apt ABI is required');

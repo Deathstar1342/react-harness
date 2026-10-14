@@ -1,16 +1,19 @@
 /** Actual production executable/entry. No smoke-entry.cjs substitutions. */
 import { _electron as electron, expect } from '@playwright/test';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 const executable=process.argv[2];if(!executable)throw new Error('Provide an actual packaged executable');
+const mode=process.argv[3]??'create';assert(['create','verify'].includes(mode));
 const home=process.env.ABYSSUS_PACKAGE_TEST_HOME??mkdtempSync(path.join(tmpdir(),'abyssus-package-'));
 mkdirSync(home,{recursive:true});
-writeFileSync(path.join(home,'preserve.txt'),'package-preservation-fixture');
+if(mode==='create')writeFileSync(path.join(home,'preserve.txt'),'package-preservation-fixture',{flag:'wx'});
+else assert.equal(readFileSync(path.join(home,'preserve.txt'),'utf8'),'package-preservation-fixture');
 const env=Object.fromEntries(Object.entries(process.env).filter((entry):entry is [string,string]=>typeof entry[1]==='string'));delete env.ELECTRON_RUN_AS_NODE;
 const launch=()=>electron.launch({executablePath:path.resolve(executable),args:['--user-data-dir='+home],cwd:tmpdir(),env,chromiumSandbox:true,timeout:45000});
 for(let i=0;i<2;i++){
@@ -21,7 +24,8 @@ for(let i=0;i<2;i++){
     const page=await app.firstWindow();
     await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible({timeout:20000});
     const info=await app.evaluate(({app,BrowserWindow})=>({packaged:app.isPackaged,data:app.getPath('userData'),session:app.getPath('sessionData'),sandbox:(BrowserWindow.getAllWindows()[0].webContents as unknown as {getLastWebPreferences:()=>{sandbox:boolean}}).getLastWebPreferences().sandbox}));
-    assert(info.packaged);assert(info.sandbox);assert.equal(path.resolve(info.data).toLowerCase(),path.resolve(home).toLowerCase());
+    assert(info.packaged);assert(info.sandbox);assert.equal(realpathSync(info.data).toLowerCase(),realpathSync(home).toLowerCase());
+    if(i===0)console.log('Packaged runtime:',await app.evaluate(()=>({electron:process.versions.electron,node:process.versions.node,napi:process.versions.napi})));
     if(process.platform==='win32')assert.equal(info.data,info.session);
     assert.equal(await page.evaluate(()=>typeof (globalThis as Record<string,unknown>).require),'undefined');
     assert.equal(readFileSync(path.join(home,'preserve.txt'),'utf8'),'package-preservation-fixture');
@@ -43,14 +47,44 @@ for(let i=0;i<2;i++){
         console.log('PASS process-owned maintenance refusal after unrelated child exit; second instance focuses existing app');
       }
     }
-    if(process.platform==='linux'&&i===0){
+    if(process.platform==='linux'){
       await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
       await page.getByLabel('Persistent profile home (Linux path)').fill(path.join(home,'linux-profile'));
-      await page.getByLabel('Profile action').selectOption('initialize');
+      const creating=mode==='create'&&i===0;
+      await page.getByLabel('Profile action').selectOption(creating?'initialize':'existing');
       await page.getByRole('button',{name:'Open profile',exact:true}).click();
       await expect(page.getByRole('heading',{name:'Optional system installs'})).toBeVisible({timeout:45000});
       const state=await page.evaluate(()=>window.abyssusDesktop!.status());assert.equal(state.phase,'ready');
       assert(state.checks?.slice(0,5).every(c=>c.ok));
+      const receipt=path.join(home,'accepted-state.json');
+      if(creating){
+        const recorded=await page.evaluate(async({home})=>{
+          const request=async(url:string,method='GET',body?:unknown)=>{const r=await fetch('/api'+url,{method,...(body?{headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{})});if(!r.ok)throw new Error('Fixture API failed: '+url);return r.json();};
+          await request('/provider-settings','PATCH',{models:{architect:'package-architect',coder:'package-coder',critic:'package-critic'},baseUrl:'http://127.0.0.1:9/v1',apiKey:'synthetic-package-test-key'});
+          const preferences=await request('/preferences','PATCH',{debugMode:true,defaultApprovalMode:'review'});
+          const workspace=await request('/workspace','PATCH',{workspaceRoot:home+'/projects'});
+          const project=await request('/projects','POST',{name:'Package persistence',mode:'create'});
+          const chat=await request('/projects/'+project.id+'/chats','POST',{title:'Retain this chat'});
+          const file=await request('/projects/'+project.id+'/file','PUT',{path:'kept.txt',content:'Preserved through actual package maintenance.\n',baseHash:null,owner:'package-acceptance'});
+          await request('/provider-settings','PATCH',{models:{architect:'new-default-architect'}});
+          return {project,chat,file,preferences,workspace};
+        },{home});
+        const configHash=createHash('sha256').update(readFileSync(path.join(home,'linux-profile/profile/config/.env'))).digest('hex');
+        writeFileSync(receipt,JSON.stringify({...recorded,configHash}),{flag:'wx'});
+      }else{
+        const recorded=JSON.parse(readFileSync(receipt,'utf8'));
+        assert.equal(createHash('sha256').update(readFileSync(path.join(home,'linux-profile/profile/config/.env'))).digest('hex'),recorded.configHash);
+        const restored=await page.evaluate(async(recorded)=>{
+          const get=async(url:string)=>{const r=await fetch('/api'+url);if(!r.ok)throw new Error('Restore API failed');return r.json();};
+          return {projects:await get('/projects'),detail:await get('/chats/'+recorded.chat.id),file:await get('/projects/'+recorded.project.id+'/file?path=kept.txt'),preferences:await get('/preferences'),workspace:await get('/workspace'),provider:await get('/provider-settings')};
+        },recorded);
+        assert.deepEqual(restored.projects.find((p:{id:string})=>p.id===recorded.project.id),recorded.project);
+        assert.deepEqual(restored.detail.chat,recorded.chat);assert.deepEqual(restored.file,recorded.file);
+        assert.deepEqual(restored.preferences,recorded.preferences);assert.deepEqual(restored.workspace,recorded.workspace);
+        assert.equal(restored.provider.apiKeyConfigured,true);assert.equal(restored.provider.models.architect,'new-default-architect');assert.equal(restored.detail.chat.models.architect,'package-architect');
+        assert.equal(readFileSync(path.join(recorded.project.path,'kept.txt'),'utf8'),recorded.file.content);
+        console.log('PASS same profile/project/chat IDs, model snapshot, settings, configured synthetic key and exact project file restored');
+      }
       console.log('PASS installed Linux backend, SQLite/native PTY/runtime/sandbox checks');
     }
     await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
