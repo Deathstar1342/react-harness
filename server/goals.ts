@@ -60,13 +60,16 @@ export function installResolutions(store:Store,chatId:string,goal:Goal):NonNulla
   });
 }
 export function unresolvedGoalEvents(store:Store,chatId:string,goal:Goal) {
-  const resolved=new Set(installResolutions(store,chatId,goal).map(item=>item.eventId));
+  const resolved=new Set(appliedInstallResolutions(store,chatId,goal).map(item=>item.eventId));
   return goal.uncertainEventIds.filter(id=>!resolved.has(id));
 }
 export function activeGoalEvidence(store:Store,chatId:string,evidence:AssignmentEvidence,goal=goalOf(store,chatId)):AssignmentEvidence {
   if(!goal)return evidence;
-  const resolved=new Set(installResolutions(store,chatId,goal).map(item=>item.eventId));
+  const resolved=new Set(appliedInstallResolutions(store,chatId,goal).map(item=>item.eventId));
   return {...evidence,uncertainEventIds:evidence.uncertainEventIds.filter(id=>!resolved.has(id))};
+}
+function appliedInstallResolutions(store:Store,chatId:string,goal:Goal) {
+  return installResolutions(store,chatId,goal).filter(valid=>goal.resolvedUncertainties?.some(applied=>applied.eventId===valid.eventId && applied.installId===valid.installId && applied.reconciliationEventId===valid.reconciliationEventId));
 }
 export function refreshGoalResolutions(store:Store,chatId:string) {
   const goal=goalOf(store,chatId);if(!goal || goal.status==='completed')return;
@@ -112,7 +115,8 @@ export function createGoal(store: Store, chatId: string, input: GoalInput, human
   store.setState(`goal-obligations:${chatId}`,obligations);
   goal.verificationBlockers=obligations.filter(item=>item.revision===goal.revision).flatMap(item=>assignmentBlockers({acceptanceEvidence:item.evidence} as Frame));
   const uncertain=store.db.prepare("SELECT id FROM events WHERE chat_id=? AND ((type='tool' AND (json_extract(data,'$.result.data.uncertain')=1 OR json_extract(data,'$.result.data.recoveryRequired')=1 OR json_extract(data,'$.result.data.state')='uncertain')) OR (type='command' AND json_extract(data,'$.status') IN ('uncertain','interrupted')) OR type='goal_uncertainty') LIMIT 101").all(chatId).map(row=>Number(row.id));
-  addGoalUncertainty(store,chatId,goal,uncertain);goal.resolvedUncertainties=installResolutions(store,chatId,goal);
+  addGoalUncertainty(store,chatId,goal,uncertain);
+  goal.resolvedUncertainties=old ? appliedInstallResolutions(store,chatId,{...goal,resolvedUncertainties:old.resolvedUncertainties}) : installResolutions(store,chatId,goal);
   goal.verificationBlockers=obligations.filter(item=>item.revision===goal.revision).flatMap(item=>assignmentBlockers({acceptanceEvidence:activeGoalEvidence(store,chatId,item.evidence,goal)} as Frame));
   if(unresolvedGoalEvents(store,chatId,goal).length || goal.uncertaintyOverflow){goal.status='blocked';goal.reason='Recorded uncertain effects remain unresolved; revising the goal cannot authorize replay or completion.';}
   if(goal.evidenceOverflow){goal.status='blocked';goal.reason='Goal verification evidence exceeded its bounded ledger; acceptance remains unverified. Retain this history for inspection.';}

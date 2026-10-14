@@ -36,6 +36,14 @@ it('recognizes an already explicitly reconciled historical install when creating
   expect(goal(t).status).toBe('waiting_for_user');expect(goal(t).uncertainEventIds).toHaveLength(1);expect(goal(t).resolvedUncertainties).toHaveLength(1);expect(t.helper.execute).toHaveBeenCalledTimes(1);
 });
 
+it('does not apply a new recovery receipt through goal revision before explicit Resume',async()=>{
+  const t=await fixture();await t.installs.recover(t.install.id,false);
+  await t.runtime.setGoal(t.chat.id,{objective:'Revised objective',acceptanceCriteria:['Revised scope']},{expectedRevision:1,reason:'Explicit scope change, not resume'});
+  expect(goal(t).status).toBe('blocked');expect(goal(t).resolvedUncertainties).toHaveLength(0);expect(t.helper.execute).toHaveBeenCalledTimes(1);
+  t.replies.push(call('ask_user',{question:'Review revised requirements.'}));await t.runtime.control(t.chat.id,'resume');await t.runtime.wait(t.chat.id);
+  expect(goal(t).status).toBe('waiting_for_user');expect(goal(t).resolvedUncertainties).toHaveLength(1);expect(t.helper.execute).toHaveBeenCalledTimes(1);
+});
+
 it.each(['target','preview','request','event','current-target','current-preview','current-state'] as const)('rejects mismatched %s reconciliation bindings on Resume',async mismatch=>{
   const t=await fixture();await t.installs.recover(t.install.id,false);
   const key=`install-reconciliation:${t.install.id}`,receipt=t.store.getState<InstallRecoveryReceipt>(key,null!);
