@@ -120,6 +120,39 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(authenticate(envelope, "test", self.audit), ("hello", {}))
         with self.assertRaises(Rejected):
             authenticate(envelope, "test", self.audit)
+    def test_lock_failure_consumes_execute_but_never_installs(self):
+        decision = self.prepare()
+        self.engine.dispatch("authorize", decision)
+        with patch.object(self.adapter, "lock", side_effect=RuntimeError("locked")):
+            result = self.engine.dispatch("execute", decision)
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(self.adapter.calls, 0)
+        with self.assertRaises(Rejected):
+            self.engine.dispatch("execute", decision)
+    def test_restart_expires_authorized_records(self):
+        decision = self.prepare()
+        self.engine.dispatch("authorize", decision)
+        self.audit.db.close()
+        self.audit = Audit(self.file)
+        self.engine = Engine(self.audit, self.adapter)
+        self.assertEqual(self.audit.get(self.request["requestId"])["state"], "failed")
+        with self.assertRaises(Rejected):
+            self.engine.dispatch("execute", decision)
+    def test_unhealthy_reconciliation_cannot_clear_recovery(self):
+        decision = self.prepare()
+        self.engine.dispatch("authorize", decision)
+        self.adapter.fail = True
+        self.engine.dispatch("execute", decision)
+        with patch.object(self.adapter, "reconcile", return_value={"healthy": False, "matches": False}):
+            self.engine.dispatch("reconcile", {"requestId": self.request["requestId"]})
+        self.assertTrue(self.audit.unresolved())
+    def test_target_substitution_consumes_decision(self):
+        decision = self.prepare()
+        self.engine.dispatch("authorize", decision)
+        with patch.object(self.adapter, "target", return_value={"id": "b" * 64}):
+            result = self.engine.dispatch("execute", decision)
+        self.assertEqual(result["code"], "WRONG_TARGET")
+        self.assertEqual(self.adapter.calls, 0)
 
 
 if __name__ == "__main__":

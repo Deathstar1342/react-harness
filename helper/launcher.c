@@ -89,7 +89,21 @@ int main(int argc,char **argv) {
     hierarchy("/proc/self/exe"); /* /proc symlink has root ownership for root process. */
     tree("/usr/lib/abyssus-helper",0);
     tree("/usr/lib/x86_64-linux-gnu",0);
-    tree("/usr/lib/python3",0);
+    hierarchy("/usr/lib/python3/dist-packages");
+    tree("/usr/lib/python3/dist-packages/apt",0);
+    DIR *modules=opendir("/usr/lib/python3/dist-packages");
+    if(!modules) fail("distro apt modules");
+    struct dirent *module;
+    unsigned native_modules=0;
+    while((module=readdir(modules))) {
+        size_t length=strlen(module->d_name);
+        if((!strncmp(module->d_name,"apt_pkg.",8) || !strncmp(module->d_name,"apt_inst.",9)) && length>3 && !strcmp(module->d_name+length-3,".so")) {
+            char file[PATH_MAX]; snprintf(file,sizeof(file),"/usr/lib/python3/dist-packages/%s",module->d_name);
+            tree(file,0);native_modules++;
+        }
+    }
+    closedir(modules);
+    if(native_modules!=2) fail("unsupported distro apt native modules");
     DIR *lib=opendir("/usr/lib");
     if(!lib) fail("/usr/lib");
     struct dirent *entry;
@@ -103,7 +117,8 @@ int main(int argc,char **argv) {
     hierarchy("/etc/systemd/system"); hierarchy("/run");
     hierarchy("/lib64/ld-linux-x86-64.so.2");
     loader_cache();
-    tree("/usr/lib/apt",0); tree("/etc/apt",0);
+    tree("/usr/lib/apt",0); tree("/etc/apt",0); tree("/etc/dpkg",0);
+    hierarchy("/etc/ld.so.conf"); tree("/etc/ld.so.conf.d",0);
     struct stat preload;
     if(!stat("/etc/ld.so.preload",&preload) && preload.st_size) fail("/etc/ld.so.preload unsupported");
     if(!strcmp(argv[1],"serve") || !strcmp(argv[1],"repair") || !strcmp(argv[1],"uninstall")) {
