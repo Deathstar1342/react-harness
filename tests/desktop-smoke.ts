@@ -69,10 +69,12 @@ try {
       assert((await worker).url().startsWith('abyssus://app/'));
       console.log('PASS real packaged JSON language worker loaded');
       await page.locator('.monaco-editor .view-lines').first().click();
-      await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText('{"saved":"real Electron"}');
+      // A JSON scalar avoids editor auto-pairing changing synthetic inserted text.
+      await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText('42');
       await expect(page.getByLabel('Unsaved changes')).toBeVisible();
+      await assert.rejects(page.evaluate(()=>window.abyssusDesktop!.helper('setup')));
       await page.getByRole('button',{name:'Save',exact:true}).click();
-      await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.json'),'utf8'),'{"saved":"real Electron"}');
+      await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.json'),'utf8'),'42');
       console.log('PASS real Monaco open, worker-backed editor input, dirty guard and version-checked save');
       const provider=createServer((req,res)=>{
         res.setHeader('content-type','application/json');
