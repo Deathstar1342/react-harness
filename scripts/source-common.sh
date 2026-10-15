@@ -29,6 +29,6 @@ source_platform() {
 }
 source_sandbox_check() {
   [[ -x /usr/bin/bwrap && -x /usr/bin/socat && -x /usr/bin/bash ]] || source_fail 'Missing sandbox prerequisites: bubblewrap, socat or bash.'
-  /usr/bin/bwrap --unshare-all --die-with-parent --new-session --disable-userns --ro-bind / / --proc /proc --dev /dev /bin/true ||
+  /usr/bin/bwrap --unshare-all --unshare-user --die-with-parent --new-session --disable-userns --ro-bind / / --proc /proc --dev /dev /bin/true ||
     source_fail 'Linux blocked the sandbox check. Ask your administrator to enable supported Bubblewrap/user namespaces. No kernel/AppArmor settings were changed and no host execution fallback is used.'
 }
