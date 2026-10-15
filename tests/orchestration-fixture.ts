@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Store } from '../server/store.js';
@@ -23,9 +23,11 @@ export const testResult = (status: 'passed'|'failed'|'error'|'skipped'): ToolRes
 });
 
 /** Real SQLite/runtime/file tools; only provider and command outcomes are synthetic. */
-export async function orchestrationFixture(phases = 1) {
-  const root = await mkdtemp(path.join(tmpdir(), 'm23-scenario-'));
-  const store = new Store(':memory:');
+export async function orchestrationFixture(phases = 1, persistent = false) {
+  const base = await mkdtemp(path.join(tmpdir(), 'm23-scenario-'));
+  const root = persistent ? path.join(base,'project') : base, home = path.join(base,'app');
+  if(persistent) {await mkdir(root);await mkdir(home,{mode:0o700});}
+  const store = new Store(persistent ? path.join(home,'state.sqlite') : ':memory:');
   const workspace = new WorkspaceTools();
   const project = store.createProject('M23 evaluation', root), chat = store.createChat(project.id, 'Scenario', 'autonomous');
   const plan = store.revisePlan(chat.id, {phases: Array.from({length:phases}, (_, i)=>({id:`phase-${i+1}`,title:`Phase ${i+1}`,steps:[{id:`step-${i+1}`,title:`Deliver phase ${i+1}`,status:'pending' as const}]}))});
@@ -52,12 +54,12 @@ export async function orchestrationFixture(phases = 1) {
     const reply = replies.shift(); if (!reply) throw new Error('Unexpected scenario provider request');
     return typeof reply === 'function' ? await reply(input) : reply;
   }};
-  const config = readConfig({});
+  const config = readConfig(persistent ? {HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'data'),HARNESS_WORKSPACE_ROOT:path.join(base,'workspaces')} : {});
   const runtime = new Runtime(store,provider,tools,config,{instructions:roleInstructions});
   const delegate = (phase = 1, extra: Record<string,unknown> = {}) => call('delegate',{objective:`Deliver phase ${phase}`,acceptanceCriteria:[`Inspect evidence for phase ${phase}; preserve manual.txt`],paths:['result.txt','README.md'],planStep:reference(phase),...extra});
   return {root,store,chat,plan,reference,replies,requests,executed,commandResults,tools,runtime,config,provider,delegate,
     seed: (name='result.txt',content='Original observed file')=>writeFile(path.join(root,name),content),
     run: async(text='Implement the full plan; preserve manual.txt')=>{await runtime.submit(chat.id,text);await runtime.wait(chat.id);},
-    close:async()=>{await runtime.close();await workspace.dispose();store.close();await rm(root,{recursive:true,force:true});},
+    close:async()=>{await runtime.close();await workspace.dispose();store.close();await rm(base,{recursive:true,force:true});},
   };
 }

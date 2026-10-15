@@ -1,33 +1,25 @@
-# STARK formatting probe
+# Bounded native provider diagnostic
 
-From the repository folder in WSL, with Node 24+ and your existing .env:
-
-```bash
-node --env-file=.env scripts/stark-probe.mjs
-```
-
-No npm install or running app is needed. The script tests the configured architect using two synthetic user-message-only prompts (simple JSON and an action-shaped JSON object), with up to three attempts each. It always disables streaming. It sends no native tools or response_format, reads no project files, and executes no generated actions. Requests time out after 120 seconds; HTTP/transport errors stop the probe. Output-token limit comes from .env (default 16384).
-
-Attach `.harness/stark-probe-architect.json` to the chat after reviewing the response text for unexpected internal information. Known API keys and URLs are redacted; arbitrary model text still needs your review. Do not share .env or commit reports. .harness is already ignored. Repeating the command replaces that role's report.
-
-Append `coder` or `critic` to test another configured model. Exact JSON matching and normally completed replies are reported separately. These minimal tests do not prove the full agent prompts work.
-
-Offline checks: `node --test scripts/stark-probe.test.mjs`.
-
-## Compare minimal and app prompts
-
-After the simple probes pass, run all three roles with:
+Run the reviewed redesigned checkout with Node 24+. No npm install or running app is needed. Put `STARK_BASE_URL`, `STARK_API_KEY` and `M27_MODEL` in a private environment file **outside the checkout**. The base URL must be your authorized HTTPS API base and the model must be an exact catalog ID. There is no default, alias, 3.5/3.8 substitution or migration.
 
 ```bash
-node --env-file=.env --import tsx scripts/stark-prompt-probe.mjs
+node --env-file=/private/probe.env scripts/native-provider-probe.mjs
 ```
 
-This needs the app's existing npm dependencies (`npm ci` if not installed). It imports the checked-out protocol prompt, strict parser, project-guidance policy and non-streaming provider. Each role receives the same README read task with (1) minimal instructions, (2) actual role/protocol instructions, (3) role/protocol plus synthetic runtime state and absent project guidance. Unlike the first probe, the model must select an action rather than copy a complete answer. No actions are executed.
+PowerShell also accepts `--env-file=D:/private/probe.env`. Node environment variables take precedence over the env file. Never put a key on the command line or share the env file. Run one explicitly selected model at a time. Keep the private slot-to-ID association locally: the shareable report deliberately omits model IDs and raw catalog metadata. Obtain IDs through your provider's authorized catalog information; this script does not dump the catalog.
 
-Up to nine initial requests and one formatting retry per variant (18 maximum), sequentially, using identical configured output limits and 120-second request deadlines. These direct probes do not use the running app's scheduler. Expect several minutes. HTTP/provider failures stop the run. The report is checkpointed before/after attempts; a pending row means it was interrupted. Optional final argument `architect`, `coder`, or `critic` narrows the run; default is all. Each invocation replaces the report.
+One `/models` request precedes at most six sequential `/chat/completions` requests: ordinary reply, native echo call/result/acknowledgement, independent streaming reply and streaming native echo round trip. Bounds: seven requests, 30 seconds each/210 seconds total, 256 output tokens per completion, 256 KiB per response, 1000 catalog entries, no pagination or retries. These direct requests are outside the app scheduler; account for other concurrent provider work. Rate/credit/auth/key-lock errors stop further requests. Any `Retry-After`, or explicit zero remaining request/token/credit header, also stops requests. No automatic wait/retry, link following or redirect is allowed. Unknown vendor messages/headers remain unknown.
 
-Attach `.harness/stark-prompt-comparison.json` after reviewing it. It contains synthetic prompts, model responses, hashes, timing and separate format/task results. Known keys and URLs are redacted. It excludes actual projects, AGENTS.md, chat history, custom prompt files and compaction. This is a controlled synthetic comparison, not replay of the failing live chat; passing it means we next need to inspect the omitted context. No production prompts, parser, retries, settings or permissions are changed.
+Exactly one `diagnostic_echo` call with a bounded ID, complete duplicate-key-safe fixed-value arguments, correlated tool result and exact follow-up acknowledgement is required. Its only handler returns a fixed in-memory literal. There is no application tool, arbitrary function, shell, file action, install, source write, default change or commit. Tool prose cannot pass. Streaming assembles split bytes/arguments and requires normal finish plus `[DONE]`; partial data never reaches the echo round trip.
 
-Offline checks: `node --import tsx --test scripts/stark-prompt-probe.test.mjs`.
+The JSON report contains fixed categories, booleans and bounded counts/status codes. It omits endpoint, keys, model/request IDs, prompts, arguments, raw replies/errors, catalog metadata, account data, URLs and work content. Header evidence contains only presence/zero flags from a fixed allowlist. Do not add private annotations before sharing. The script writes only stdout; choose a private output file yourself if desired. Exit 0 means all five catalog/capability rows verified; exit 2 means an incomplete/failed check; exit 1 means no report could be produced.
 
-Validation for this probe: five offline comparison tests passed; typecheck and production build passed. Full init_test app suite: 357 passed, 13 platform skips, two failures in settings-api.test.ts because the branch's diagnostic formatting retry sends four requests while those existing tests expect three. The new scripts are outside the app test include pattern and change no application behavior. Live prompt comparison still needs work-provider access.
+`responseIdMatch` is independent: `matched` requires exact configured identity on both initial/follow-up responses; `unknown` means at least one omitted identity; `mismatch` means a conflicting or different identity failed the probe. Capability success with unknown identity is **not** verified model identity. Declared catalog capabilities remain `unknown`; declarations cannot grant execution authority. Argument validation, call-ID validity, result correlation and acknowledgement have separate fields. Refusal, missing tool, invalid schema, malformed payload/SSE, truncation, unsupported, retired, rate/credit/key-lock/auth gates, timeout, transport failure and unexpected replies remain distinct. Error prose never determines retirement or account authority.
+
+This probes small synthetic prompts against the configured endpoint, not real STARK task quality or release readiness. Work-only endpoint acceptance stays deferred until the user runs it there; credentials are unnecessary for independent development. App settings/capability gating are unchanged.
+
+```bash
+node --test scripts/native-provider-probe.test.mjs
+```
+
+Required Validate CI runs these real local HTTP/SSE fixtures, explicitly labelled `synthetic`. Loopback HTTP is permitted only with `M27_SYNTHETIC=1` and host `127.0.0.1`; work probes require HTTPS. M27 removes the obsolete JSON-format/repair scripts with no compatibility fallback.

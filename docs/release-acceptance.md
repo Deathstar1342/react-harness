@@ -1,5 +1,7 @@
 # Candidate acceptance record
 
+M27 validates existing packaging integration against redesigned source only. It does not resume M21's paused corresponding-source/notices work or waive any gate below. Frozen source, synthetic evaluation, portable/browser/Electron, disposable Linux CI, installed-device and live-provider evidence remain separate; see [integrated evaluation](integrated-evaluation.md) and the [work diagnostic](../scripts/README.md).
+
 Record the exact source/artifact SHA256, Windows build, WSL version, explicitly selected distro version, username and installation/data paths without keys. Use a disposable authorized VM for privileged/package work. Do not use the developer's existing preview or live WSL project as a test target.
 
 | Gate | Required evidence | Current classification |
