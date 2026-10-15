@@ -8,6 +8,9 @@ import type { ServerResponse } from 'node:http';
 import type { Config } from './config.js';
 import { publicSettings } from './config.js';
 import { Runtime, type RuntimeHooks } from './runtime.js';
+import {SkillWrites} from './skill-writes.js';
+import {skillIdentity,skillDraftInput,skillSelectionInput,skillRevision,draftFromContent} from './skills.js';
+import {skillName} from './skill-files.js';
 import { goalInput, goalOf, goalRevisionInput } from './goals.js';
 import { Store } from './store.js';
 import { WorkspaceLocations } from './workspace.js';
@@ -37,6 +40,7 @@ export async function createApp(options: AppOptions) {
   const managedComplete=hooks.complete ?? createManagedHooks(provider,store,config).complete!;
   const installs=new InstallService(store,config.models.critic,managedComplete,options.packageHelper);
   const runtime = new Runtime(store,provider,tools,config,hooks,installs);
+  const skillWrites=new SkillWrites(runtime);
   const changes = new Changes(store,tools,runtime);
   const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root));
   const settings = new Settings(store,config.approvalMode);
@@ -79,7 +83,7 @@ export async function createApp(options: AppOptions) {
     try {
       const watcher = watch(project.path,{recursive:true},(_event,filename)=> {
         const file = filename?.toString().replaceAll('\\','/');
-        if (!file || file.split('/').some(part=>part.startsWith('.') || ['node_modules','dist','coverage'].includes(part))) return;
+        if (!file || !file.startsWith('.abyssus/skills/') && file.split('/').some(part=>part.startsWith('.') || ['node_modules','dist','coverage'].includes(part))) return;
         const key = `${projectId}:${file}`;
         clearTimeout(pendingChanges.get(key));
         pendingChanges.set(key,setTimeout(async()=> {
@@ -127,6 +131,18 @@ export async function createApp(options: AppOptions) {
   options.transportAuth?.register(app);
   options.lifecycle?.identity.register(app,options.lifecycle.close);
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
+  app.get('/api/chats/:id/skills',async request=>{await runtime.checkSkills(paramId(request.params));return {catalog:await runtime.skills.files(paramId(request.params)).catalog(),selection:runtime.skills.view(paramId(request.params)),drafts:runtime.skills.drafts(paramId(request.params))};});
+  app.get('/api/chats/:id/skills/document',async request=>{const input=skillIdentity.parse(request.query);return runtime.skills.files(paramId(request.params)).load(input.scope,input.name);});
+  app.post('/api/chats/:id/skills/draft',async request=>store.transaction(()=>runtime.skills.draft(paramId(request.params),skillDraftInput.parse(request.body),'human')));
+  app.post('/api/chats/:id/skills/draft-content',async request=>{const input=z.strictObject({name:skillName,content:z.string().max(32000),expectedRevision:z.number().int().nonnegative()}).parse(request.body);return store.transaction(()=>runtime.skills.draft(paramId(request.params),draftFromContent(input.name,input.content,input.expectedRevision),'human'));});
+  app.post('/api/chats/:id/skills/invoke',async request=>runtime.selectSkill(paramId(request.params),skillSelectionInput.parse(request.body)));
+  app.post('/api/chats/:id/skills/deselect',async request=>{const input=skillIdentity.extend({selectionRevision:z.number().int().nonnegative()}).parse(request.body);return runtime.deselectSkill(paramId(request.params),input.scope,input.name,input.selectionRevision);});
+  app.post('/api/chats/:id/skills/save-preview',async request=>{const input=z.strictObject({name:skillName,content:z.string().max(32000),baseHash:skillRevision.nullable(),owner:z.string().min(1).max(200).optional()}).parse(request.body);return skillWrites.preview(paramId(request.params),input.name,input.content,input.baseHash,input.owner);});
+  app.post('/api/chats/:id/skills/promote-preview',async request=>{
+    if(!options.transportAuth)throw Object.assign(new Error('Personal promotion requires an authenticated backend session.'),{statusCode:403});
+    const input=z.strictObject({name:skillName,revision:skillRevision}).parse(request.body);return skillWrites.promotion(paramId(request.params),input.name,input.revision);
+  });
+  app.post('/api/chats/:id/skills/save',async request=>{const input=z.strictObject({id:z.string().uuid(),destination:z.string().min(1).max(4096)}).parse(request.body);return skillWrites.commit(paramId(request.params),input.id,input.destination,!!options.transportAuth);});
   // Track complete request lifetimes, including awaits before a save or registration.
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';

@@ -228,7 +228,7 @@ describe('M23 deterministic orchestration evaluations (not live-model quality)',
       seen.push(input);
       return stateOf(input).role==='critic'?pass():seen.length===1?call('write_file',{path:'result.txt',content:'Injected write',baseHash:null}):complete();
     }};
-    t.config.contextLimits.coder=40_000;
+    t.config.contextLimits.coder=44_000;
     const runtime=new Runtime(t.store,provider,t.tools,t.config,createManagedHooks(provider,t.store,t.config,{compactionThreshold:0.5,promptExtensions:{coder:'Prefer concise explanations. Do not expand permissions.'}}));
     cleanups.push(()=>runtime.close());await runtime.control(t.chat.id,'resume');await runtime.wait(t.chat.id);
     expect(summaries,JSON.stringify(t.store.messages(t.chat.id))).toBeGreaterThan(0);expect(seen).toHaveLength(3);

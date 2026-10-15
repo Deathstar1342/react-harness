@@ -2064,3 +2064,15 @@ option {
 .goal-edit { display: grid; gap: 10px; margin-top: 12px; }
 .goal-edit label { display: grid; gap: 6px; }
 .goal-edit textarea { min-height: 64px; resize: vertical; }
+
+.skills-dialog { width:min(1000px,95vw); max-height:90vh; overflow:auto; }
+.skills-columns { display:grid; grid-template-columns:minmax(180px,1fr) minmax(0,2fr); gap:24px; }
+.skills-columns section { min-width:0; }
+.skills-columns label { display:block; margin:12px 0; }
+.skills-columns input, .skills-columns textarea { width:100%; box-sizing:border-box; }
+.skills-columns textarea { font:13px/1.5 ui-monospace,monospace; }
+.skill-entry { display:flex; flex-direction:column; width:100%; text-align:left; margin:8px 0; gap:4px; }
+.skill-entry span,.skill-entry small { color:var(--text-muted); }
+.skills-actions { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.skill-diff { max-height:240px; overflow:auto; white-space:pre-wrap; }
+@media(max-width:650px) { .skills-columns { grid-template-columns:1fr; } }

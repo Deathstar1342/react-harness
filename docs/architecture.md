@@ -10,6 +10,14 @@ The current desktop, Linux process sandbox, workspace approvals, independent sys
 
 ## Product direction
 
+### M26 reusable workflow guidance
+
+`SkillFiles` discovers bounded metadata in fixed project/personal roots and lazily loads validated documents plus declared resources. `Skills` retains private versioned drafts and immutable selected snapshots in SQLite. Registry instruction controls remain separate from workspace evidence and original human provenance. A centrally translated project `save_skill` uses the existing file mutation/approval/journal pipeline; no executable registration or personal model capability is added.
+
+The on-demand Skills panel supports private drafts, explicit project diff/save, pinned invocation and authenticated personal promotion. Its editor contributes independently to aggregate app/desktop dirty state, with ordinary file leases and stale-buffer retention. Human invocation pauses without launching work; model invocation only changes instructions within already-authorized work. Selected revisions remain outside compactable history and stale changes invalidate pending approvals/current acceptance. Process setup and final dispatch retain selection bindings.
+
+Personal promotion uses a fixed application-home subtree, exact source/resource and destination versions, shared mutation reservations, durable intent before effects and honest uncertainty on partial/result-COMMIT failures. Claims retain origin ownership; unresolved claims block removal and goal completion, including after restart or later goal creation. No generic uncertainty reset is introduced. See [M26 API contract](api-contract.md#m26-reusable-workflow-skills) for the strict frontmatter subset, bounds, routes, visibility and concurrency limits. M21 packaging remains paused.
+
 ### M25 scoped guidance and mutation ownership
 
 Known-path AGENTS.md ancestor snapshots provide deterministic subtree precedence below human/runtime policy, with fixed depth/count/byte bounds and revision checks around model, approval, dispatch and acceptance boundaries. Discovery is scoped, not recursive repository enumeration. The architect's only file mutation capability is bounded canonical AGENTS line maintenance through existing approvals, leases and history; planning drafts stay prose and goals stay in SQLite.

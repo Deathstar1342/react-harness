@@ -12,7 +12,7 @@ export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Recor
   }
   return { ...result, TERM: 'dumb', PS1: '', PS2: '', PROMPT_COMMAND: '', NO_COLOR: '1' };
 }
-export interface CommandResult { output: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean; truncated?: boolean; error?: string; backgroundPids?: number[]; shellReset?: boolean }
+export interface CommandResult { status?:'not_started'; output: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean; truncated?: boolean; error?: string; backgroundPids?: number[]; shellReset?: boolean }
 export interface ShellOptions { maxOutputBytes: number; maxQueue: number; maxSessions: number; defaultTimeoutMs: number; maxTimeoutMs: number; shell: string; sandbox?: LinuxSandbox }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 class PersistentShell {
@@ -179,8 +179,16 @@ export class ShellPool {
       if (!session) { session = await PersistentShell.create(root, this.options); this.sessions.set(id, session);this.layouts.set(id,layout); }
       if (this.disposed) { await session.dispose(); this.sessions.delete(id); return { output: '', cancelled: true, error: 'Tool service disposed before execution.' }; }
       await beforeRun?.();
-      await context.prepareCommand?.();
-      context.beforeCommand?.();
+      try {
+        await context.prepareCommand?.();
+        context.beforeCommand?.();
+      } catch(error) {
+        // Only these trusted callback vetoes precede session.run. Confirm setup
+        // cleanup before recording no dispatch; cleanup loss still rejects and
+        // follows the existing uncertain/quarantined outcome path.
+        await session.dispose();this.sessions.delete(id);this.layouts.delete(id);queue.generation++;
+        return {status:'not_started' as const,output:'',error:error instanceof Error?error.message:'Authorization vetoed before command dispatch.'};
+      }
       const outcome = await session.run(command, Math.min(timeoutMs, this.options.maxTimeoutMs), context.signal, context.onOutput);
       if (outcome.shellReset) { await session.dispose(); this.sessions.delete(id); queue.generation++; }
       await afterRun?.(outcome);

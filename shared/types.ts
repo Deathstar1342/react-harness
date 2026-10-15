@@ -34,6 +34,12 @@ export interface Goal extends GoalRevision {
   completion?: { eventId: number; planId: string; planVersion: number; reviewEventIds: number[] };
 }
 export interface Action { name: string; args: Record<string, unknown> }
+export interface SkillEntry {scope:'project'|'personal';name:string;description:string;references:string[];shadowed?:boolean;revision?:string;hash?:string}
+export interface SkillCatalog {entries:SkillEntry[];diagnostics:{scope:'project'|'personal';entry:string;message:string}[]}
+export interface SkillDocument extends SkillEntry {content:string;hash:string;revision:string;resources:{path:string;content:string;hash:string}[]}
+export interface SkillSelectionView {revision:number;stale?:string;entries:SkillEntry[]}
+export interface SkillDraft {name:string;content:string;revision:number;source:'human'|'model';taskId?:string;createdAt:string}
+export interface SkillWritePreview {id:string;scope:'project'|'personal';name:string;destination:string;diff:string;expiresAt:number}
 export interface NativeToolCall { id: string; type: 'function'; function: { name: string; arguments: string } }
 export interface NativeToolDefinition { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }
 export type ModelMessage = { role: 'system' | 'user'; content: string } |
@@ -90,7 +96,7 @@ export interface RunEvent { id: number; chatId: string; type: string; data: unkn
 export interface CommandEvent {
   processId?:string;
   commandId: string; agentId: string; sessionId: string; role: AgentRole; action: Action;
-  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'uncertain';
+  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'uncertain' | 'not_started';
   output?: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean;
   shellReset?: boolean; truncated?: boolean; message?: string;
 }

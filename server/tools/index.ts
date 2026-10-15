@@ -2,10 +2,11 @@ import { lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
-import { definitionFor, validateAction } from '../tool-registry.js';
+import { definitionFor, validateAction, workspaceAction } from '../tool-registry.js';
 import type { Action, FileChange, FileSnapshot, ToolContext, ToolInspection, ToolResult, ToolService, TestReport } from '../../shared/types.js';
 import { patchSnapshot, type LineEdit } from './edits.js';
 import {reserveMutation} from './mutations.js';
+import {validateProjectSkillResources} from '../skill-files.js';
 import { WorkspaceFiles, type FileOptions } from './files.js';
 import { allowed, hash, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
 import { ShellPool, gitCommand, type ShellOptions, type CommandResult } from './shell.js';
@@ -16,7 +17,7 @@ export { ToolError } from './paths.js';
 const busyReports = new Set<string>();
 function validate(action: Action): Record<string, any> {
   if (definitionFor(action.name).kind !== 'workspace') throw new ToolError('Unknown workspace tool.');
-  return validateAction(action).args;
+  return workspaceAction(validateAction(action)).args;
 }
 export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<Omit<ShellOptions, 'sandbox'>> { maxReportBytes?: number }
 export class WorkspaceTools implements ToolService {
@@ -86,6 +87,8 @@ export class WorkspaceTools implements ToolService {
     catch(error) { throw Object.assign(error instanceof Error ? error : new Error('Move undo failed'),{mutation: created ? 'uncertain' : 'not_started'}); }
   }
   private async fileChanges(root: string, action: Action): Promise<NonNullable<ToolInspection['changes']>> {
+    if(action.name==='save_skill')await validateProjectSkillResources(root,String(action.args.name),String(action.args.content));
+    action=workspaceAction(action);
     const args = action.args;
     const before = await this.read(root, String(args.path));
     if (before.hash !== args.baseHash) throw new ToolError('Edit is based on a stale file version.', 'CONFLICT');

@@ -12,7 +12,8 @@ export function commandEvent(frame: {id:string; shellId?:string; role:AgentRole}
   const uncertain = data.uncertain === true || (shellReset && typeof data.error === 'string' && !cancelled && !timedOut);
   const exitCode = !uncertain && Number.isInteger(data.exitCode) ? data.exitCode as number : undefined;
   const output = typeof data.output === 'string' ? data.output : '';
-  return {...base, status: uncertain ? 'uncertain' : cancelled || timedOut ? 'interrupted' : exitCode === undefined ? 'uncertain' : exitCode === 0 ? 'completed' : 'failed',
+  const notStarted=data.status==='not_started'&&!uncertain&&!cancelled&&!timedOut&&!shellReset&&data.exitCode===undefined;
+  return {...base, status: notStarted ? 'not_started' : uncertain ? 'uncertain' : cancelled || timedOut ? 'interrupted' : exitCode === undefined ? 'uncertain' : exitCode === 0 ? 'completed' : 'failed',
     exitCode, cancelled, timedOut, shellReset, output:typeof data.output !== 'string' ? undefined : output.slice(-commandOutputLimit),
     truncated:data.truncated === true || output.length > commandOutputLimit,
     message:typeof data.error === 'string' ? data.error.slice(-16000) : !result.ok ? `Tool reported a problem: ${result.output.slice(-16000)}` : exitCode === undefined ? 'No command exit evidence was recorded.' : undefined};
