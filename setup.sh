@@ -58,7 +58,16 @@ printf 'Linux Node, npm and sandbox prerequisites passed.\n'
 
 printf '\nInstalling locked application dependencies...\n'
 # Browser source launch needs no Electron executable download.
-ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci --foreground-scripts
+# node-gyp's generated include paths cannot quote a header cache under a HOME
+# containing spaces. Use a private, space-free transient cache, not global config.
+native_headers="$(mktemp -d "/tmp/abyssus-native-build-$UID.XXXXXXXX")"
+cleanup_headers() {
+  if [[ "$native_headers" == /tmp/abyssus-native-build-"$UID".* && -d "$native_headers" && ! -L "$native_headers" && -O "$native_headers" ]]; then rm -rf -- "$native_headers"; fi
+}
+trap cleanup_headers EXIT
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm_package_config_node_gyp_devdir="$native_headers" npm ci --foreground-scripts
+cleanup_headers
+trap - EXIT
 node -e 'require("node:sqlite"); require("node-pty"); console.log("SQLite and Linux PTY loaded.")'
 node --import tsx scripts/source-setup.ts
 npm run build
