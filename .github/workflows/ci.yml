@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Bounded native diagnostic synthetic HTTP and SSE
+        run: node --test scripts/native-provider-probe.test.mjs
       - run: npm run build
       - name: Required unsupported-namespace fail-closed check
         run: |
