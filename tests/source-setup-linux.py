@@ -49,6 +49,9 @@ def terminal(argv, env, answers, timeout=20, cwd=ROOT):
         pid = 0
         assert KEY.encode() not in output, "Hidden synthetic key appeared in terminal output"
         return os.waitstatus_to_exitcode(status), bytes(output)
+    except BaseException as error:
+        tail = bytes(output).decode(errors="replace").replace(KEY, "[hidden synthetic key]")[-10000:]
+        raise AssertionError(f"Terminal check stopped ({type(error).__name__}); sanitized output:\n{tail}") from error
     finally:
         os.close(fd)
         if pid:
