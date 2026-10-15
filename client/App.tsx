@@ -31,6 +31,7 @@ import { errorText, formatTime, id, post, request } from "./api";
 import { FilePanel } from "./FilePanel";
 import { ChangesPanel } from './ChangesPanel';
 import { TerminalPanel } from './TerminalPanel';
+import {SkillsPanel} from './SkillsPanel';
 import { ActivityDrawer, ApprovalCard, PlanPanel } from "./Panels";
 import { ProjectDialog, SettingsDialog } from "./WorkspaceDialogs";
 import { useConversation } from "./useConversation";
@@ -49,6 +50,7 @@ export function Conversation({
   onFiles,
   onChanges,
   onFileRevision,
+  onSkillsDirty,
   draft,
   setDraft,
 }: {
@@ -60,6 +62,7 @@ export function Conversation({
   onFiles: () => void;
   onChanges: () => void;
   onFileRevision: (revision: number) => void;
+  onSkillsDirty:(dirty:boolean)=>void;
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
 }) {
@@ -68,6 +71,7 @@ export function Conversation({
   const [busy, setBusy] = useState("");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [skillsOpen,setSkillsOpen]=useState(false);
   const planControl = useRef<HTMLButtonElement>(null);
   const [actionError, setActionError] = useState("");
   const [rename, setRename] = useState(false);
@@ -214,6 +218,7 @@ export function Conversation({
           </button>
           <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>{detail.goal ? `Goal · ${detail.goal.status.replaceAll('_',' ')} · ${detail.plan.phases.filter(phase=>phase.steps.length && phase.steps.every(step=>step.status==='done' && detail.goal!.reviews.some(review=>review.planStep.planId===detail.plan.id && review.planStep.planVersion===detail.plan.version && review.planStep.phaseId===phase.id && review.planStep.stepId===step.id))).length}/${detail.plan.phases.length} phases` : 'Plan'}</button>
           <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
+          <button className="text-button" aria-expanded={skillsOpen} onClick={()=>setSkillsOpen(true)}>Skills</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
         </div>
       </header>
@@ -560,6 +565,7 @@ export function Conversation({
         </div>
       </div>
       {terminalOpen && <TerminalPanel detail={detail} connected={connection === 'connected'} onClose={()=>setTerminalOpen(false)} />}
+      {skillsOpen&&<SkillsPanel chatId={chatId} projectId={project.id} planOnly={detail.chat.mode==='plan'} onClose={()=>setSkillsOpen(false)} onChange={()=>void refresh()} onDirty={onSkillsDirty}/>}
       <ActivityDrawer events={detail.events} tests={detail.tests} debug={debug} />
     </main>
   );
@@ -580,7 +586,11 @@ export function App() {
   const [changes, setChanges] = useState(false);
   const editorLayout = useEditorLayout();
   const [dirty, setDirty] = useState(false);
-  useEffect(()=>{void window.abyssusDesktop?.dirty(dirty).catch(()=>{});},[dirty]);
+  const dirtySources=useRef({file:false,skills:false});
+  const updateDirty=useCallback((source:'file'|'skills',value:boolean)=>{dirtySources.current[source]=value;const combined=dirtySources.current.file||dirtySources.current.skills;setDirty(combined);void window.abyssusDesktop?.dirty(combined).catch(()=>{});},[]);
+  const fileDirty=useCallback((value:boolean)=>updateDirty('file',value),[updateDirty]);
+  const skillsDirty=useCallback((value:boolean)=>updateDirty('skills',value),[updateDirty]);
+  useEffect(()=>{void window.abyssusDesktop?.dirty(dirtySources.current.file||dirtySources.current.skills).catch(()=>{});},[dirty]);
   const [fileRevision, setFileRevision] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -646,6 +656,7 @@ export function App() {
   }, [projectId]);
   const newChat = async () => {
     if (!project || creating) return;
+    if(dirtySources.current.skills){setError('Save or discard skill edits before creating another chat.');return;}
     setCreating(true);
     setError("");
     const target = project.id;
@@ -747,6 +758,7 @@ export function App() {
             <button
               className={`chat-item ${chat.id === chatId ? "active" : ""}`}
               onClick={() => {
+                if(chat.id!==chatId&&dirtySources.current.skills){setError('Save or discard skill edits before switching chats.');return;}
                 setChatId(chat.id);
                 setSidebar(false);
               }}
@@ -863,6 +875,7 @@ export function App() {
               onFiles={() => setFiles((old) => !old)}
               onChanges={() => setChanges(true)}
               onFileRevision={updateFileRevision}
+              onSkillsDirty={skillsDirty}
             />
           ) : (
             <main className="conversation">
@@ -922,7 +935,7 @@ export function App() {
                 key={project.id}
                 projectId={project.id}
                 revision={fileRevision}
-                onDirty={setDirty}
+                onDirty={fileDirty}
                 onClose={() => setFiles(false)}
                 expanded={editorLayout.expanded}
                 onToggleExpanded={editorLayout.toggleExpanded}

@@ -286,3 +286,53 @@ Desktop IPC is defined in `desktop/contracts.ts`: status, explicit start selecti
 Desktop status additionally exposes optional `transitioning`, with the document's last committed `sessionId` and selection until safe replacement. Private main/preload freeze acknowledgements carry only an operation nonce and dirty Boolean; IPC must originate from the exact current main frame. An instance-matched bounded `cleanup-failed` notice on the owned backend stdout pipe reports failed drain even after HTTP closes. These are private desktop contracts, not model tools, browser API routes or credential payloads. Backend lifecycle authentication and public proof shapes are unchanged.
 
 Optional desktop `helperReadiness` contains `setup`, `repair`, and `uninstall` entries with `{canStart:boolean,message:string}`. These describe read-only staging/system-service prerequisites, not authorization or a healthy helper installation. Main repeats the selected-environment preflight before draining the backend for any native-confirmed helper action. An unavailable result preserves the current backend/session and returns actionable guidance. Repair/removal do not require the client descriptor or helper hello. Actual OS authorization and operation failures remain terminal and visible.
+## M26 reusable workflow skills
+
+Skills are untrusted workflow documents, not executable handlers, authorization, tests or original human provenance. Existing native history, single-coder execution, workspace approvals, independent system-install policy, file leases, versions and uncertainty protections apply. `save_skill` centrally derives `.abyssus/skills/<name>/SKILL.md`; its complete content/baseHash remain immutable inside the original native call and approval. Draft edits cannot change an approved save. Architect/coder may save in execution mode; coder assignment scope still applies. No model tool can write personal storage.
+
+Project storage is `.abyssus/skills/<name>/SKILL.md`. Personal storage is `<backend application home>/skills/<name>/SKILL.md`, independent of cwd and state-directory overrides. No arbitrary personal directory discovery. Explicit `(scope,name)` is authoritative; discovery reports personal entries shadowed by a project name without rebinding existing selections. Names are lowercase ASCII slugs, at most 64 characters, excluding protected/reserved path components.
+
+The frontmatter is deliberately a **strict JSON-literal subset**, not a general YAML parser. Exactly these fields, once each, with no extra keys, comments, aliases or evaluation:
+
+```text
+---
+name: "verify-changes"
+description: "Verify changes and report observed results"
+references: ["resources/checks.md"]
+---
+Required context, workflow steps, verification and expected handoff in Markdown.
+```
+
+Discovery reads at most 4096 header bytes per document, with a 32000-byte descriptor size ceiling. It scans only direct skill directory entries, at most 64/scope, two concurrent discoveries with no queue, and 64000 aggregate metadata/diagnostic bytes. Malformed individual entries return bounded diagnostics while valid entries remain usable; root/aggregate bound failures are explicit. Full text/resources are lazy. Files must be regular, single-link, valid UTF-8 without NUL. References are unique (case folded), canonical `resources/<ASCII-path>.md` or `.txt`, depth at most four including `resources`, at most eight references of 16000 bytes each. No absolute/parent/hidden/protected paths, executable imports, links or arbitrary URLs are followed. Documents plus references are capped at 128000 bytes per load and across at most four selected skills. Descriptor and current path identity/version checks detect substitutions; as with existing file tools these are bounded observations, not an OS-atomic snapshot against arbitrary concurrent host filesystem edits.
+
+| Native tool | Roles / modes | Effect |
+| --- | --- | --- |
+| `discover_skills {}` | architect/coder/critic, both modes | Metadata/diagnostics only |
+| `load_skill {scope,name}` | architect/coder/critic, both modes | Exact document/resources/hash/revision |
+| `draft_skill {name,description,references,body,expectedRevision}` | architect/coder, both modes | Private SQLite draft, no filesystem write |
+| `invoke_skill {scope,name,revision,selectionRevision}` | architect/coder, both modes; last in batch | Pinned instruction selection, no independent execution start |
+| `save_skill {name,content,baseHash}` | architect/coder, execution only | Normal project file mutation/diff/history |
+
+Instruction tools are registry control operations with separate `skill_instruction` events. They do not enter workspace-read evidence or qualify observation-only acceptance. Drafts are at most 16 and 128000 aggregate bytes/chat, with monotonically checked per-name revisions and human/model/task provenance. No draft ID is dereferenced during native saving: save arguments contain exact reviewed bytes.
+
+Authenticated human routes under `/api/chats/:id/skills`:
+
+| Route | Contract |
+| --- | --- |
+| `GET /` | `{catalog:{entries,diagnostics},selection:{revision,stale?,entries},drafts}`; checks selected freshness without starting work |
+| `GET /document?scope=...&name=...` | Full bounded document and declared resources; SHA-256 whole-file hash and composite revision |
+| `POST /draft` | Same draft input as native tool; human provenance |
+| `POST /draft-content` | `{name,content,expectedRevision}`; validates full document and retains private draft |
+| `POST /invoke` | `{scope,name,revision,selectionRevision}`; pauses/drains current work, rechecks then selects exact revision; never resumes a goal |
+| `POST /deselect` | `{scope,name,selectionRevision}`; pauses and invalidates acceptance without clearing uncertainty |
+| `POST /save-preview` | `{name,content,baseHash,owner?}`; execution-mode, fixed project destination and exact diff |
+| `POST /promote-preview` | `{name,revision}`; requires configured transport authentication, execution mode, current source document/resources and exact fixed personal destination/destination hashes |
+| `POST /save` | `{id,destination}`; consumes one exact preview, requiring idle project, unchanged mode/selection/source/destinations, leases and shared project/personal reservations |
+
+Preview lifetime is five minutes, with at most 64 retained previews per chat; use existing draft names when draft capacity is reached. Review capacity is deliberately finite: expired/consumed claims are not automatically discarded. Ordinary safe chat removal cleans their exact ownership records. Unresolved `recording`/`unknown` claims prevent project/chat removal and cannot be discarded to reset uncertainty. There is no generic reconciliation endpoint; retain the claim and inspect the exact destination/files and failure evidence. No automatic retry, rollback or deletion of partially promoted resources occurs. Personal uncertainty also blocks further personal promotions across chats.
+
+Human project saves use the existing file journal and exact owner/version protections. Ordinary explicit human IDE edits remain allowed, including in planning chats; specialized skill save/promote and all model writes remain plan-gated. Personal promotion commits an intent record before any filesystem effect, copies the exact document and declared resources with fresh destination versions, and publishes actual status after effects. Failed result COMMIT retains uncertainty, even when files appear complete. Startup links retained claims into the originating goal's bounded uncertainty ledger; a later goal also inherits those exact events. Reads/invocation/deselection/revision/resume/critic verdict cannot clear them. Removal checks both runtime and direct Store ownership, preserving evidence before disk/database cleanup.
+
+Private SQLite state retains full selected immutable snapshots and provenance outside compaction. Public catalog/selection metadata omit personal absolute paths; only the authenticated promotion preview exposes its exact destination. Selected doc/reference changes are checked at model/action/approval/review/goal boundaries and after process setup; final synchronous process dispatch checks the pinned selection binding. Watcher notifications stop active owned processes and invalidate current acceptance without renewing budgets. A stale selection stops work until explicit refresh via a new exact invocation or deselection. Saving selected guidance publishes its already-executed native result before the next freshness stop. Restart never starts work or replays a claim. Fixed runtime policy and the original separately stored human messages/assignments remain above workflow text.
+
+`CommandResult.status` optionally reports `not_started`, and public `CommandEvent.status` includes `not_started` (Terminal: **Not started**). For ordinary synchronous commands, only a trusted `prepareCommand`/`beforeCommand` callback veto before `session.run`, followed by confirmed sandbox setup cleanup, produces this outcome. It has no exit code, command effect, verification or permanent uncertainty. Cleanup failures, missing results, shell loss and errors after dispatch remain uncertain; the change does not normalize arbitrary errors into no-op success. Existing runtime pre-dispatch denials likewise render as not started.

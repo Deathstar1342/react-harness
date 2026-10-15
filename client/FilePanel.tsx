@@ -461,7 +461,7 @@ export function FilePanel({
                   onChange={(value) => {
                     // Publish edits synchronously before a main-process transition
                     // can freeze/replace the document; React effects may run later.
-                    void window.abyssusDesktop?.dirty((value??'')!==state.current.snapshot?.content).catch(()=>{});
+                    onDirty((value??'')!==state.current.snapshot?.content);
                     setContent(value ?? "");
                   }}
                   options={{

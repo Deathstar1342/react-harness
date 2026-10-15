@@ -5,7 +5,9 @@ import type { Config } from './config.js';
 import { Store } from './store.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
 import { hash, safeRelative } from './tools/paths.js';
-import { definitionFor, parseToolArguments, publishedTools, toolRegistry, validateAction, validateToolResult } from './tool-registry.js';
+import { definitionFor, parseToolArguments, publishedTools, toolRegistry, validateAction, validateToolResult, skillControls } from './tool-registry.js';
+import {Skills,skillsPolicy,skillSelectionInput,skillDraftInput} from './skills.js';
+import type {SkillDocument} from './skill-files.js';
 import { validateNativeCalls, validateNativeHistory } from './provider.js';
 import type { InstallService } from './installs.js';
 import { assignmentMessage, checkpointFeedback, reviewMessage, taskState, type Assignment } from './prompts/orchestration.js';
@@ -18,6 +20,7 @@ import {ProcessJobs, processRecords} from './process-jobs.js';
 interface PendingAction { verification?: VerificationSnapshot; callId?: string; id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
 export interface Frame { acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
 export interface RunState {
+  skillsHash?:string;
   humanMessageIds?: string[];
   frames: Frame[];
   steering: string[];
@@ -42,6 +45,20 @@ const safeResult = (error: unknown): ToolResult => ({
 });
 
 export class Runtime {
+  readonly skills:Skills;
+  recordSkillUncertainty(chatId:string,writeId:string) {
+    const state=this.load(chatId);
+    const record=(draft?:RunState)=>{
+      if(this.store.getState(`skills:uncertain-event:${writeId}`,null))return;
+      const event=this.store.event(chatId,'goal_uncertainty',{reason:'Skill write or promotion outcome unknown; no replay or generic reconciliation.',writeId});
+      this.store.setState(`skills:uncertain-event:${writeId}`,event.id);
+      const goal=goalOf(this.store,chatId);if(goal){addGoalUncertainty(this.store,chatId,goal,[event.id]);goal.status='blocked';goal.reason='Skill write outcome is uncertain; inspect retained claim. Reads and invocation cannot reconcile it.';saveGoal(this.store,chatId,goal);}
+      const selection=this.skills.selection(chatId);if(selection.documents.length){selection.stale='A skill write outcome is uncertain. Inspect retained evidence; refresh does not reconcile effects.';this.store.setState(`skills:selected:${chatId}`,selection);}
+      this.invalidateSkillEvidence(chatId,draft);
+    };
+    if(state)this.commitRunTransition(chatId,state,record);else this.store.transaction(()=>record());
+    this.processes.stopChat(chatId);
+  }
   readonly processes:ProcessJobs;
   private active = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private runs = new Map<string, RunState>();
@@ -61,6 +78,7 @@ export class Runtime {
   }
 
   async exclusiveRemoval<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+    this.store.assertSkillRemovalSafe(projectId);
     this.installs?.expire();
     this.store.assertInstallRemovalSafe(projectId);
     if (this.store.chats(projectId).some(chat => this.decisions.has(chat.id) || this.store.approvals(chat.id).some(a=>a.status==='pending') || this.load(chat.id)?.frames.some(f=>f.pending?.stage==='executing'))) {
@@ -108,7 +126,69 @@ export class Runtime {
     readonly config: Config,
     readonly hooks: RuntimeHooks,
     readonly installs?: InstallService,
-  ) { store.initializeModels(config.models); store.initializePlanning();this.processes=new ProcessJobs(store,tools,()=>config.apiKey?[config.apiKey]:[]);tools.configureMutationGuard?.((root,owner)=>this.processes.guard(root,owner)); }
+  ) { store.initializeModels(config.models); store.initializePlanning();this.skills=new Skills(store,config);this.processes=new ProcessJobs(store,tools,()=>config.apiKey?[config.apiKey]:[],async chatId=>{await this.skills.fresh(chatId);},chatId=>this.skills.binding(chatId));tools.configureMutationGuard?.((root,owner)=>this.processes.guard(root,owner)); }
+
+  private invalidateSkillEvidence(chatId:string,state?:RunState) {
+    invalidateGoal(this.store,chatId,'Selected workflow guidance changed; fresh review is required.');
+    this.store.invalidateApprovals(chatId);this.installs?.invalidate(chatId,'SKILLS_CHANGED');
+    if(state) {
+      state.generation++;state.skillsHash=this.skills.binding(chatId);
+      for(const frame of state.frames) {
+        for(const check of frame.acceptanceEvidence?.checks??[])if(check.status==='passed')check.status='stale';
+        frame.evidenceEventIds=[];
+        this.cancelQueued(chatId,frame,'Workflow selection changed; request fresh work.');
+      }
+    }
+  }
+  async selectSkill(chatId:string,input:Parameters<Skills['prepareSelection']>[1]) {
+    this.assertAvailable(chatId);
+    await this.skills.prepareSelection(chatId,input);
+    await this.control(chatId,'pause');
+    const document=await this.skills.prepareSelection(chatId,input);
+    const state=this.load(chatId);
+    const apply=(draft?:RunState)=>{this.skills.select(chatId,document,input.selectionRevision,'human');this.invalidateSkillEvidence(chatId,draft);this.store.event(chatId,'skills_changed',this.skills.view(chatId));};
+    if(state)this.commitRunTransition(chatId,state,apply);else this.store.transaction(()=>apply());
+    return this.skills.view(chatId);
+  }
+  async deselectSkill(chatId:string,scope:string,name:string,revision:number) {
+    this.assertAvailable(chatId);
+    await this.control(chatId,'pause');const state=this.load(chatId);
+    const apply=(draft?:RunState)=>{this.skills.deselect(chatId,scope,name,revision);this.invalidateSkillEvidence(chatId,draft);this.store.event(chatId,'skills_changed',this.skills.view(chatId));};
+    if(state)this.commitRunTransition(chatId,state,apply);else this.store.transaction(()=>apply());
+    return this.skills.view(chatId);
+  }
+  async checkSkills(chatId:string) {
+    const selected=this.skills.selection(chatId);
+    if(selected.stale || !selected.documents.length)return;
+    try {await this.skills.fresh(chatId);}catch(error) {
+      if(this.skills.selection(chatId).revision!==selected.revision)return;
+      const state=this.load(chatId),invalidate=(draft?:RunState)=>{
+        selected.stale=(error as Error).message;this.store.setState(`skills:selected:${chatId}`,selected);this.invalidateSkillEvidence(chatId,draft);
+        this.store.updateChat(chatId,{status:'paused'});goalStatus(this.store,chatId,'paused',selected.stale);this.store.event(chatId,'skills_changed',this.skills.view(chatId));
+      };
+      if(state)this.commitRunTransition(chatId,state,invalidate);else this.store.transaction(()=>invalidate());
+      this.active.get(chatId)?.controller.abort();this.processes.stopChat(chatId);
+    }
+  }
+  private async skillAction(chatId:string,state:RunState,frame:Frame,call:NativeToolCall,action:Action,signal:AbortSignal) {
+    const generation=state.generation,selectionRevision=this.skills.selection(chatId).revision;
+    let data:unknown,document:SkillDocument|undefined;
+    if(action.name==='discover_skills')data=await this.skills.files(chatId).catalog();
+    if(action.name==='load_skill')data=await this.skills.files(chatId).load(action.args.scope as 'project'|'personal',String(action.args.name));
+    if(action.name==='invoke_skill')document=await this.skills.prepareSelection(chatId,skillSelectionInput.parse(action.args));
+    signal.throwIfAborted();await this.refreshInstructions(chatId,state,signal);
+    if(state.generation!==generation || frame.queuedCalls?.[0]?.id!==call.id || this.skills.selection(chatId).revision!==selectionRevision)return;
+    this.commitRunTransition(chatId,state,draft=>{
+      const next=draft.frames.find(f=>f.id===frame.id)!;
+      if(this.skills.selection(chatId).revision!==selectionRevision)throw new Error('Skill selection changed before commit.');
+      if(action.name==='draft_skill')data=this.skills.draft(chatId,skillDraftInput.parse(action.args),'model',draft.frames[0].id);
+      if(document)data=this.skills.select(chatId,document,Number(action.args.selectionRevision),'model',draft.frames[0].id);
+      this.resolveCall(chatId,next,call.id,{ok:true,output:'Workflow instruction operation recorded; no execution or verification is implied.',data});
+      this.store.event(chatId,'skill_instruction',{name:action.name,toolCallId:call.id,source:'model'});
+      if(document)this.invalidateSkillEvidence(chatId,draft);
+    });
+    if(document)this.processes.stopChat(chatId);
+  }
 
   private load(chatId: string): RunState | null {
     const cached = this.runs.get(chatId);
@@ -336,6 +416,17 @@ export class Runtime {
       if (chat.id === excludeChatId) continue;
 
       const state = this.load(chat.id);
+      const selected=this.skills.selection(chat.id);
+      if(selected.documents.some(doc=>doc.scope==='project'&&[`.abyssus/skills/${doc.name}/SKILL.md`,...doc.resources.map(r=>`.abyssus/skills/${doc.name}/${r.path}`)].includes(filename))) {
+        const invalidate=(draft?:RunState)=>{
+          selected.stale='Selected workflow files changed. Explicitly refresh or deselect guidance; execution remains paused.';
+          this.store.setState(`skills:selected:${chat.id}`,selected);this.invalidateSkillEvidence(chat.id,draft);
+          this.store.updateChat(chat.id,{status:'paused'});goalStatus(this.store,chat.id,'paused',selected.stale);
+          this.store.event(chat.id,'skills_changed',this.skills.view(chat.id));
+        };
+        if(state)this.commitRunTransition(chat.id,state,invalidate);else this.store.transaction(()=>invalidate());
+        this.active.get(chat.id)?.controller.abort();this.processes.stopChat(chat.id);continue;
+      }
       if (!state?.frames.length) {this.store.transaction(()=>invalidateGoal(this.store,chat.id,`Workspace ${source} change: ${filename}. Fresh review is required.`));continue;}
       this.commitRunTransition(chat.id,state,draft=>{
       invalidateGoal(this.store,chat.id,`Workspace ${source} change: ${filename}. Fresh review is required.`);
@@ -525,7 +616,7 @@ export class Runtime {
       if(!pending.callId)throw new Error('Missing process native correlation');
       const goal=goalOf(this.store,chatId);
       const plan=this.store.plan(chatId);
-      return this.processes.start({projectId:chat.projectId,chatId,frameId:frame.id,taskId:state.frames[0].id,callId:pending.callId,commandId:pending.id,generation:state.generation,modeVersion:chat.modeVersion??0,instructionsHash:state.instructionsHash??null,targets:state.instructionTargets??[],approvalId:pending.approvalId,approvalMode:chat.approvalMode,assignment:JSON.stringify(frame.assignment),plan:plan.id?{id:plan.id,version:plan.version!}:undefined,goal:goal?{id:goal.id,revision:goal.revision,generation:goal.generation}:undefined},action);
+      return this.processes.start({projectId:chat.projectId,chatId,frameId:frame.id,taskId:state.frames[0].id,skillsHash:state.skillsHash,callId:pending.callId,commandId:pending.id,generation:state.generation,modeVersion:chat.modeVersion??0,instructionsHash:state.instructionsHash??null,targets:state.instructionTargets??[],approvalId:pending.approvalId,approvalMode:chat.approvalMode,assignment:JSON.stringify(frame.assignment),plan:plan.id?{id:plan.id,version:plan.version!}:undefined,goal:goal?{id:goal.id,revision:goal.revision,generation:goal.generation}:undefined},action);
     }
     if(action.name==='cancel_process')return {ok:true,output:'Cancellation outcome recorded; effects are not rolled back.',data:await this.processes.cancel(String(action.args.processId),chatId,frame.id)};
     const allowed=frame.role==='coder'?[frame.id]:frame.role==='critic'?[frame.reviewDelegationId??frame.id]:processRecords(this.store,chat.projectId,chatId).filter(record=>record.taskId===state.frames[0].id).map(record=>record.frameId);
@@ -590,6 +681,16 @@ export class Runtime {
     let instructions;
 
     try {
+      try {await this.skills.fresh(chatId);}catch(error) {
+        this.commitRunTransition(chatId,state,draft=>{
+          const selected=this.skills.selection(chatId);selected.stale=(error as Error).message;
+          this.store.setState(`skills:selected:${chatId}`,selected);
+          this.invalidateSkillEvidence(chatId,draft);
+        });
+        throw error;
+      }
+      const binding=this.skills.binding(chatId);
+      if(state.skillsHash!==binding)this.commitRunTransition(chatId,state,draft=>{draft.skillsHash=binding;});
       const targets = new Set(state.instructionTargets ?? []);
       // Invalid requested paths have no applicable subtree. Reject them as tool
       // failures below, without poisoning retained guidance for the whole task.
@@ -714,9 +815,10 @@ export class Runtime {
       const generation = state.generation;
       if (!frame.queuedCalls?.length) {
       let messages: ModelMessage[] = [
-        { role: 'system', content: `${this.hooks.instructions(frame.role)}\n\n${projectInstructionsPolicy}` },
+        { role: 'system', content: `${this.hooks.instructions(frame.role)}\n\n${projectInstructionsPolicy}\n\n${skillsPolicy}` },
         taskState(this.store.project(this.store.chat(chatId).projectId).path, state, frame, this.store.plan(chatId), this.store.messages(chatId).filter(message=>message.role==='user' && state.humanMessageIds?.includes(message.id)),goalOf(this.store,chatId),this.store.chat(chatId).modeVersion),
         instructions.message,
+        this.skills.message(chatId),
         ...frame.messages,
       ];
 
@@ -797,6 +899,7 @@ export class Runtime {
       try {
         validateAction(action,frame.role,state.planOnly?'plan':'execute');
         const definition=definitionFor(action.name);
+        if(skillControls.has(action.name)) {await this.skillAction(chatId,state,frame,call,action,signal);continue;}
         for(const target of definition.affectedPaths(action))safeRelative(target,true);
         if(action.name==='delegate')for(const target of (action.args.paths as string[]|undefined)??[])safeRelative(target,true);
         if(definition.effect!=='read' && definition.approval!=='owned_stop')this.processes.assertIdle(this.store.chat(chatId).projectId);
@@ -1107,7 +1210,7 @@ export class Runtime {
             this.store.chat(chatId).projectId,
           );
 
-          const before = await this.tools.read(project.path,String(pending.action.args.path));
+          const before = await this.tools.read(project.path,definitionFor(pending.action.name).affectedPaths(pending.action)[0]);
 
           signal.throwIfAborted();
 
@@ -1185,6 +1288,15 @@ export class Runtime {
           signal,
           pending.id,
         );
+        if(definitionFor(pending.action.name).command) {
+          const generation=state.generation,skillsHash=this.skills.binding(chatId),modeVersion=this.store.chat(chatId).modeVersion;
+          const current=()=>{
+            signal.throwIfAborted();
+            if(frame.pending!==pending||state.generation!==generation||state.steering.length||state.planOnly||this.store.chat(chatId).modeVersion!==modeVersion||this.skills.binding(chatId)!==skillsHash)throw new Error('Command authorization or selected workflow changed during setup.');
+          };
+          context.prepareCommand=async()=>{await this.refreshInstructions(chatId,state,signal);current();};
+          context.beforeCommand=current;
+        }
 
         const publishOutput = context.onOutput;
         let acceptingOutput = true;
@@ -1317,7 +1429,7 @@ export class Runtime {
             | { path?: string; hash?: string | null }
             | undefined;
 
-          const filename = snapshot?.path ?? String(pending.action.args.path);
+          const filename = snapshot?.path ?? definitionFor(pending.action.name).affectedPaths(pending.action)[0];
 
           changedFile={projectId,filename};
 
@@ -1377,6 +1489,7 @@ export class Runtime {
   }
 
   private async completeGoal(chatId:string,state:RunState,frame:Frame,call:NativeToolCall,action:Action,signal:AbortSignal) {
+    this.skills.assertCertain(chatId);
     this.processes.assertIdle(this.store.chat(chatId).projectId);
     const goal=goalOf(this.store,chatId),plan=this.store.plan(chatId),modeVersion=this.store.chat(chatId).modeVersion;
     if(!goal || goal.status!=='running' || state.planOnly || action.args.goalId!==goal.id || action.args.goalRevision!==goal.revision || action.args.planId!==plan.id || action.args.planVersion!==plan.version || action.args.modeVersion!==modeVersion)throw new Error('Completion request has stale goal, plan or mode revisions, or goal execution is not running.');
@@ -1424,6 +1537,7 @@ export class Runtime {
   }
 
   private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot):ToolResult {
+    if(['submit_completion','review_result'].includes(action.name))this.skills.assertCertain(chatId);
     if(['submit_completion','review_result','delegate'].includes(action.name)) {
       const projectId=this.store.chat(chatId).projectId;
       if(action.name==='delegate')this.processes.assertIdle(projectId);

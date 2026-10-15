@@ -113,6 +113,11 @@ export class Store {
     this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(project),projectId);
   }
   private deleteChatRecords(chatId: string) {
+    this.assertSkillRemovalSafe(this.chat(chatId).projectId);
+    for(const row of this.db.prepare("SELECT key,data FROM state WHERE key LIKE 'skills:write:%' AND json_extract(data,'$.chatId')=?").all(chatId)) {
+      const claim=JSON.parse(String(row.data)) as {id:string};
+      this.db.prepare('DELETE FROM state WHERE key=? OR key=?').run(row.key,`skills:uncertain-event:${claim.id}`);
+    }
     for (const table of ['messages','events','approvals','test_reports']) this.db.prepare(`DELETE FROM ${table} WHERE chat_id=?`).run(chatId);
     this.db.prepare("DELETE FROM file_changes WHERE json_extract(summary,'$.chatId')=?").run(chatId);
     // Run, plan, summary and archived context keys are scoped by exact chat ID.
@@ -129,6 +134,7 @@ export class Store {
   deleteProject(projectId: string) {
     this.project(projectId);
     this.assertInstallRemovalSafe(projectId);
+    this.assertSkillRemovalSafe(projectId);
     this.transaction(()=>{
       for (const chat of this.chats(projectId)) this.deleteChatRecords(chat.id);
       this.db.prepare('DELETE FROM file_changes WHERE project_id=?').run(projectId);
@@ -137,6 +143,10 @@ export class Store {
   }
   chats(projectId?: string): Chat[] {
     return (projectId ? this.db.prepare('SELECT data FROM chats WHERE project_id=?').all(projectId) : this.db.prepare('SELECT data FROM chats').all()).map(row => JSON.parse(String(row.data))).sort((a: Chat,b: Chat) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+  assertSkillRemovalSafe(projectId:string) {
+    const unresolved=this.db.prepare("SELECT state.key FROM state JOIN chats ON chats.id=json_extract(state.data,'$.chatId') WHERE state.key LIKE 'skills:write:%' AND chats.project_id=? AND json_extract(state.data,'$.status') IN ('recording','unknown') LIMIT 1").get(projectId);
+    if(unresolved)throw Object.assign(new Error('An unresolved skill write or personal promotion retains evidence in this project. Removal cannot discard uncertainty; inspect the retained claim.'),{statusCode:409});
   }
   install(id: string): import('../shared/types.js').InstallRecord {
     const row = this.db.prepare('SELECT data FROM install_requests WHERE id=?').get(id);

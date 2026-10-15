@@ -60,6 +60,7 @@ export function conversationEntries(messages: Message[], events: RunEvent[], deb
 export function toolMessageLabel(message: Message): string {
   const metadata = message.metadata;
   if (metadata?.commandStatus === 'uncertain') return 'Command outcome uncertain';
+  if (metadata?.commandStatus === 'not_started') return 'Command not started';
   if (metadata?.commandStatus === 'interrupted') return 'Command interrupted';
   if (metadata?.commandStatus === 'completed' && metadata.exitCode === 0) {
     return metadata.ok === false ? 'Command exited 0; tool or report problem' : 'Command completed (exit 0)';

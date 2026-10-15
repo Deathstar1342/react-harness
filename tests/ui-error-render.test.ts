@@ -11,7 +11,7 @@ let detail: ChatDetail;
 function render(debug = false, error = '') {
   vi.mocked(useConversation).mockReturnValue({ detail, error, stream: '', connection: 'connected', fileRevision: 0, refresh: async () => {} });
   return renderToStaticMarkup(createElement(Conversation, {
-    chatId: 'c', project, configured: true, debug, onChange() {}, onFiles() {}, onChanges() {}, onFileRevision() {}, draft: '', setDraft() {},
+    chatId: 'c', project, configured: true, debug, onChange() {}, onFiles() {}, onChanges() {}, onFileRevision() {}, onSkillsDirty() {}, draft: '', setDraft() {},
   }));
 }
 beforeEach(() => {

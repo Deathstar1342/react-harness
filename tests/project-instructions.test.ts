@@ -264,9 +264,9 @@ describe('instruction freshness at runtime boundaries', () => {
       }
       requests.push(input.messages); return final();
     } };
-    // Budget the versioned role policy and M25 tool schemas;
+    // Budget the versioned role policy and M26 tool schemas;
     // the long history still forces compaction and a mid-summary refresh.
-    t.config.contextLimits.architect = 34_000;
+    t.config.contextLimits.architect = 38_000;
     const runtime = new Runtime(t.store, provider, t.tools, t.config, createManagedHooks(provider, t.store, t.config, { compactionThreshold: 0.5 }));
     try { await runtime.control(t.chat.id, 'resume'); await runtime.wait(t.chat.id); } finally { await runtime.close(); }
     expect(t.store.chat(t.chat.id).status,JSON.stringify(t.store.messages(t.chat.id))).toBe('idle'); expect(requests).toHaveLength(1);

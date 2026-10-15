@@ -9,6 +9,7 @@ import {parseToolArguments} from './tool-registry.js';
 
 export const PROCESS_LIMITS={jobs:64,outputBytes:64_000,events:128,pageBytes:16_000,waitMs:1000} as const;
 export interface ProcessOrigin {
+  skillsHash?:string;
   projectId:string; chatId:string; frameId:string; callId:string; commandId:string;
   generation:number; modeVersion:number; instructionsHash:string|null; targets:string[];
   taskId:string;
@@ -52,7 +53,7 @@ export class ProcessJobs {
   private live=new Map<string,{controller:AbortController;promise:Promise<void>;owner:symbol;release:()=>void}>();
   private closing=false;
   private outputCarry=new Map<string,string>();
-  constructor(private store:Store,private tools:ToolService,private secrets:()=>string[]=()=>[]) {}
+  constructor(private store:Store,private tools:ToolService,private secrets:()=>string[]=()=>[],private freshSkills?:(chatId:string)=>Promise<void>,private skillBinding?:(chatId:string)=>string) {}
   private get(id:string) {
     const record=this.store.getState<ProcessRecord|null>(stateKey(id),null);
     if(!record)throw new Error('Process handle is unavailable.');return record;
@@ -78,6 +79,8 @@ export class ProcessJobs {
   private validate(record:ProcessRecord,owner:symbol) {
     const current=this.get(record.id),chat=this.store.chat(record.chatId),state=this.store.getState<RunState|null>(`run:${record.chatId}`,null),goal=goalOf(this.store,record.chatId);
     const frame=state?.frames.find(frame=>frame.id===record.frameId);
+    if(state?.skillsHash!==record.skillsHash)throw new Error('Selected workflow binding changed before process dispatch.');
+    if(record.skillsHash!==undefined&&this.skillBinding?.(record.chatId)!==record.skillsHash)throw new Error('Selected workflow revision changed before process dispatch.');
     const archived=this.store.getState<import('../shared/types.js').ModelMessage[]>(`native:frame:${record.chatId}:${record.frameId}`,[]);
     const native=archived.some(message=>message.role==='assistant'&&message.tool_calls?.some(call=>call.id===record.callId&&JSON.stringify(parseToolArguments(call.function.name,call.function.arguments))===JSON.stringify(record.action)));
     if(this.closing||current.status!=='starting'||current.dispatched||current.cancellationRequested||this.live.get(record.id)?.controller.signal.aborted||chat.projectId!==record.projectId||chat.mode==='plan'||chat.modeVersion!==record.modeVersion||chat.approvalMode!==record.approvalMode||!state||state.frames[0]?.id!==record.taskId||state.planOnly||state.generation!==record.generation||state.steering.length||!frame||!native||state.instructionsHash!==record.instructionsHash||['paused','interrupted','error'].includes(chat.status))throw new Error('Process authorization changed before command dispatch.');
@@ -107,7 +110,7 @@ export class ProcessJobs {
   private async run(record:ProcessRecord,live:{controller:AbortController;owner:symbol;release:()=>void}) {
     let acknowledged=false,cleanupConfirmed=false,result:ToolResult|undefined,persistenceFailed=false;
     const context:ToolContext={projectRoot:this.store.project(record.projectId).path,chatId:record.chatId,agentId:record.id,signal:live.controller.signal,mutationOwner:live.owner,
-      prepareCommand:async()=>{this.validate(record,live.owner);const instructions=await readProjectInstructions(this.tools,context.projectRoot,record.targets);if(instructions.hash!==record.instructionsHash)throw new Error('Applicable guidance changed before process dispatch.');this.validate(record,live.owner);},
+      prepareCommand:async()=>{this.validate(record,live.owner);const instructions=await readProjectInstructions(this.tools,context.projectRoot,record.targets);if(instructions.hash!==record.instructionsHash)throw new Error('Applicable guidance changed before process dispatch.');await this.freshSkills?.(record.chatId);this.validate(record,live.owner);},
       beforeCommand:()=>{this.store.transaction(()=>{this.validate(record,live.owner);const current=this.get(record.id);current.status='running';current.dispatched=true;current.updatedAt=new Date().toISOString();this.store.setState(stateKey(record.id),current);});acknowledged=true;},
       onOutput:output=>{if(persistenceFailed)return;try{this.output(record.id,output);}catch{persistenceFailed=true;live.controller.abort();}},
     };

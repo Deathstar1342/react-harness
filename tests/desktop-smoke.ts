@@ -105,9 +105,24 @@ try {
       await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText('42');
       await expect(page.getByLabel('Unsaved changes')).toBeVisible();
       await assert.rejects(page.evaluate(()=>window.abyssusDesktop!.helper('setup')));
+      // M26: skill and file editors contribute independently to the actual
+      // preload/main-process transition guard, including unsaved draft fields.
+      await page.getByRole('button',{name:'Skills',exact:true}).click();
+      await page.getByLabel('Skill name').fill('desktop-workflow');
+      await page.getByLabel('Skill description').fill('Preserve unsaved desktop work');
+      await assert.rejects(page.evaluate(()=>window.abyssusDesktop!.helper('setup')));
+      await page.getByRole('button',{name:'Close Skills',exact:true}).click();
+      await page.getByRole('button',{name:'Discard and close',exact:true}).click();
+      // Cleaning the skill editor must not clear the still-dirty Monaco editor.
+      await assert.rejects(page.evaluate(()=>window.abyssusDesktop!.helper('setup')));
       await page.getByRole('button',{name:'Save',exact:true}).click();
       await expect(page.getByLabel('Unsaved changes')).toHaveCount(0);assert.equal(readFileSync(path.join(project,'sample.json'),'utf8'),'42');
       console.log('PASS real Monaco open, worker-backed editor input, dirty guard and version-checked save');
+      await page.getByRole('button',{name:'Skills',exact:true}).click();
+      await page.getByLabel('Workflow steps').fill('Unsaved workflow draft');
+      await assert.rejects(page.evaluate(()=>window.abyssusDesktop!.helper('setup')));
+      await page.getByRole('button',{name:'Close Skills',exact:true}).click();await page.getByRole('button',{name:'Discard and close',exact:true}).click();
+      console.log('PASS real Electron independent skill/file dirty aggregation, unsaved draft close guard and retained editor state');
       const provider=createServer(async(req,res)=>{
         if(req.url==='/v1/models'){res.setHeader('content-type','application/json');res.end(JSON.stringify({data:['gemini-3.5-pro','gemini-3.5-flash-withtools'].map(id=>({id}))}));return;}
         let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw),result=diagnosticReply(body);

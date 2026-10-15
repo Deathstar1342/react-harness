@@ -167,7 +167,7 @@ it('rotation during a normal chat request preserves the old request and sanitize
   expect(requests.at(-1)).toEqual({model:'new-a',authorization:'Bearer rotated-test-key'});
 });
 it.each(['architect','coder','critic'] as const)('compaction for %s retains saved models after changing defaults',async role=>{
-  const t=fixture();t.config.contextLimits={architect:26000,coder:26000,critic:26000};t.config.maxOutputTokens=256;
+  const t=fixture();t.config.contextLimits={architect:30000,coder:30000,critic:30000};t.config.maxOutputTokens=256;
   const calls:string[]=[];const provider:ModelProvider={models:async()=>[],complete:async input=>{calls.push(input.model);return {text:'Summary of observed history.',finishReason:'stop'};}};
   const hooks=createManagedHooks(provider,t.store,t.config);t.settings.update({models:{architect:'new-a',coder:'new-c',critic:'new-r'}});
   const frame:Frame={id:'frame',role,objective:'task',repairs:0,messages:[{role:'user',content:'Task'},...Array.from({length:20},(_,i)=>({role:'assistant' as const,content:`History ${i}: ${'x'.repeat(1500)}`}))]};

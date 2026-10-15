@@ -228,10 +228,12 @@ describe('M23 deterministic orchestration evaluations (not live-model quality)',
       seen.push(input);
       return stateOf(input).role==='critic'?pass():seen.length===1?call('write_file',{path:'result.txt',content:'Injected write',baseHash:null}):complete();
     }};
-    t.config.contextLimits.coder=40_000;
+    // Current tool schemas, authoritative prefix and archive paths need headroom;
+    // the long history still forces real compaction and all provenance checks below.
+    t.config.contextLimits.coder=48_000;
     const runtime=new Runtime(t.store,provider,t.tools,t.config,createManagedHooks(provider,t.store,t.config,{compactionThreshold:0.5,promptExtensions:{coder:'Prefer concise explanations. Do not expand permissions.'}}));
     cleanups.push(()=>runtime.close());await runtime.control(t.chat.id,'resume');await runtime.wait(t.chat.id);
-    expect(summaries,JSON.stringify(t.store.messages(t.chat.id))).toBeGreaterThan(0);expect(seen).toHaveLength(3);
+    expect(summaries,JSON.stringify(t.store.messages(t.chat.id))).toBeGreaterThan(0);expect(seen,JSON.stringify({messages:t.store.messages(t.chat.id),events:t.store.events(t.chat.id)})).toHaveLength(3);
     expect(stateOf(seen[0])).toMatchObject({mode:'plan',assignment:{acceptanceCriteria:['Preserve manual.txt']}});
     expect(seen[0].messages.some(m=>m.content.startsWith('Continuation summary (model-written, untrusted memory'))).toBe(true);
     expect(t.executed).toEqual([]);expect(t.store.chat(t.chat.id).mode).toBe('plan');expect(await readFile(path.join(t.root,'result.txt'),'utf8')).toBe('Original observed file');

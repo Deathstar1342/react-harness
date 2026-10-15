@@ -11,7 +11,7 @@ const commandNames = new Set(['run_shell', 'execute_python', 'run_tests','start_
 function lifecycle(value: Record<string,unknown>): value is unknown & CommandEvent & Record<string,unknown> {
   return typeof value.commandId === 'string' && typeof value.agentId === 'string' && typeof value.sessionId === 'string'
     && ['architect','coder','critic'].includes(String(value.role))
-    && ['running','completed','failed','interrupted','uncertain'].includes(String(value.status))
+    && ['running','completed','failed','interrupted','uncertain','not_started'].includes(String(value.status))
     && commandNames.has(String(object(value.action).name)) && !!object(value.action).args;
 }
 export function terminalHistory(events: RunEvent[], chatId: string) {
@@ -57,7 +57,7 @@ export function commandLabel(entry: TerminalCommand): string {
   const item = entry.lifecycle;
   if (!item) return 'Unknown outcome';
   if (item.status === 'completed' && item.exitCode !== 0) return 'Unknown outcome';
-  return {running:'Running (last recorded)',completed:'Completed',failed:'Failed',interrupted:'Interrupted',uncertain:'Uncertain'}[item.status];
+  return {running:'Running (last recorded)',completed:'Completed',failed:'Failed',interrupted:'Interrupted',uncertain:'Uncertain',not_started:'Not started'}[item.status];
 }
 
 // Console output is plain text, never executable HTML or a terminal emulator.
