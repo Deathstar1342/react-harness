@@ -150,7 +150,10 @@ export async function runProbe(env, fetcher = fetch) {
       result.resultCorrelated = true;
       result.acknowledgement = second.text.trim() === 'ACK' && second.calls.length === 0;
       result.status = result.acknowledgement ? 'verified' : 'unexpected_reply';
-    } catch (error) { result.status = error instanceof Failure ? error.status : 'unknown'; }
+    } catch (error) {
+      result.status = error instanceof Failure ? error.status : 'unknown';
+      if (result.status === 'model_mismatch') result.responseIdMatch = 'mismatch';
+    }
   }
   return report;
 }

@@ -69,6 +69,7 @@ for (const [name,value,status] of [
 ]) test(`native ${name} cannot pass or execute; streaming stays independent`, async () => {
   const {report} = await fixture(({body,res}) => { if (body?.tools && !body.stream) { res.end(JSON.stringify(value)); return true; } });
   assert.equal(report.native.status,status); assert.equal(report.native.resultCorrelated,false); assert.equal(report.streamingNative.status,'verified');
+  if(status==='model_mismatch')assert.equal(report.native.responseIdMatch,'mismatch');
 });
 test('follow-up tool prose is not acknowledgement', async () => {
   const {report} = await fixture(({body,res}) => { if (body?.messages.some(m=>m.role==='tool') && !body.stream) { res.end(JSON.stringify(reply('I finished '+key))); return true; } });
@@ -99,6 +100,7 @@ for(const [label,data,status] of [
   ['trailing',frame({content:'OK'},'stop')+'data: [DONE]\n\n'+frame({content:'more'}),'malformed'],
 ]) test(`conflicting SSE ${label} cannot pass`,async()=>{
   const {report}=await fixture(({body,res})=>{if(body?.stream){res.setHeader('content-type','text/event-stream');res.end(data);return true;}});assert.equal(report.streamingNative.status,status);
+  if(status==='model_mismatch')assert.equal(report.streamingNative.responseIdMatch,'mismatch');
 });
 test('missing response identity stays unknown independently of capability success',async()=>{
   const {report}=await fixture(({body,res})=>{if(body&&!body.stream){const native=Boolean(body.tools),text=body.messages.some(m=>m.role==='tool')?'ACK':'OK';const value=reply(native?'':text,native?[call]:undefined);delete value.model;res.end(JSON.stringify(value));return true;}});
@@ -106,7 +108,7 @@ test('missing response identity stays unknown independently of capability succes
 });
 test('follow-up model mismatch fails even after validated correlated arguments',async()=>{
   const {report}=await fixture(({body,res})=>{if(body?.messages.some(m=>m.role==='tool')&&!body.stream){res.end(JSON.stringify({...reply('ACK'),model:'other'}));return true;}});
-  assert.equal(report.native.status,'model_mismatch');assert.equal(report.native.argumentsValid,true);assert.equal(report.native.acknowledgement,false);
+  assert.equal(report.native.status,'model_mismatch');assert.equal(report.native.responseIdMatch,'mismatch');assert.equal(report.native.argumentsValid,true);assert.equal(report.native.acknowledgement,false);
 });
 test('catalog entry bound never paginates or starts completion probes',async()=>{
   const {report,requests}=await fixture(({res})=>{res.end(JSON.stringify({data:Array.from({length:1001},()=>({id:model}))}));return true;});assert.equal(report.catalog.status,'malformed');assert.equal(requests.length,1);
