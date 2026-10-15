@@ -24,7 +24,9 @@ export async function configureSource(root:string,prompt:Prompt,env:NodeJS.Proce
   for(const name of ['HARNESS_DATA_DIR','HARNESS_LEGACY_ROOT','HARNESS_INIT','HARNESS_SELECT_DATA','HARNESS_MIGRATION_RETRY'])if(env[name]!==undefined)throw new SetupError('Remove explicit migration/data overrides before guided setup. Existing profiles are preserved.');
   const defaultHome=env.HARNESS_HOME??savedHome(root)??path.join(homedir(),'.local','share','abyssus-native');
   const home=(await prompt(`Profile folder [${defaultHome}]: `)).trim()||defaultHome;
-  if(!path.isAbsolute(home)||home==='/'||home.startsWith('/mnt/')||/[\x00-\x1f\x7f]/.test(home))throw new SetupError('Choose an absolute Linux profile path outside Windows mounts.');
+  if(!path.isAbsolute(home)||home.length>4096||home==='/'||home.startsWith('/mnt/')||/[\x00-\x1f\x7f]/.test(home))throw new SetupError('Choose an absolute Linux profile path outside Windows mounts.');
+  const contains=(parent:string,child:string)=>{const rel=path.relative(path.resolve(parent),path.resolve(child));return rel===''||rel!=='..'&&!rel.startsWith(`..${path.sep}`)&&!path.isAbsolute(rel);};
+  if(contains(root,home)||contains(home,root))throw new SetupError('Keep the private profile separate from the checkout, not inside it or its parent folder.');
   const profile=await prepareProfile({env:{HARNESS_HOME:home,HARNESS_INIT:'1'},cwd:root,installRoot:root});
   try {
     const file=new ProviderSettingsFile(profile.paths.configFile,{}),current=file.config();

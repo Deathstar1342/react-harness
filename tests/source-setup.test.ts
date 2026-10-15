@@ -51,3 +51,8 @@ it('pins the bootstrap archive to the independently verified existing runtime ch
   const root=path.resolve(import.meta.dirname,'..'),common=readFileSync(path.join(root,'scripts/source-common.sh'),'utf8'),stage=readFileSync(path.join(root,'scripts/stage-runtime.mjs'),'utf8');
   const version=common.match(/^SOURCE_NODE_VERSION=(.*)$/m)![1],sha=common.match(/^SOURCE_NODE_SHA=(.*)$/m)![1];expect(stage).toContain(`version='${version}'`);expect(stage).toContain(`sha='${sha}'`);
 });
+it('refuses profile locations overlapping source before writing profile or launcher data',async()=>{
+  const t=fixture();
+  for(const home of [t.root,path.join(t.root,'private'),path.dirname(t.root)])await expect(configureSource(t.root,answers([home]),t.env)).rejects.toThrow('separate');
+  expect(existsSync(path.join(t.root,'.source-setup'))).toBe(false);expect(existsSync(t.file)).toBe(false);
+});

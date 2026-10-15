@@ -58,7 +58,7 @@ printf 'Linux Node, npm and sandbox prerequisites passed.\n'
 
 printf '\nInstalling locked application dependencies...\n'
 # Browser source launch needs no Electron executable download.
-ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci --foreground-scripts
 node -e 'require("node:sqlite"); require("node-pty"); console.log("SQLite and Linux PTY loaded.")'
 node --import tsx scripts/source-setup.ts
 npm run build
