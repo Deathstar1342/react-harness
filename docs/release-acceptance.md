@@ -4,6 +4,7 @@ Record the exact source/artifact SHA256, Windows build, WSL version, explicitly 
 
 | Gate | Required evidence | Current classification |
 | --- | --- | --- |
+| Clean package portability | Installed runtime and application command links resolve within the installed payload or intended system paths after the build checkout is unavailable; inspect links independently of regular-file manifests | **FAILED in M27 archive audit:** ten backend command links, including npm/npx/corepack, target absent CI build paths. M21 correction and clean-layout regression required; successful runner install tests do not waive this failure. See [independent M27 review](reports/milestone-27-coordinator.md). |
 | Windows installer | Real assisted folder choice, D: app/data choice, wrong/UNC/root/junction path refusal, cancel, missing saved drive, repeated install, uninstall/reinstall | Automated disposable NSIS checks plus manual assisted-page receipt required |
 | WSL setup | No default/service distro selected; explicit Ubuntu24.04 WSL2; bundled backend installation via normal OS package tools; runtime/PTY/sandbox ready | Clean Windows/WSL VM receipt required |
 | User data | Same profile/project/chat IDs, model snapshots, settings, key/config hash, project bytes, caches after restart and package maintenance | CI records actual Linux state; Windows/WSL end-to-end receipt required |
