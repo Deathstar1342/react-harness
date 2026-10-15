@@ -1,5 +1,23 @@
 # Setup guide
 
+## Guided source setup
+
+For the current source prototype, clone this repository inside your Ubuntu/WSL Linux home and run:
+
+```bash
+bash setup.sh
+```
+
+The interactive script checks non-root Linux and working Bubblewrap namespaces. It offers missing Ubuntu/Debian prerequisites through an explicit `sudo apt-get` confirmation. If Linux Node 24+/npm is unavailable on x64, it offers a private Node 24.16.0 download from nodejs.org with the same pinned SHA256 as runtime staging; it never pipes a downloaded installer into a shell. Other architectures need an existing compatible Node installation. Network/proxy or administrator restrictions remain actionable errors; security settings are never disabled automatically.
+
+Setup runs locked `npm ci` with the unnecessary Electron executable download disabled for browser use, verifies SQLite/PTY loading, selects a private profile (default `~/.local/share/abyssus-native`), privately prompts for URL/key/exact model IDs, and builds the UI. Model defaults are provisional until checked against your catalog. You may leave the provider blank and configure it in Settings later. The key is hidden in the terminal and saved only through the existing private configuration writer; it is not put in arguments, launcher files or npm/build environments. Changing a saved endpoint requires explicitly supplying a replacement key. Enter on reruns preserves saved values and profile identity; incompatible/active profiles reject without erasing them. Existing imported projects are untouched.
+
+After setup, use `bash start.sh` from the checkout, including in a new terminal. The ignored `.source-setup/home` records only the selected profile path. The launcher uses that selection and clears inherited provider URL/key/model overrides so a stale shell override cannot redirect the saved key. Explicit migration/data overrides must be removed before this guided flow; manual advanced startup remains available below. Stop with Ctrl+C. `bash setup.sh --no-start` finishes setup without launching; `bash setup.sh --check` checks prerequisites read-only. Stop any app running from this checkout before pulling updates and rerunning setup, because setup reinstalls dependencies and rebuilds the UI. Native compilation uses a private transient header cache under `/tmp`, removed after installation or failure, to avoid header-path quoting problems when the home contains spaces.
+
+Use a Linux filesystem path, not `/mnt/c` or `/mnt/d`; a WSL distro stored on D already stores its Linux home there. Ordinary setup may need approved access to Ubuntu repositories, nodejs.org and npm. It does not install the privileged apt helper, contact STARK, alter WSL distributions, or update an installed desktop preview. Native model testing still occurs at work through Settings → Test connection.
+
+This is a source convenience script, not the customer installer. The intended packaged onboarding bundles the runtime/backend/UI and guides storage/provider setup without npm/profile commands. Windows still requires the supported Linux/WSL backend and OS-authorized prerequisites. M21 packaging remains paused, including the known portability/internal-manifest/source-notices/manual acceptance gates; no one-click customer release is claimed by this script.
+
 ## System install settings (M19)
 
 Open Settings: **System installs** immediately follows workspace approvals. **Ask every time** is the default. Workspace autonomy never changes it. **Auto-approve** admits only supported concrete apt previews; **AI review** uses an independent selected reviewer and falls back to a human when review is invalid/unavailable. Reviewer selection starts from the critic default and is separate from saved chat models. Policy and reviewer edits save to this profile and invalidate pending decisions.
@@ -34,7 +52,7 @@ On Ubuntu/Debian, install the non-Node prerequisites with:
 
 ```bash
 sudo apt update
-sudo apt install -y git curl python3 python3-venv build-essential
+sudo apt install -y git curl python3 python3-venv build-essential bubblewrap socat
 ```
 
 Verify the tools in your WSL terminal:

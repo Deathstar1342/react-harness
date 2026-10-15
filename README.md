@@ -6,6 +6,8 @@ React + TypeScript, a Node.js 24 backend, SQLite via `node:sqlite`, and a local 
 
 ## Run in WSL
 
+**Quick setup:** in a fresh checkout inside your Ubuntu/WSL Linux home, run `bash setup.sh`. It checks sandbox prerequisites, offers missing Ubuntu packages with an explicit sudo prompt, offers a pinned checksum-verified user-local Node runtime if needed, installs locked npm dependencies, initializes/selects a private native profile, prompts for API settings with a hidden key, and builds the UI. No provider calls, privileged helper provisioning, kernel-policy changes or profile migration occur. Later run **`bash start.sh`** from that checkout; it remembers the profile without putting credentials in the launcher. See [guided setup](docs/setup.md#guided-source-setup).
+
 For a full walkthrough, including work-network STARK checks, upgrades, backups, and troubleshooting, see the **[Setup guide](docs/setup.md)**.
 
 Prerequisites: Node.js 24 or newer, npm, Git, Bash, and Python 3 for Python tools. If `node-pty` needs to compile on your Linux distribution, install its usual native build prerequisites (Python 3, make, and a C++ compiler). Keep the checkout and working projects in your WSL home directory for filesystem performance.
