@@ -14,6 +14,7 @@ coverage/
 
 # Local runtime state, projects, logs, and databases
 .harness/
+.source-setup/
 data/
 workspaces/
 logs/

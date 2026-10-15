@@ -19,6 +19,9 @@ jobs:
           bwrap --version
           socat -V
       - run: npm ci
+      - name: Guided source setup - real Linux checks, terminal privacy and download rejection
+        timeout-minutes: 10
+        run: python3 tests/source-setup-linux.py
       - run: npm run typecheck
       - run: npm test
       - name: Bounded native diagnostic synthetic HTTP and SSE
