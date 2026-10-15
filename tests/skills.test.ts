@@ -27,7 +27,7 @@ afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close()
 type Reply=CompletionResult|((input:Parameters<ModelProvider['complete']>[0])=>CompletionResult|Promise<CompletionResult>);
 async function fixture(authenticated=true) {
   const root=await mkdtemp(path.join(tmpdir(),'m26-')),projectRoot=path.join(root,'project'),home=path.join(root,'app');
-  await mkdir(projectRoot);await mkdir(home);
+  await mkdir(projectRoot);await mkdir(home,{mode:0o700});
   const config=readConfig({HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'data'),HARNESS_WORKSPACE_ROOT:path.join(root,'workspaces'),MODEL_MAX_OUTPUT_TOKENS:'512'});
   const store=new Store(path.join(home,'state.sqlite')),tools=new WorkspaceTools();
   const project=store.createProject('Skills',projectRoot),chat=store.createChat(project.id,'Workflow','review');
