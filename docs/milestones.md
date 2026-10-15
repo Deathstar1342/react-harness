@@ -48,6 +48,8 @@ Delivered on GitHub main on 2026-10-14: report-only handoff `678c768`, tested so
 
 ### M26 — Reusable skills
 
+Delivered on GitHub main on 2026-10-14: report-only handoff `113494f`, tested source `fe0122c`, integration `1c372f5`. Coordinator independently passed 871 Windows tests / 45 skips, typecheck/build, actual skill Chrome/screenshots/Windows Electron and 101 integration checks / two skips. Every applicable exact-main step passed [Validate](https://github.com/Deathstar1342/react-harness/actions/runs/38660181233), [Desktop Windows/Ubuntu](https://github.com/Deathstar1342/react-harness/actions/runs/38660181327) and [helper](https://github.com/Deathstar1342/react-harness/actions/runs/38660181248). M27 may start from reviewed published main. Original failed Linux/coordinator and diagnostic receipts remain; live provider/device/native-human and M21 packaging gates are distinct. See [coordinator review](reports/milestone-26-coordinator.md).
+
 - Project `.abyssus/skills/<name>/SKILL.md` and personal application-home skills describe reusable workflows, not new execution authority. Discover bounded metadata, load full text only when relevant, and record the revisions used by active work.
 - Skills panel and native tools create/edit/save/invoke skills, including "turn this task into a skill". Apply existing write/approval rules; explicit personal promotion has a clear destination. Validate names/paths/frontmatter/size and reject unsafe links. Skill text cannot grant approval, install handlers or override runtime controls.
 - Own skills storage/catalog/loading/tools/UI/API/context/tests/docs/report. Test drafting/saving, explicit invocation, revisions, restart/compaction, malformed paths/metadata and instruction/permission conflicts.
