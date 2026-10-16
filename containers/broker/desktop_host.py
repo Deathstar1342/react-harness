@@ -183,6 +183,24 @@ class DesktopHost:
             return capability['launchId']==self.owner['launchId'] and value['state']=='stopped' and value['version']==1 and value['instanceId']==self.owner['instanceId'] and value['profileId']==self.owner['profileId'] and hmac.compare_digest(expected,value['mac'])
         except Exception:return False
 
+    def wait_broker_exit(self):
+        # The signed shutdown response precedes listener/proxy/journal teardown.
+        # This lifetime lease is required even after supervisor crash/reconnect,
+        # where no live child-process handle exists. Never inspect a guessed PID.
+        import fcntl
+        from transfers import root_handle
+        with root_handle(self.storage/'runtime') as parent:
+            fd=os.open('broker.lock',os.O_RDWR|os.O_NOFOLLOW,dir_fd=parent)
+            try:
+                from native_io import private_fd
+                private_fd(fd);end=time.monotonic()+20
+                while True:
+                    try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+                    except BlockingIOError:
+                        require(time.monotonic()<end,'BROKER_EXIT_UNVERIFIED');time.sleep(.05)
+                require(not (self.storage/'runtime/control/session.json').exists(),'BROKER_ENDPOINT_RETAINED')
+            finally:os.close(fd)
+
     def dispatch(self,request):
         op=request.get('op')
         if op=='stopped':
@@ -192,6 +210,7 @@ class DesktopHost:
             exact(request,['op']);require(self.dispatch({'op':'stopped'})['stopped'],'CONTROLLER_DRAIN_UNVERIFIED')
             result=broker_request(str(self.storage),'shutdown');require(result=={'stopped':True},'BROKER_DRAIN_UNVERIFIED')
             if self.broker:require(self.broker.wait(timeout=20)==0,'BROKER_DRAIN_UNVERIFIED')
+            self.wait_broker_exit()
             info=self.owned()
             if info:self.call(['rm',info['Id']])
             return {'stopped':True}
@@ -213,7 +232,11 @@ class DesktopHost:
 def main():
     os.umask(0o077)
     raw=sys.stdin.buffer.readline(16385);require(len(raw)<=16384 and raw.endswith(b'\n'),'INVALID_LAUNCH')
-    host=DesktopHost(json.loads(raw));value=host.start()
+    host=DesktopHost(json.loads(raw))
+    try:value=host.start()
+    except Exception as error:
+        print(canonical({'startupFailure':type(error).__name__,'ownedPhase':host.owner.get('phase') if host.owner else None}),file=sys.stderr,flush=True)
+        raise
     print(canonical({'ready':value}),flush=True)
     while True:
         raw=sys.stdin.buffer.readline(16385)

@@ -3,6 +3,8 @@ import { mkdtempSync,mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 const root=path.resolve(import.meta.dirname,'..'),out=process.env.M31_RECEIPTS,appRoot=process.env.M31_APP_ROOT;
 if(!out||!appRoot)throw new Error('Explicit external staging/receipt paths required');
 mkdirSync(out,{recursive:true});const home=mkdtempSync(path.join(tmpdir(),'m31-electron-'));
@@ -20,8 +22,11 @@ try {
  const selected=path.join(home,'selected-storage');mkdirSync(selected);
  await app.evaluate(({dialog},selected)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[selected]});},selected);
  await page.getByRole('button',{name:'Choose storage folder'}).click();await expect(page.getByText(selected,{exact:true})).toBeVisible();
+ const second=spawn(createRequire(import.meta.url)('electron'),[path.join(root,'tests/desktop-container-entry.cjs')],{cwd:tmpdir(),env:{...process.env,M31_APP_ROOT:appRoot,M31_SMOKE_HOME:home},windowsHide:true,stdio:'ignore'});
+ await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{second.kill();reject(new Error('Second instance failed to exit'));},15000);second.once('error',error=>{clearTimeout(timer);reject(error);});second.once('close',code=>{clearTimeout(timer);code===0?resolve():reject(new Error('Second instance exit failed'));});});
+ assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),1);
  await page.screenshot({path:path.join(out,`m31-container-${process.platform}.png`)});
- console.log('PASS actual Electron container onboarding/isolation/native picker handoff; dialog return synthetic, no Docker acceptance');
+ console.log('PASS actual Electron container onboarding/isolation/native picker handoff; dialog return and packaged flag synthetic; actual single-instance lock; no Docker/package acceptance');
  await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
  await app.close();
 }catch(error){await app.evaluate(({app})=>app.exit(1)).catch(()=>{});throw error;}

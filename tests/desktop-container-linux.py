@@ -73,6 +73,19 @@ def shutdown():
 
 try:
     first=start();check('real native supervisor initializes and authenticates private controller',not first['reconnect'])
+    sys.path.insert(0,str(ROOT/'containers/broker'))
+    from resources import Resources
+    from storage_probe import FixedStorageProbe
+    class ProbeDocker:
+        storage=STORAGE;storage_id=launch['storageId']
+        def call(self,args,timeout=30,input=None):
+            result=subprocess.run(['docker','--context',context,*args],input=input,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=ENV,timeout=timeout)
+            assert result.returncode==0,'fixed probe engine operation failed';return result.stdout
+    probe_docker=ProbeDocker();probe_docker.resources=Resources(probe_docker)
+    challenge={'version':1,'revision':1,'probeId':str(uuid.uuid4()),'nonce':secrets.token_hex(32),'launchId':launch['launchId'],'storageId':launch['storageId']}
+    measured=FixedStorageProbe(probe_docker,launch['controllerImage'],os.getuid(),os.getgid())(challenge)
+    check('fixed trusted image proves distinct readonly slots and independent Linux bind WAL locks',measured['sqlite']['secondWriterDenied'])
+    probe_docker.resources.db.close()
     api('/health',token=False,expected=401);api('/auth/pair',{'code':'0'*48},expected=403,token=False)
     check('controller requires bearer and disables browser pairing')
     project=api('/projects',{'name':'Desktop persistence','mode':'create'},201)
@@ -92,17 +105,26 @@ try:
     check('managed copies and registrations survive container recreation',any(p['id']==imported['project']['id'] for p in api('/projects')))
     shutdown();check('second clean stop retains private state and managed files',(STORAGE/'state/profile/state/state.sqlite').is_file())
 except Exception as error:
-    owner_file=STORAGE/'runtime/desktop-owner.json'
-    if owner_file.exists():
-        owner=json.loads(owner_file.read_text())
-        if owner.get('id'):
-            info=json.loads(docker('inspect',owner['id']))[0]
-            if info['Config'].get('Labels',{}).get('abyssus.desktop')==owner['owner']:
-                (OUT/'m31-desktop-ownership.json').write_text(json.dumps({'ownerPhase':owner.get('phase'),'mounts':[{k:m.get(k) for k in ('Type','Source','Destination','RW')} for m in info['Mounts']],'user':info['Config']['User'],'hostConfig':{key:info['HostConfig'].get(key) for key in ('Privileged','ReadonlyRootfs','NetworkMode','CapDrop','CapAdd','Devices','DeviceRequests','Binds','VolumesFrom','PidMode','IpcMode','UTSMode','Tmpfs','Init','PidsLimit','Memory','NanoCpus','SecurityOpt','PortBindings')}},indent=2))
     (OUT/'m31-desktop-failure.txt').write_text(type(error).__name__+': '+str(error))
+    try:
+        owner_file=STORAGE/'runtime/desktop-owner.json'
+        if owner_file.exists():
+            owner=json.loads(owner_file.read_text())
+            if owner.get('id'):
+                present=docker('ps','-a','--no-trunc','--filter','id='+owner['id'],'--format','{{.ID}}')
+                if not present:(OUT/'m31-desktop-ownership.json').write_text(json.dumps({'ownedAbsent':True,'ownerPhase':owner.get('phase')}))
+                else:
+                    info=json.loads(docker('inspect',owner['id']))[0]
+                    if info['Config'].get('Labels',{}).get('abyssus.desktop')==owner['owner']:
+                        (OUT/'m31-desktop-ownership.json').write_text(json.dumps({'ownerPhase':owner.get('phase'),'mounts':[{k:m.get(k) for k in ('Type','Source','Destination','RW')} for m in info['Mounts']],'user':info['Config']['User'],'hostConfig':{key:info['HostConfig'].get(key) for key in ('Privileged','ReadonlyRootfs','NetworkMode','CapDrop','CapAdd','Devices','DeviceRequests','Binds','VolumesFrom','PidMode','IpcMode','UTSMode','Tmpfs','Init','PidsLimit','Memory','NanoCpus','SecurityOpt','PortBindings')}},indent=2))
+    except Exception as diagnostic_error:
+        (OUT/'m31-desktop-diagnostic-failure.txt').write_text(type(diagnostic_error).__name__)
     raise
 finally:
     if child and child.poll() is None:
         # Failure cleanup is exact test-owned, never engine-wide discovery/prune.
         child.kill();child.wait(timeout=10)
+    if child and child.stderr:
+        diagnostic=child.stderr.read(8192)
+        (OUT/'m31-supervisor-diagnostic.txt').write_text(diagnostic)
     (OUT/'m31-desktop-checks.json').write_text(json.dumps({'source':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),'checks':checks,'count':len(checks),'platform':'actual disposable Linux Docker','provider':'none','windows':'not tested'},indent=2))

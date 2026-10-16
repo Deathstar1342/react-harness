@@ -1,5 +1,9 @@
 """Portable exact ownership guards; no Docker/host processes are created."""
 import copy
+import os
+import tempfile
+import subprocess
+import threading
 import json
 from pathlib import Path
 import sys
@@ -45,5 +49,28 @@ class Ownership(unittest.TestCase):
         self.host.storage_check=lambda:None;self.host.stopped_receipt=lambda:False
         self.assertEqual(self.host.dispatch({'op':'stopped'}),{'stopped':False})
         with self.assertRaisesRegex(Denied,'CONTROLLER_DRAIN_UNVERIFIED'):self.host.dispatch({'op':'drain'})
+
+
+class BrokerExit(unittest.TestCase):
+    @unittest.skipUnless(os.name=='posix','actual Linux lifetime lease')
+    def test_reconnected_supervisor_waits_for_listener_teardown_lease(self):
+        root=Path(tempfile.mkdtemp(prefix='m31-broker-exit-'));runtime=root/'runtime';runtime.mkdir(mode=0o700);(runtime/'control').mkdir(mode=0o700)
+        (runtime/'control/session.json').write_text('fixture')
+        code="import fcntl,sys;from pathlib import Path;p=Path(sys.argv[1]);f=(p/'broker.lock').open('a');fcntl.flock(f,fcntl.LOCK_EX);print('held',flush=True);sys.stdin.readline();(p/'control/session.json').unlink();f.close()"
+        child=subprocess.Popen([sys.executable,'-I','-B','-c',code,str(runtime)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(),'held')
+            (runtime/'broker.lock').chmod(0o600)
+            host=object.__new__(DesktopHost);host.storage=root;host.broker=None
+            done=threading.Event();errors=[]
+            def wait():
+                try:host.wait_broker_exit()
+                except BaseException as error:errors.append(error)
+                finally:done.set()
+            thread=threading.Thread(target=wait);thread.start()
+            self.assertFalse(done.wait(.1));child.stdin.write('close\n');child.stdin.flush();self.assertEqual(child.wait(timeout=10),0)
+            self.assertTrue(done.wait(10));thread.join();self.assertEqual(errors,[])
+        finally:
+            if child.poll() is None:child.kill();child.wait(timeout=10)
 
 if __name__=='__main__':unittest.main()

@@ -121,6 +121,13 @@ class NativeHandles(unittest.TestCase):
         with lineage_lock(self.root):save_lineage(self.root,{'roots':[]})
         self.assertEqual(private_json(self.root/'origins.json'),{'roots':[]})
 
+
+    def test_actual_native_sqlite_wal_blocks_second_process_and_reopens(self):
+        from sqlite_probe import probe_native
+        self.native.privatize_empty(self.root)
+        self.assertEqual(probe_native(self.root,'f'*64),{'wal':True,'secondWriterDenied':True,'reopened':True})
+        with self.assertRaises(Exception):probe_native(self.root,'f'*64)
+
     def test_hardlinks_and_nonlocal_paths_are_rejected(self):
         file=self.root/'file';file.write_text('x');os.link(file,self.root/'hardlink')
         with self.assertRaises(ValueError):self.native.PinnedPath(file,directory=False)

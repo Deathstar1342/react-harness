@@ -90,7 +90,12 @@ def stage(output,downloads):
                 target=file.resolve();require(output in target.parents and target.is_file(),'External runtime symlink');data=target.read_bytes();mode=target.stat().st_mode;file.unlink();file.write_bytes(data);file.chmod(mode)
         shutil.copyfile(source/'LICENSE',output/'LICENSE')
         executable='bin/python3.13'
-        provenance.update(configure=configure,compiler=subprocess.check_output(['cc','--version'],text=True),externalLibraries=subprocess.check_output(['ldd',str(output/executable)],text=True))
+        dependencies={}
+        for binary in [output/executable,*sorted(output.rglob('*.so'))]:
+            result=subprocess.run(['ldd',str(binary)],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,check=True)
+            require('not found' not in result.stdout,'Unresolved private runtime library')
+            dependencies[binary.relative_to(output).as_posix()]=result.stdout
+        provenance.update(configure=configure,compiler=subprocess.check_output(['cc','--version'],text=True),externalLibraries=dependencies,distribution=Path('/etc/os-release').read_text())
     (output/'provenance.json').write_text(json.dumps(provenance,indent=2)+'\n')
     files={};total=0
     for file in sorted(output.rglob('*')):
