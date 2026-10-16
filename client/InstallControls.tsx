@@ -4,8 +4,8 @@ import { errorText, id, post, request } from './api';
 
 export function InstallPreview({preview}: {preview:PackageHelperPreview}) {
   return <div className="install-preview">
-    <p><strong>Linux target: {preview.target.distribution} {preview.target.release} · {preview.target.architecture}</strong></p>
-    <p className="field-help">Installs run in this Linux environment. Package maintainer scripts run as root; triggers can change existing packages and services. Package-defined service changes and script effects are not bounded by download size.</p>
+    <p><strong>{preview.target.scope==='project-container'?'Execution container':'Linux target'}: {preview.target.distribution} {preview.target.release} · {preview.target.architecture}</strong></p>
+    <p className="field-help">{preview.target.scope==='project-container'?'Installs run in a mount-free maintenance container. The reviewed image becomes this project’s execution environment only after integrity checks; packages that change the trusted runtime cannot be published.':'Installs run in this Linux environment.'} Package maintainer scripts run as root; triggers can change existing packages and services. Package-defined service changes and script effects are not bounded by download size.</p>
     <ul>{preview.packages.map(p=><li key={p.name}><strong>{p.name} {p.version}</strong> · {p.architecture} · {p.requested?'requested':'dependency'}<br/>{p.repositories.map(r=>`${r.origin} / ${r.archive} / ${r.component} / ${r.site}`).join('; ')}</li>)}</ul>
     <p>{preview.impact.newPackages} new packages · {preview.impact.downloadBytes} download bytes · {preview.impact.installedBytes} declared installed bytes. No upgrades, downgrades or removals.</p>
     <details><summary>Exact versions, provenance and target identity</summary><pre>{JSON.stringify(preview,null,2)}</pre></details>
@@ -37,8 +37,8 @@ export function InstallSettingsControls() {
   const save=async(patch:object)=>{if(!settings||busy)return;setBusy(true);setError('');try{const next=await request<InstallSettingsView>('/system-installs/settings',{method:'PATCH',body:JSON.stringify({...patch,revision:settings.revision})});setSettings(next);setModel(next.reviewerModel);}catch(e){setError(errorText(e));}finally{setBusy(false);}};
   return <section className="settings-section"><h3>System installs</h3>
     <label>System install policy<select aria-label="System install policy" value={settings?.policy??'ask'} disabled={!settings||busy} onChange={e=>void save({policy:e.target.value})}><option value="ask">Ask every time</option><option value="auto">Auto-approve</option><option value="ai">AI review</option></select></label>
-    <p className="field-help">Applies to this app profile and the selected Linux target. Workspace approval choices do not change it. Changes invalidate pending install decisions.</p>
-    <p role="status">{settings?.message??'Checking selected Linux environment…'}{settings?.target&&` · ${settings.target.distribution} ${settings.target.release} (${settings.target.architecture})`}</p>
+    <p className="field-help">Applies to this app profile{settings?.scope==='project-execution-container'?' and each project execution container':' and the selected Linux target'}. Workspace approval choices do not change it. Changes invalidate pending install decisions.</p>
+    <p role="status">{settings?.message??'Checking install target…'}{settings?.target&&` · ${settings.target.distribution} ${settings.target.release} (${settings.target.architecture})`}</p>
     <label>Install reviewer model<input aria-label="Install reviewer model" list="install-review-models" value={model} disabled={busy||!settings} onChange={e=>setModel(e.target.value)}/></label>
     <datalist id="install-review-models">{models.map(value=><option key={value} value={value}/>)}</datalist>
     <button className="text-button" disabled={busy||!settings||model===settings.reviewerModel} onClick={()=>void save({reviewerModel:model})}>Save reviewer model</button> <button className="text-button" onClick={()=>void request<{models:string[]}>('/models').then(data=>setModels(data.models)).catch(e=>setError(errorText(e)))}>Load model choices</button>

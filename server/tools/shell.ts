@@ -12,7 +12,7 @@ export function childEnvironment(source: NodeJS.ProcessEnv = process.env): Recor
   }
   return { ...result, TERM: 'dumb', PS1: '', PS2: '', PROMPT_COMMAND: '', NO_COLOR: '1' };
 }
-export interface CommandResult { status?:'not_started'; output: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean; truncated?: boolean; error?: string; backgroundPids?: number[]; shellReset?: boolean }
+export interface CommandResult { uncertain?:boolean; status?:'not_started'; output: string; exitCode?: number; cancelled?: boolean; timedOut?: boolean; truncated?: boolean; error?: string; backgroundPids?: number[]; shellReset?: boolean }
 export interface ShellOptions { maxOutputBytes: number; maxQueue: number; maxSessions: number; defaultTimeoutMs: number; maxTimeoutMs: number; shell: string; sandbox?: LinuxSandbox }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 class PersistentShell {

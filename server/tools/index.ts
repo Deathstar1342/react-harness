@@ -1,3 +1,4 @@
+import {ContainerShellPool} from '../container-shell.js';
 import { lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -23,7 +24,8 @@ export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<Omi
 export class WorkspaceTools implements ToolService {
   readonly processLifecycle='sandbox-dispatch-v1' as const;
   private files: WorkspaceFiles;
-  private shells: ShellPool;
+  private shells: ShellPool | ContainerShellPool;
+  private container?:ContainerShellPool;
   readonly sandbox = new LinuxSandbox();
   private disposed = false;
   private removing=new Set<string>();
@@ -67,8 +69,8 @@ export class WorkspaceTools implements ToolService {
     this.files = new WorkspaceFiles({ maxFileBytes: options.maxFileBytes ?? 2_000_000, maxEntries: options.maxEntries ?? 10_000, maxSearchFiles: options.maxSearchFiles ?? 20_000, leaseMs: options.leaseMs ?? 45_000 });
     this.shells = new ShellPool({ maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash', sandbox:this.sandbox });
   }
-  configureSandbox(policy:SandboxPolicy){this.sandbox.configure(policy);}
-  resetSandbox(root:string){return this.removeScope(root,undefined,()=>this.sandbox.reset(root));}
+  configureSandbox(policy:SandboxPolicy){this.sandbox.configure(policy);if(policy.executionMode==='container'){this.container??=new ContainerShellPool();this.shells=this.container;}}
+  async resetSandbox(root:string):Promise<void>{await this.removeScope(root,undefined,async()=>{if(this.container)await this.container.reset(root);else this.sandbox.reset(root);});}
   private check(): void { if (this.disposed) throw new ToolError('Tool service has been disposed.'); }
   read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.tracked(root,()=>this.files.read(root, path)); }
   list(root: string, path = '') { this.check(); return this.tracked(root,()=>this.files.list(root, path)); }
@@ -123,7 +125,7 @@ export class WorkspaceTools implements ToolService {
     }
     if (definitionFor(action.name).command) {
       if (args.reportPath) await scoped(context.projectRoot, args.reportPath);
-      return { effect: 'execute', risk: 'elevated', description: `${action.name}: sandboxed execution can modify the selected project and private dependencies. Registry-only network capability. Requires runtime authorization.` };
+      return { effect: 'execute', risk: 'elevated', description: `${action.name}: sandboxed execution can modify the selected project and private dependencies. ${this.container?'Public HTTP(S) proxy; private network targets denied.':'Registry-only network capability.'} Requires runtime authorization.` };
     }
     return { effect: 'read', risk: 'routine', description: action.name, ...(args.path !== undefined ? { path: args.path } : {}) };
   }
@@ -144,6 +146,7 @@ export class WorkspaceTools implements ToolService {
       this.check(); const args = validate(action);
       if (context.signal?.aborted) return { ok: false, output: 'Cancelled before execution.' };
       const root = rootPathSync(context.projectRoot);
+      if(this.container&&definitionFor(action.name).command){const before=context.beforeCommand;context={...context,beforeCommand:binding=>{this.files.assertRemovable(root);before?.(binding);}};}
       if (definitionFor(action.name).fileMutation) {
         const changes = await this.fileChanges(root, action), change = changes[0];
         if (action.name === 'rename_file') {
@@ -153,7 +156,7 @@ export class WorkspaceTools implements ToolService {
         const result = await this.files.save(root, args.path, change.after.content, args.baseHash, context.agentId, () => {fileMutationStarted = true;}, action.name === 'delete_file');
         return {ok: true, output: `${action.name === 'delete_file' ? 'Removed' : 'Saved'} ${result.path}`, data: {...result, snapshots: [result]}};
       }
-      if(['run_shell','execute_python','run_tests','git_status','git_diff'].includes(action.name))this.sandbox.assertExecutionAvailable();
+      if(!this.container&&['run_shell','execute_python','run_tests','git_status','git_diff'].includes(action.name))this.sandbox.assertExecutionAvailable();
       switch (action.name) {
         case 'read_file_range': { const data = await this.files.range(root,args.path,args.startLine,args.count); return {ok: data.hash !== null, output: data.content, data}; }
         case 'search_page': { const data = await this.files.searchPage(root,args.query,args.path,args.offset,args.limit,args.revision); return {ok: true, output: JSON.stringify(data), data}; }
@@ -167,8 +170,8 @@ export class WorkspaceTools implements ToolService {
           return this.commandResult(await this.shells.run(context, command, args.timeoutMs));
         }
         case 'run_tests': return await this.runTests(context, args);
-        case 'git_status': return await this.gitStatus(root, context.signal);
-        case 'git_diff': return await this.gitDiff(root, args.path, context.signal);
+        case 'git_status': return await this.gitStatus(root, context.signal,context);
+        case 'git_diff': return await this.gitDiff(root, args.path, context.signal,context);
         default: throw new ToolError('Unknown workspace tool.');
       }
     } catch (error) { return { ok: false, output: error instanceof Error ? error.message : 'Tool operation failed.', data: {...(error instanceof ToolError ? {code:error.code} : {}),...(definitionFor(action.name).fileMutation ? {mutation:fileMutationStarted ? 'uncertain' : 'not_started', uncertain: fileMutationStarted} : {})} }; }
@@ -176,15 +179,20 @@ export class WorkspaceTools implements ToolService {
   private commandResult(result: CommandResult): ToolResult {
     return { ok: result.exitCode === 0 && !result.error && !result.cancelled && !result.timedOut, output: [result.output, result.error, result.truncated ? '[Output truncated]' : ''].filter(Boolean).join('\n'), data: result };
   }
-  private async assertGitRoot(root: string, signal?: AbortSignal): Promise<void> {
+  private async git(root:string,args:string[],limit:number,signal?:AbortSignal,context?:ToolContext){
+    if(!this.container)return gitCommand(root,args,limit,signal,this.sandbox);
+    const owned={...(context??{projectRoot:root,chatId:'fixed-git',agentId:'fixed-git',signal}),agentId:(context?.agentId??'fixed-git')+':git'};
+    try{return await this.container.git(owned,args,limit);}finally{await this.container.closeContext(owned);}
+  }
+  private async assertGitRoot(root: string, signal?: AbortSignal,context?:ToolContext): Promise<void> {
     if(!existsSync(path.join(root,'.git')))throw new ToolError('Git working tree must match the workspace root.');
-    const result = await gitCommand(root, ['rev-parse', '--show-toplevel'], this.maxOutputBytes, signal, this.sandbox);
+    const result = await this.git(root, ['rev-parse', '--show-toplevel'], this.maxOutputBytes, signal,context);
     if (result.exitCode !== 0 || result.error) throw new ToolError('Workspace root is not an available Git working tree.');
     if (key(await rootPath(result.output.trim())) !== key(root)) throw new ToolError('Git working tree must match the workspace root.');
   }
-  private async gitStatus(root: string, signal?: AbortSignal): Promise<ToolResult> {
-    await this.assertGitRoot(root, signal);
-    const result = await gitCommand(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all'], this.maxOutputBytes, signal, this.sandbox);
+  private async gitStatus(root: string, signal?: AbortSignal,context?:ToolContext): Promise<ToolResult> {
+    await this.assertGitRoot(root, signal,context);
+    const result = await this.git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all'], this.maxOutputBytes, signal,context);
     if (result.exitCode !== 0 || result.error) return this.commandResult(result);
     if (result.truncated) throw new ToolError('Git status exceeds output limit.');
     const raw = result.output.split('\0'), entries: { status: string; path: string; originalPath?: string }[] = [];
@@ -198,13 +206,13 @@ export class WorkspaceTools implements ToolService {
     }
     return { ok: true, output: JSON.stringify(entries), data: entries };
   }
-  private async gitDiff(root: string, input?: string, signal?: AbortSignal): Promise<ToolResult> {
-    await this.assertGitRoot(root, signal);
+  private async gitDiff(root: string, input?: string, signal?: AbortSignal,context?:ToolContext): Promise<ToolResult> {
+    await this.assertGitRoot(root, signal,context);
     const requested = input !== undefined ? (await scoped(root, input, true)).relative : '';
     const sections: string[] = [];
     for (const cached of [false, true]) {
       const flags = cached ? ['--cached'] : [];
-      const names = await gitCommand(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', '--', ...(requested ? [requested] : [])], this.maxOutputBytes, signal, this.sandbox);
+      const names = await this.git(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', '--', ...(requested ? [requested] : [])], this.maxOutputBytes, signal,context);
       if (names.exitCode !== 0 || names.error) return this.commandResult(names);
       if (names.truncated) throw new ToolError('Git paths exceed output limit. Select a narrower path.');
       const paths: string[] = [];
@@ -212,7 +220,7 @@ export class WorkspaceTools implements ToolService {
       if (!paths.length) continue;
       // Disabling rename detection avoids showing the old contents of a protected file.
       for (let index = 0; index < paths.length; index += 100) {
-        const result = await gitCommand(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-submodules=all', '--', ...paths.slice(index, index + 100)], this.maxOutputBytes, signal, this.sandbox);
+        const result = await this.git(root, ['diff', ...flags, '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-submodules=all', '--', ...paths.slice(index, index + 100)], this.maxOutputBytes, signal,context);
         if (result.exitCode !== 0 || result.error) return this.commandResult(result);
         if (result.truncated) throw new ToolError('Git diff exceeds output limit. Select a narrower path.');
         sections.push(`${cached ? 'Staged' : 'Unstaged'} changes:\n${result.output}`);

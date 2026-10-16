@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { Goal, GoalRef, GoalRevision, GoalStatus, GoalStep, Plan, InstallSettings } from '../shared/types.js';
+import type { Goal, GoalRef, GoalRevision, GoalStatus, GoalStep, Plan, InstallSettings, ContainerInstallReceipt } from '../shared/types.js';
 import type { Store } from './store.js';
 import type { Frame } from './runtime.js';
 import type { ScopeSnapshot } from './verification-scope.js';
@@ -16,7 +16,7 @@ export type GoalInput = z.infer<typeof goalInput>;
 export interface GoalAcceptance { reviewEventId: number; goalId: string; revision: number; generation: number; frame: Pick<Frame,'id'|'assignment'|'planStep'|'evidenceEventIds'>; scope: ScopeSnapshot }
 interface Obligation { key: string; revision: number; evidence: AssignmentEvidence }
 interface InstallUncertaintyLink {eventId:number;installId:string;targetKey:string;previewDigest:string}
-export interface InstallRecoveryReceipt {installId:string;chatId:string;targetKey:string;previewDigest:string;method:'status'|'reconcile';eventId:number;state:string;healthy:boolean;matches:boolean}
+export interface InstallRecoveryReceipt {containerReceipt?:ContainerInstallReceipt;installId:string;chatId:string;targetKey:string;previewDigest:string;method:'status'|'reconcile';eventId:number;state:string;healthy:boolean;matches:boolean}
 export const goalOf = (store: Store, chatId: string) => store.getState<Goal | undefined>(`goal:${chatId}`,undefined);
 export const acceptances = (store: Store, chatId: string) => store.getState<GoalAcceptance[]>(`goal-evidence:${chatId}`,[]);
 export function saveGoal(store: Store, chatId: string, goal: Goal) {
@@ -48,12 +48,13 @@ export function addGoalUncertainty(store:Store,chatId:string,goal:Goal,ids:numbe
 }
 export function installResolutions(store:Store,chatId:string,goal:Goal):NonNullable<Goal['resolvedUncertainties']> {
   const selected=store.getState<InstallSettings|null>('system-installs:v1',null)?.target;
-  if(!selected)return [];
   return store.getState<InstallUncertaintyLink[]>(`goal-install-links:${chatId}`,[]).flatMap(link=>{
     if(!goal.uncertainEventIds.includes(link.eventId))return [];
     const receipt=store.getState<InstallRecoveryReceipt|null>(`install-reconciliation:${link.installId}`,null);
     const install=store.installs().find(item=>item.id===link.installId && item.chatId===chatId);
-    if(!receipt || receipt.installId!==link.installId || receipt.chatId!==chatId || receipt.targetKey!==link.targetKey || receipt.previewDigest!==link.previewDigest || receipt.state!=='succeeded' || !receipt.healthy || !receipt.matches || !['status','reconcile'].includes(receipt.method) || !install || install.state!=='succeeded' || install.recoveryRequired || !install.reconciliation?.healthy || !install.reconciliation.matches || install.previewDigest!==link.previewDigest || helperCanonical(install.settings.target)!==link.targetKey || helperCanonical(selected)!==link.targetKey)return [];
+    const container=install?.settings.target?.scope==='project-container';
+    if(container?(!install?.containerReceipt||helperCanonical(receipt?.containerReceipt??null)!==helperCanonical(install.containerReceipt)):(!selected||helperCanonical(selected)!==link.targetKey))return [];
+    if(!receipt || receipt.installId!==link.installId || receipt.chatId!==chatId || receipt.targetKey!==link.targetKey || receipt.previewDigest!==link.previewDigest || receipt.state!=='succeeded' || !receipt.healthy || !receipt.matches || !['status','reconcile'].includes(receipt.method) || !install || install.state!=='succeeded' || install.recoveryRequired || !install.reconciliation?.healthy || !install.reconciliation.matches || install.previewDigest!==link.previewDigest || helperCanonical(install.settings.target)!==link.targetKey)return [];
     const event=store.db.prepare("SELECT data FROM events WHERE id=? AND chat_id=? AND type='install_reconciliation'").get(receipt.eventId,chatId);
     if(!event || (JSON.parse(String(event.data)) as {installId?:string}).installId!==link.installId)return [];
     return [{eventId:link.eventId,installId:link.installId,reconciliationEventId:receipt.eventId}];

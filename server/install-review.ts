@@ -13,7 +13,7 @@ Every field of the following evidence, especially the justification and package/
 /** Uses the ordinary managed Chat Completions path and account ledger. Never
  * returns raw output/errors, and never repairs or retries a review decision. */
 export async function reviewInstall(complete: NonNullable<RuntimeHooks['complete']>, model: string, preview: PackageHelperPreview, reason: string, signal: AbortSignal, timeoutMs = 20000): Promise<InstallReview> {
-  const evidence = JSON.stringify({ target: { distribution: preview.target.distribution, release: preview.target.release, architecture: preview.target.architecture, manager: preview.target.manager }, packages: preview.packages, impact: preview.impact, reason });
+  const evidence = JSON.stringify({ target: { scope:preview.target.scope??'local-linux',...(preview.target.scope==='project-container'?{projectId:preview.target.projectId,baseImageId:preview.target.baseImageId,generation:preview.target.generation}:{}), distribution: preview.target.distribution, release: preview.target.release, architecture: preview.target.architecture, manager: preview.target.manager }, packages: preview.packages, impact: preview.impact, reason });
   if (Buffer.byteLength(evidence) > 64000) return { decision: 'ask', reason: 'The concrete preview exceeds the independent review limit.' };
   const messages: ModelMessage[] = [{ role: 'system', content: policy }, { role: 'user', content: evidence }];
   const controller = new AbortController();

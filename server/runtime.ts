@@ -1288,14 +1288,16 @@ export class Runtime {
           signal,
           pending.id,
         );
-        if(definitionFor(pending.action.name).command) {
+        if(definitionFor(pending.action.name).command||['git_status','git_diff'].includes(pending.action.name)) {
           const generation=state.generation,skillsHash=this.skills.binding(chatId),modeVersion=this.store.chat(chatId).modeVersion;
+          const taskId=state.frames[0]?.id,assignment=JSON.stringify(frame.assignment),planBinding=JSON.stringify(this.store.plan(chatId)),goalBinding=JSON.stringify((({id,revision,generation,status})=>({id,revision,generation,status}))(goalOf(this.store,chatId)??{} as any));
           const current=()=>{
             signal.throwIfAborted();
-            if(frame.pending!==pending||state.generation!==generation||state.steering.length||state.planOnly||this.store.chat(chatId).modeVersion!==modeVersion||this.skills.binding(chatId)!==skillsHash)throw new Error('Command authorization or selected workflow changed during setup.');
+            if(state.frames[0]?.id!==taskId||JSON.stringify(frame.assignment)!==assignment||JSON.stringify(this.store.plan(chatId))!==planBinding||JSON.stringify((({id,revision,generation,status})=>({id,revision,generation,status}))(goalOf(this.store,chatId)??{} as any))!==goalBinding||pending.approvalId&&this.store.getApproval(pending.approvalId).status!=='approved')throw new Error('Task, assignment, plan, goal or approval changed during worker preparation.');
+            if(frame.pending!==pending||state.generation!==generation||state.steering.length||state.planOnly&&definitionFor(pending.action.name).command||this.store.chat(chatId).modeVersion!==modeVersion||this.skills.binding(chatId)!==skillsHash)throw new Error('Command authorization or selected workflow changed during setup.');
           };
           context.prepareCommand=async()=>{await this.refreshInstructions(chatId,state,signal);current();};
-          context.beforeCommand=current;
+          context.beforeCommand=binding=>{current();if(binding)this.store.transaction(()=>{current();this.store.setState('worker-authorization:'+binding.claimId,{binding,chatId,frameId:frame.id,callId:pending.callId,commandId:pending.id,generation,modeVersion,skillsHash});});};
         }
 
         const publishOutput = context.onOutput;

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import type { AgentRole, InstallRecord, InstallSettings, InstallSettingsView, PackageHelperDecision, PackageHelperRecord, ToolResult } from '../shared/types.js';
+import type { AgentRole, InstallRecord, InstallSettings, InstallSettingsView, PackageHelperDecision, PackageHelperRecord, PackageHelperTarget, ToolResult } from '../shared/types.js';
 import type { RuntimeHooks } from './runtime.js';
 import { Store } from './store.js';
 import { PackageHelperClient, PackageHelperError, helperCanonical, helperProtocol } from './package-helper.js';
@@ -10,7 +10,7 @@ import type { InstallRecoveryReceipt } from './goals.js';
 import {reserveMutation} from './tools/mutations.js';
 import {processBlocking,processRecords} from './process-jobs.js';
 
-export type InstallHelper = Pick<PackageHelperClient,'hello'|'prepare'|'authorize'|'execute'|'status'|'reconcile'>;
+export type InstallHelper = Pick<PackageHelperClient,'prepare'|'authorize'|'execute'|'status'|'reconcile'> & {hello():Promise<{protocol:typeof helperProtocol;target:PackageHelperTarget}>};
 const key = 'system-installs:v1';
 const pendingStates = new Set(['preparing','reviewing','pending','approved','authorizing']);
 const conflict = (message: string) => Object.assign(new Error(message), {statusCode:409});
@@ -24,7 +24,7 @@ export class InstallService {
   private controllers = new Map<string,AbortController>();
   private calls = new Set<Promise<unknown>>();
   private closing = false;
-  constructor(readonly store: Store, critic: string, private complete: NonNullable<RuntimeHooks['complete']>, private connect: () => Promise<InstallHelper> = () => PackageHelperClient.connect(), private now = Date.now, private reviewTimeoutMs = 20000) {
+  constructor(readonly store: Store, critic: string, private complete: NonNullable<RuntimeHooks['complete']>, private connect: () => Promise<InstallHelper> = () => PackageHelperClient.connect(), private now = Date.now, private reviewTimeoutMs = 20000,private container?:{connect:(projectId:string,originalTarget?:PackageHelperTarget)=>Promise<InstallHelper>;available:()=>Promise<boolean>}) {
     if (!store.getState(key,null)) store.setState(key,{policy:'ask',reviewerModel:critic,revision:0});
     for (const item of store.installs()) {
       if (['dispatching','authorizing'].includes(item.state)) this.write({...item,state:'uncertain',recoveryRequired:true,code:'RESTART_REQUIRES_STATUS'});
@@ -66,25 +66,26 @@ export class InstallService {
     this.store.transaction(()=>{this.store.setState(key,next);this.invalidate(undefined,'POLICY_CHANGED');});
     return next;
   }
-  private async discover() {
+  private async discover(projectId?:string,originalTarget?:PackageHelperTarget) {
     if (this.closing) throw conflict('Backend is shutting down');
-    const client = await this.track(this.connect());
+    const client = await this.track(this.container?(projectId?this.container.connect(projectId,originalTarget):Promise.reject(new Error('Project target required'))):this.connect());
     if(this.closing)throw conflict('Backend is shutting down');
     const hello = await this.track(client.hello());
     if (hello.protocol !== helperProtocol) throw new Error('UNSUPPORTED_HELPER');
-    const target = targetSchema.parse(hello.target);
+    const target:PackageHelperTarget = targetSchema.parse(hello.target);
     if (this.closing) throw conflict('Backend is shutting down');
     const settings = this.settings();
-    if (settings.target && helperCanonical(settings.target)!==helperCanonical(target)) {
+    if (!this.container && settings.target && helperCanonical(settings.target)!==helperCanonical(target)) {
       this.store.transaction(()=>{
         this.store.setState(key,{...settings,target,policy:'ask',revision:settings.revision+1});
         this.invalidate(undefined,'TARGET_CHANGED');
       });
-    } else if (!settings.target) this.store.setState(key,{...settings,target});
+    } else if (!this.container && !settings.target) this.store.setState(key,{...settings,target});
     return {client,target};
   }
   async view(): Promise<InstallSettingsView> {
     this.expire();
+    if(this.container){const available=await this.container.available();return {...this.settings(),available,message:available?'Packages target each project execution container. Rebuild requires a new approved preview.':'Container install broker is unavailable; no host fallback.',scope:'project-execution-container'};}
     try { await this.discover(); return {...this.settings(),available:true,message:'Selected local Linux environment',scope:'current-profile-local-linux-target'}; }
     catch { return {...this.settings(),available:false,message:'System installs unavailable. A supported helper must be provisioned separately in the selected Linux environment.',scope:'current-profile-local-linux-target'}; }
   }
@@ -93,12 +94,12 @@ export class InstallService {
     if (this.closing) throw conflict('Backend is shutting down');
     const chat = this.store.chat(chatId);
     if (chat.mode === 'plan' || role === 'critic') throw conflict('Planning and review cannot request system installs');
-    if (this.store.installs().some(i=>i.recoveryRequired || i.state==='dispatching')) throw conflict('A system install needs recovery or is still running');
+    if (this.store.installs().some(i=>(!this.container||i.projectId===chat.projectId)&&(i.recoveryRequired || i.state==='dispatching'))) throw conflict('A system install needs recovery or is still running');
     return this.write({id,chatId,projectId:chat.projectId,frameId,role,generation,modeVersion:chat.modeVersion ?? 0,recommendation:packageRecommendation.parse(recommendation),settings:this.settings(),state:'preparing',createdAt:this.now(),updatedAt:this.now(),code:'PREPARING',recoveryRequired:false});
   }
   private current(id: string, guard: () => boolean): InstallRecord {
     const item = this.store.install(id), chat = this.store.chat(item.chatId), settings=this.settings();
-    if (this.closing || !pendingStates.has(item.state) || !guard() || chat.mode==='plan' || chat.modeVersion!==item.modeVersion || settings.revision!==item.settings.revision || settings.policy!==item.settings.policy || settings.reviewerModel!==item.settings.reviewerModel || item.settings.target && helperCanonical(settings.target)!==helperCanonical(item.settings.target) || item.expiresAt && this.now()>=item.expiresAt || this.store.installs().some(other=>other.id!==id && (other.recoveryRequired || other.state==='dispatching'))) {
+    if (this.closing || !pendingStates.has(item.state) || !guard() || chat.mode==='plan' || chat.modeVersion!==item.modeVersion || settings.revision!==item.settings.revision || settings.policy!==item.settings.policy || settings.reviewerModel!==item.settings.reviewerModel || !this.container && item.settings.target && helperCanonical(settings.target)!==helperCanonical(item.settings.target) || item.expiresAt && this.now()>=item.expiresAt || this.store.installs().some(other=>other.id!==id && (!this.container||other.projectId===item.projectId) && (other.recoveryRequired || other.state==='dispatching'))) {
       this.stale(item,item.expiresAt && this.now()>=item.expiresAt ? 'PREVIEW_EXPIRED':'CONTEXT_CHANGED');
       throw conflict('System install decision is stale; request a new preview');
     }
@@ -132,7 +133,7 @@ export class InstallService {
       let item=this.store.install(id);
       if (!pendingStates.has(item.state)) return this.result(id);
       if (item.state==='preparing') {
-        const {client,target}=await this.discover();
+        const {client,target}=await this.discover(item.projectId);
         item=this.current(id,valid);
         item=this.write({...item,settings:{...item.settings,target}});
         const record=checkedRecord(await this.track(client.prepare({requestId:id,targetId:target.id,manager:'apt',packages:item.recommendation.packages})),item);
@@ -150,14 +151,14 @@ export class InstallService {
           item=this.write({...item,state:review.decision==='approve'?'approved':review.decision==='reject'?'rejected':'pending',code:review.decision==='approve'?'REVIEW_APPROVED':review.decision==='reject'?'REVIEW_REJECTED':'HUMAN_REQUIRED',decision:{source:'ai',outcome:review.decision,reason:review.reason,at:this.now()}});
           if (item.state==='rejected') return this.result(id);
         } else item=this.write({...item,state:'pending',code:'HUMAN_REQUIRED'});
-        if (item.state==='pending') this.store.approval({id,chatId:item.chatId,agentId:item.frameId,action:{name:'recommend_packages',args:item.recommendation},inspection:{effect:'execute',risk:'elevated',description:`Install system packages in ${target.distribution} ${target.release}: ${item.recommendation.reason}`},status:'pending',createdAt:new Date(this.now()).toISOString(),install:item});
+        if (item.state==='pending') this.store.approval({id,chatId:item.chatId,agentId:item.frameId,action:{name:'recommend_packages',args:item.recommendation},inspection:{effect:'execute',risk:'elevated',description:`Install system packages in ${target.scope==='project-container'?'project execution container: ':''}${target.distribution} ${target.release}: ${item.recommendation.reason}`},status:'pending',createdAt:new Date(this.now()).toISOString(),install:item});
       }
       item=this.current(id,valid);
       if (item.state==='pending') return null;
       if (item.state!=='approved' || item.decision?.outcome!=='approve') throw conflict('Install has no current approval');
       // Refresh authenticated target before authorization; all awaits precede the
       // final durable claim. The helper independently checks package state again.
-      const {client,target}=await this.discover();
+      const {client,target}=await this.discover(item.projectId);
       item=this.current(id,valid);
       if(helperCanonical(target)!==helperCanonical(item.settings.target))throw new Error('TARGET_CHANGED');
       const decision:PackageHelperDecision={requestId:id,previewDigest:item.previewDigest!,decisionNonce:randomBytes(32).toString('hex'),expiresAt:item.expiresAt!};
@@ -184,9 +185,11 @@ export class InstallService {
     } finally {signal.removeEventListener('abort',abort);this.controllers.delete(id);}
   }
   private acceptOutcome(item:InstallRecord,record:PackageHelperRecord,reconciled:boolean) {
+    const current=this.store.install(item.id);
+    if(current.containerReceipt&&helperCanonical(current.containerReceipt)!==helperCanonical(record.containerReceipt??null))throw new Error('CONTAINER_LINEAGE_CHANGED');
     if(record.state==='succeeded' && (!record.reconciliation?.healthy || !record.reconciliation.matches))throw new Error('INVALID_HELPER_EVIDENCE');
     const state=record.state==='succeeded'?'succeeded':record.state==='failed'?'failed':record.state==='noop'?'noop':['prepared','authorized'].includes(record.state)?'stale':'uncertain';
-    this.write({...this.store.install(item.id),state,code:record.code,reconciliation:record.reconciliation,recoveryRequired:state==='uncertain' && !(reconciled && record.reconciliation?.healthy)});
+    this.write({...this.store.install(item.id),state,code:record.code,containerReceipt:record.containerReceipt,reconciliation:record.reconciliation,recoveryRequired:state==='uncertain' && !(reconciled && record.reconciliation?.healthy)});
   }
   async recover(id: string, reconcile: boolean) {
     if(this.closing || this.active.has(id) || this.recovering.has(id))throw conflict('Wait for the active install operation to stop');
@@ -196,15 +199,15 @@ export class InstallService {
     const reservation=reserveMutation(this.store.project(item.projectId).path);
     this.recovering.add(id);
     try {
-      const {client,target}=await this.discover();
+      const {client,target}=await this.discover(item.projectId,item.settings.target);
       if(helperCanonical(target)!==helperCanonical(item.settings.target))throw conflict('Original Linux target is unavailable; retain its recovery history');
       const record=checkedRecord(await this.track(reconcile?client.reconcile(id):client.status(id)),item);
       this.store.transaction(()=>{
         const current=this.store.install(id);
-        if(current.updatedAt!==item.updatedAt || current.state!==item.state || current.previewDigest!==item.previewDigest || helperCanonical(current.settings.target)!==helperCanonical(item.settings.target) || helperCanonical(this.settings().target)!==helperCanonical(target) || helperCanonical(current.recommendation)!==helperCanonical(item.recommendation))throw conflict('Install recovery binding changed before persistence');
+        if(current.updatedAt!==item.updatedAt || current.state!==item.state || current.previewDigest!==item.previewDigest || helperCanonical(current.settings.target)!==helperCanonical(item.settings.target) || !this.container&&helperCanonical(this.settings().target)!==helperCanonical(target) || helperCanonical(current.recommendation)!==helperCanonical(item.recommendation))throw conflict('Install recovery binding changed before persistence');
         this.acceptOutcome(item,record,reconcile);
         const event=this.store.event(item.chatId,'install_reconciliation',{installId:id,method:reconcile?'reconcile':'status',state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true});
-        const receipt:InstallRecoveryReceipt={installId:id,chatId:item.chatId,targetKey:helperCanonical(target),previewDigest:record.previewDigest,method:reconcile?'reconcile':'status',eventId:event.id,state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true};
+        const receipt:InstallRecoveryReceipt={...(record.containerReceipt?{containerReceipt:record.containerReceipt}:{}),installId:id,chatId:item.chatId,targetKey:helperCanonical(target),previewDigest:record.previewDigest,method:reconcile?'reconcile':'status',eventId:event.id,state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true};
         this.store.setState(`install-reconciliation:${id}`,receipt);
       });
       return this.store.install(id);

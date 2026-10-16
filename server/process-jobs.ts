@@ -111,7 +111,7 @@ export class ProcessJobs {
     let acknowledged=false,cleanupConfirmed=false,result:ToolResult|undefined,persistenceFailed=false;
     const context:ToolContext={projectRoot:this.store.project(record.projectId).path,chatId:record.chatId,agentId:record.id,signal:live.controller.signal,mutationOwner:live.owner,
       prepareCommand:async()=>{this.validate(record,live.owner);const instructions=await readProjectInstructions(this.tools,context.projectRoot,record.targets);if(instructions.hash!==record.instructionsHash)throw new Error('Applicable guidance changed before process dispatch.');await this.freshSkills?.(record.chatId);this.validate(record,live.owner);},
-      beforeCommand:()=>{this.store.transaction(()=>{this.validate(record,live.owner);const current=this.get(record.id);current.status='running';current.dispatched=true;current.updatedAt=new Date().toISOString();this.store.setState(stateKey(record.id),current);});acknowledged=true;},
+      beforeCommand:binding=>{this.store.transaction(()=>{this.validate(record,live.owner);const current=this.get(record.id);current.status='running';current.dispatched=true;if(binding)this.store.setState('worker-authorization:'+binding.claimId,{binding,processId:record.id,chatId:record.chatId,callId:record.callId,commandId:record.commandId});current.updatedAt=new Date().toISOString();this.store.setState(stateKey(record.id),current);});acknowledged=true;},
       onOutput:output=>{if(persistenceFailed)return;try{this.output(record.id,output);}catch{persistenceFailed=true;live.controller.abort();}},
     };
     try {

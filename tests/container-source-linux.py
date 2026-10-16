@@ -111,6 +111,13 @@ try:
     subprocess.run(compose+['down'],cwd=ROOT,env=compose_env,capture_output=True,check=True)
     started=launch()
     check('production launcher passes authenticated host readiness', 'Authenticated readiness passed' in started.stdout)
+    controller=subprocess.run(compose+['ps','-q','controller'],cwd=ROOT,env=compose_env,capture_output=True,text=True,check=True).stdout.strip()
+    runtime=subprocess.run(['docker','exec','-i',controller,'node','--import','tsx','--input-type=module'],input=(ROOT/'tests/container-runtime-probe.mjs').read_text(),capture_output=True,text=True,timeout=240)
+    (OUT/'m29-runtime-sqlite.log').write_text(runtime.stdout+runtime.stderr)
+    print(runtime.stdout,flush=True)
+    if runtime.returncode:
+        print(runtime.stderr.replace(KEY,'[hidden synthetic key]'),flush=True)
+    check('actual Runtime disk-SQLite freshness and COMMIT matrix',runtime.returncode==0)
     launch('--stop')
     launch()
     check('production stop/start retains original native profile and key',before_profile==(STORAGE/'state/profile/profile.json').read_bytes() and before_config==config.read_bytes())
@@ -130,6 +137,8 @@ except Exception as error:
     (OUT/'source-failure.txt').write_text(str(error).replace(KEY,'[hidden synthetic key]'))
     raise
 finally:
+    if (STORAGE/'runtime/broker.log').exists():
+        (OUT/'source-broker.log').write_text((STORAGE/'runtime/broker.log').read_text().replace(KEY,'[hidden synthetic key]'))
     if compose_env:
         subprocess.run(compose+['down'],cwd=ROOT,env=compose_env,capture_output=True)
     (OUT/'source-checks.json').write_text(json.dumps({'checks':checks,'count':len(checks),'platform':'actual disposable Linux Docker + PTY'},indent=2))
