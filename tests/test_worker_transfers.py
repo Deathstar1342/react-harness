@@ -196,6 +196,128 @@ class TransferFaults(unittest.TestCase):
 
 
 
+    def test_original_lineage_survives_expiry_restart_and_ticket_removal(self):
+        from transfer_service import select,Transfers
+        from unittest.mock import patch
+        token,ticket=self.ticket()
+        self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None});self.assertEqual(self.wait(token)['phase'],'succeeded')
+        self.broker.transfers.threads[ticket['id']].join(2)
+        (self.storage/'runtime/transfers/tickets'/ticket['tokenHash']).unlink()
+        self.broker.transfers=Transfers(self.broker);self.broker.transfers.verify_journal()
+        (self.source/'child').mkdir()
+        with patch('transfer_service.now',return_value=ticket['expiresAt']+1000):
+            for destination in (self.source,self.source/'new',self.source/'child/new'):
+                with self.subTest(destination=destination),self.assertRaises(Exception):
+                    select(self.storage,self.sid,self.install,'export',destination,ticket['project'])
+            code,export=self.ticket('export',self.base/'separate',ticket['project'])
+            self.broker.dispatch('transfer_begin',{'code':code,'kind':'export','project':ticket['project']})
+            receipt=self.wait(code);self.assertEqual(receipt['phase'],'succeeded',receipt)
+        import json
+        wire=json.dumps(receipt)
+        self.assertNotIn(str(self.source),wire);self.assertNotIn('lineageId',wire)
+        self.assertFalse((self.source/'new').exists());self.assertFalse((self.source/'child/new').exists())
+
+    def test_missing_corrupt_or_replaced_lineage_never_recreates(self):
+        from transfer_service import select,Transfers
+        token,ticket=self.ticket();base=self.storage/'runtime/transfers';index=base/'origins.json';saved=index.read_bytes()
+        for damage in (None,b'{',b'{}',b'[]'):
+            if index.exists():index.unlink()
+            if damage is not None:index.write_bytes(damage);index.chmod(0o600)
+            with self.subTest(damage=damage):
+                with self.assertRaisesRegex(Exception,'TRANSFER_LINEAGE_CHANGED'):select(self.storage,self.sid,self.install,'import',self.source)
+                with self.assertRaisesRegex(Exception,'TRANSFER_LINEAGE_CHANGED'):self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+                with self.assertRaises(Exception):Transfers(self.broker).verify_journal()
+            if index.exists():index.unlink()
+            index.write_bytes(saved);index.chmod(0o600)
+        index.unlink();index.symlink_to(self.source/'file')
+        with self.assertRaises(Exception):select(self.storage,self.sid,self.install,'import',self.source)
+        index.unlink();index.write_bytes(saved);index.chmod(0o600)
+        (base/'identity').unlink()
+        with self.assertRaises(Exception):Transfers(self.broker).verify_journal()
+        self.assertFalse((base/'identity').exists())
+
+    def test_lineage_capacity_and_interrupted_persistence(self):
+        from transfer_service import select,authorize,lineage,write_new as real_write
+        from unittest.mock import patch
+        token,ticket=select(self.storage,self.sid,self.install,'import',self.source)
+        base=self.storage/'runtime/transfers'
+        with patch('transfer_service.MAX_ORIGINS',0):
+            with self.assertRaisesRegex(Exception,'TRANSFER_LINEAGE_CAPACITY'):authorize(self.storage,token,ticket)
+        self.assertFalse((base/'tickets'/ticket['tokenHash']).exists())
+        with patch('transfer_service.MAX_LINEAGE',200):
+            with self.assertRaisesRegex(Exception,'TRANSFER_LINEAGE_CAPACITY'):authorize(self.storage,token,ticket)
+        with patch('transfer_service.os.replace',side_effect=OSError('interrupted index replace')):
+            with self.assertRaises(OSError):authorize(self.storage,token,ticket)
+        self.assertEqual(lineage(base,self.sid)['roots'],[])
+        self.assertFalse((base/'tickets'/ticket['tokenHash']).exists())
+        def fail_ticket(file,value):
+            if file.parent.name=='tickets':raise OSError('interrupted ticket grant')
+            return real_write(file,value)
+        with patch('transfer_service.write_new',side_effect=fail_ticket):
+            with self.assertRaises(OSError):authorize(self.storage,token,ticket)
+        self.assertEqual(len(lineage(base,self.sid)['roots']),1)
+        with self.assertRaisesRegex(Exception,'TRANSFER_ALREADY_AUTHORIZED'):authorize(self.storage,token,ticket)
+        self.assertFalse((base/'tickets'/ticket['tokenHash']).exists())
+        second,prepared=select(self.storage,self.sid,self.install,'import',self.source)
+        from transfer_service import os as transfer_os
+        real_replace=transfer_os.replace
+        def replaced_then_interrupted(*args,**kwargs):
+            real_replace(*args,**kwargs);raise OSError('interrupted index directory sync')
+        with patch('transfer_service.os.replace',side_effect=replaced_then_interrupted):
+            with self.assertRaises(OSError):authorize(self.storage,second,prepared)
+        self.assertEqual(len(lineage(base,self.sid)['roots']),2)
+        self.assertFalse((base/'tickets'/prepared['tokenHash']).exists())
+        # An orphan lineage record is conservative, not silently evicted.
+        project='managed';(self.storage/'workspace'/project).mkdir()
+        with self.assertRaisesRegex(Exception,'ORIGINAL_SOURCE_PROTECTED'):
+            select(self.storage,self.sid,self.install,'export',self.source/'child',project)
+
+    def test_original_rename_and_export_admission_or_publication_recheck(self):
+        from transfer_service import select,authorize,copy as real_copy
+        from unittest.mock import patch
+        token,ticket=self.ticket();self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None});self.assertEqual(self.wait(token)['phase'],'succeeded')
+        self.broker.transfers.threads[ticket['id']].join(2)
+        code,export=self.ticket('export',self.base/'separate',ticket['project'])
+        moved=self.base/'moved';self.source.rename(moved)
+        with self.assertRaisesRegex(Exception,'TRANSFER_ORIGINAL_UNAVAILABLE'):
+            self.broker.dispatch('transfer_begin',{'code':code,'kind':'export','project':ticket['project']})
+        self.source.mkdir()
+        with self.assertRaisesRegex(Exception,'TRANSFER_ORIGINAL_UNAVAILABLE'):
+            select(self.storage,self.sid,self.install,'export',self.base/'another',ticket['project'])
+        self.source.rmdir();moved.rename(self.source)
+        def changed(*args,**kwargs):
+            result=real_copy(*args,**kwargs);self.source.rename(moved);return result
+        with patch('transfer_service.copy',changed):
+            self.broker.dispatch('transfer_begin',{'code':code,'kind':'export','project':ticket['project']})
+            receipt=self.wait(code);self.assertEqual(receipt['phase'],'failed');self.assertEqual(receipt['code'],'TRANSFER_ORIGINAL_UNAVAILABLE')
+        self.assertFalse(Path(export['destination']).exists())
+
+    def test_lineage_lock_serializes_host_confirmation_and_broker_admission(self):
+        from transfer_service import select,authorize,lineage_lock
+        token,ticket=select(self.storage,self.sid,self.install,'import',self.source)
+        with lineage_lock(self.storage/'runtime/transfers'):
+            with self.assertRaisesRegex(Exception,'TRANSFER_LINEAGE_BUSY'):authorize(self.storage,token,ticket)
+            with self.assertRaisesRegex(Exception,'TRANSFER_LINEAGE_BUSY'):select(self.storage,self.sid,self.install,'import',self.source)
+            with self.assertRaisesRegex(Exception,'TRANSFER_LINEAGE_BUSY'):self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+        authorize(self.storage,token,ticket)
+
+    def test_mount_alias_detection_allows_normal_filesystems(self):
+        from transfer_service import independent_mount,protect_originals
+        from transfers import stamp
+        from unittest.mock import patch
+        ordinary='1 0 8:1 / / rw - ext4 /dev/root rw\n2 1 8:2 / /data rw - ext4 /dev/data rw\n'
+        with patch.object(Path,'read_text',return_value=ordinary):
+            independent_mount(Path('/data/source'))
+            independent_mount(Path('/tmp/source'))
+        bind=ordinary+'3 1 8:1 /home/original/child /alias rw - ext4 /dev/root rw\n'
+        with patch.object(Path,'read_text',return_value=bind):
+            with self.assertRaisesRegex(Exception,'UNSUPPORTED_TRANSFER_MOUNT_ALIAS'):independent_mount(Path('/alias/new'))
+            independent_mount(Path('/data/source'))
+        # Full-root aliases have '/' in mountinfo; directory identity is the guard.
+        index={'roots':[{'source':str(self.source),'identity':stamp(self.source.stat())[:2]}]}
+        with patch('transfer_service.overlap',return_value=False):
+            with self.assertRaisesRegex(Exception,'ORIGINAL_SOURCE_PROTECTED'):protect_originals(index,self.source/'alias-new')
+
     def test_terminal_eof_and_eio_are_failures_with_bounded_redacted_evidence(self):
         import importlib.util
         import io

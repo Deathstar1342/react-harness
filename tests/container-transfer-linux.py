@@ -121,6 +121,10 @@ try {const result=await tools.execute({projectRoot:root,chatId:'m30-worker',agen
     check('real worker executes only in imported managed project',worker.returncode==0 and (managed/'worker.txt').read_text()=='managed-worker')
     chat=api('/projects/'+project['id']+'/chats',{'title':'Persistent imported conversation'})
     api('/projects/'+project['id']+'/editor',{'path':'ordinary.txt','owner':'m30-human','dirty':True})
+    refused=False
+    try:select(str(storage),sid,str(root),'export',str(source/'must-not-write-back'),managed.name)
+    except Exception as error:refused=str(error)=='ORIGINAL_SOURCE_PROTECTED'
+    check('export cannot create a child in an original import tree',refused and not (source/'must-not-write-back').exists())
     destination=base/'m30-export-copy'
     token,ticket=select(str(storage),sid,str(root),'export',str(destination),managed.name);authorize(storage,token,ticket)
     check('real dirty editor lease refuses export before consuming host ticket',api('/projects/'+project['id']+'/export',{'code':token},fail=True)>=400 and not destination.exists())
