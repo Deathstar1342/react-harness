@@ -27,10 +27,10 @@ def validate_native(value):
     import re
     exact(value,['root','slots']);exact(value['slots'],SLOTS)
     for name,item in [('root',value['root']),*value['slots'].items()]:
-        exact(item,['volume','fileId','directory','size','ownerSid','securityControl','protected','aclDigest'])
+        exact(item,['volume','fileId','directory','ownerSid','securityControl','protected','aclDigest'])
         require(type(item['volume']) is str and re.fullmatch('[0-9]{1,20}',item['volume']),'INVALID_NATIVE_PROOF')
         require(type(item['fileId']) is str and re.fullmatch('[a-f0-9]{32}',item['fileId']),'INVALID_NATIVE_PROOF')
-        require(item['directory'] is True and type(item['size']) is int and item['size']>=0,'INVALID_NATIVE_PROOF')
+        require(item['directory'] is True,'INVALID_NATIVE_PROOF')
         require(type(item['ownerSid']) is str and re.fullmatch(r'S-1-[0-9-]{1,180}',item['ownerSid']),'INVALID_NATIVE_PROOF')
         require(type(item['securityControl']) is int and 0<=item['securityControl']<=65535 and type(item['protected']) is bool and item['protected']==bool(item['securityControl']&0x1000),'INVALID_NATIVE_PROOF')
         require(type(item['aclDigest']) is str and HEX.fullmatch(item['aclDigest']),'INVALID_NATIVE_PROOF')

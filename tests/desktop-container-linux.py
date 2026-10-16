@@ -87,9 +87,16 @@ try:
     check('fixed trusted image proves distinct readonly slots and independent Linux bind WAL locks',measured['sqlite']['secondWriterDenied'])
     from socket_egress import SocketEgress
     probe_docker.image=launch['workerImage'];egress=SocketEgress(probe_docker).start()
-    probe_script="""import socket,os
+    probe_script="""import socket,os,ssl
 for target,expected in [('127.0.0.1',b'403'),('169.254.169.254',b'403'),('registry.npmjs.org',b'200')]:
- s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.settimeout(15);s.connect('/run/egress/proxy.sock');s.sendall(('CONNECT '+target+':443 HTTP/1.1\\r\\nHost: '+target+':443\\r\\n\\r\\n').encode());reply=s.recv(1024);s.close();assert expected in reply.split(b'\\r\\n',1)[0]
+ s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.settimeout(15);s.connect('/run/egress/proxy.sock');s.sendall(('CONNECT '+target+':443 HTTP/1.1\\r\\nHost: '+target+':443\\r\\n\\r\\n').encode());reply=b''
+ while not reply.endswith(b'\\r\\n\\r\\n'):
+  byte=s.recv(1);assert byte;reply+=byte;assert len(reply)<=8192
+ assert expected in reply.split(b'\\r\\n',1)[0]
+ if expected==b'200':
+  with ssl.create_default_context().wrap_socket(s,server_hostname=target) as secure:
+   assert secure.version() in ('TLSv1.2','TLSv1.3');assert secure.getpeercert()
+ else:s.close()
 try:socket.create_connection(('1.1.1.1',443),timeout=1)
 except OSError:pass
 else:raise AssertionError('direct networking available')

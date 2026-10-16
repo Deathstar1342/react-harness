@@ -28,7 +28,7 @@ class NativeHandles(unittest.TestCase):
         self.assertRegex(proof['ownerSid'],r'^S-1-')
         self.assertRegex(proof['aclDigest'],r'^[a-f0-9]{64}$')
         (self.root/'state').mkdir()
-        with self.native.PinnedPath(self.root/'state',directory=True) as handle:self.assertEqual(handle.private()['ownerSid'],proof['ownerSid'])
+        with self.native.PinnedPath(self.root/'state',directory=True) as handle:self.assertIn(handle.private()['ownerSid'],{proof['ownerSid'],'S-1-5-18','S-1-5-32-544'})
         with self.assertRaises(ValueError):self.native.privatize_empty(self.root)
     def test_native_no_replace_publication_retains_source_on_collision(self):
         stage=self.root/'stage';stage.mkdir();(stage/'file').write_text('contents')
@@ -48,7 +48,7 @@ class NativeHandles(unittest.TestCase):
     def set_acl(self,path,sddl,protected=True):
         n=self.native;descriptor=n.C.c_void_p();size=n.W.DWORD()
         n.ok(n.a.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl,1,n.C.byref(descriptor),n.C.byref(size)),'TEST_ACL_FAILED')
-        try:n.ok(n.a.SetFileSecurityW(str(path),4|(0x80000000 if protected else 0x20000000),descriptor),'TEST_ACL_FAILED')
+        try:n.ok(n.a.SetFileSecurityW(str(path),1|4|(0x80000000 if protected else 0x20000000),descriptor),'TEST_ACL_FAILED')
         finally:n.k.LocalFree(descriptor)
     def test_protected_root_and_inherited_private_children_have_distinct_policy(self):
         self.native.privatize_empty(self.root);child=self.root/'child';child.mkdir()
@@ -64,7 +64,7 @@ class NativeHandles(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'PRIVATE_DACL'):pin.private()
         self.set_acl(self.root,f'O:{user}D:NO_ACCESS_CONTROL')
         with self.native.PinnedPath(self.root,directory=True) as pin:
-            with self.assertRaisesRegex(ValueError,'PRIVATE_OWNER'):pin.private()
+            with self.assertRaisesRegex(ValueError,'PRIVATE_DACL'):pin.private()
     def test_slot_acl_change_invalidates_held_storage_guard(self):
         self.native.privatize_empty(self.root)
         for name in ['state','config','workspace','runtime/control']:(self.root/name).mkdir(parents=True)
@@ -143,6 +143,55 @@ class NativeHandles(unittest.TestCase):
             guard.verify();user=self.native.current_sid()
             self.set_acl(file,f'O:{user}D:P(A;;FA;;;{user})(A;;FR;;;WD)')
             with self.assertRaisesRegex(ValueError,'PRIVATE_DACL'):guard.verify()
+
+
+    def test_scaffold_interruption_never_silently_initializes_nonempty_storage(self):
+        import uuid
+        from windows_scaffold import WindowsScaffold,verify_committed_scaffold
+        from transfer_service import write_new
+        for phase in ['intent','scaffold','profile-verified','root-marker','committed']:
+            with self.subTest(phase=phase):
+                root=self.root/phase;root.mkdir();storage_id=str(uuid.uuid4());launch_id=str(uuid.uuid4());setup=WindowsScaffold(root,storage_id,launch_id)
+                def checkpoint(current):
+                    if current==phase:raise RuntimeError('injected interruption')
+                try:
+                    with self.assertRaisesRegex(RuntimeError,'injected interruption'):
+                        setup.begin(checkpoint);setup.profile_started();write_new(root/'state/container-storage.json',{'version':1,'storageId':storage_id,'profileId':str(uuid.uuid4()),'kind':'local-bind'});setup.finish(checkpoint)
+                    replacement=WindowsScaffold(root,storage_id,str(uuid.uuid4()))
+                    with self.assertRaises(Exception):replacement.begin()
+                    if phase=='committed':verify_committed_scaffold(root,storage_id)
+                    else:
+                        with self.assertRaises(Exception):verify_committed_scaffold(root,storage_id)
+                finally:setup.close()
+
+    def test_user_allow_does_not_override_effective_deny(self):
+        user=self.native.current_sid()
+        self.set_acl(self.root,f'O:{user}D:P(D;OICI;0x2;;;WD)(A;OICI;FA;;;{user})')
+        with self.native.PinnedPath(self.root,directory=True) as pin:
+            with self.assertRaisesRegex(ValueError,'PRIVATE_USER_ACCESS'):pin.private()
+
+    def test_owner_policy_keeps_actual_sid_and_root_current_user_only(self):
+        from unittest.mock import patch
+        user=self.native.current_sid()
+        for owner in [user,'S-1-5-18','S-1-5-32-544']:
+            self.native.validate_private_owner(owner,user)
+        for owner in ['S-1-5-21-1-2-3-1001','S-1-1-0']:
+            with self.assertRaisesRegex(ValueError,'PRIVATE_OWNER'):self.native.validate_private_owner(owner,user)
+        for owner in ['S-1-5-18','S-1-5-32-544']:
+            with self.assertRaisesRegex(ValueError,'PRIVATE_OWNER'):self.native.validate_private_owner(owner,user,True)
+        self.native.privatize_empty(self.root)
+        for name in ['state','config','workspace','runtime/control']:(self.root/name).mkdir(parents=True)
+        with self.native.NativeStorageGuard(self.root) as guard:
+            before=guard.verify()
+            # Simulate a changed owner result at the native security boundary;
+            # actual inherited owners and DACLs are separately read above.
+            original=self.native.private_acl
+            def changed(handle,protected_root=False):
+                result=original(handle,protected_root)
+                if handle==guard.pins['config'].handle:result={**result,'ownerSid':'S-1-5-18' if result['ownerSid']!='S-1-5-18' else user}
+                return result
+            with patch.object(self.native,'private_acl',changed):
+                with self.assertRaisesRegex(ValueError,'NATIVE_SLOT_CHANGED'):guard.verify()
 
     def test_hardlinks_and_nonlocal_paths_are_rejected(self):
         file=self.root/'file';file.write_text('x');os.link(file,self.root/'hardlink')

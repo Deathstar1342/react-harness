@@ -30,6 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libssl-dev libsqlite3-dev libffi-dev zlib1g-dev libbz2-dev liblzma-dev libreadline-dev libncurses-dev xvfb libgbm1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Stage pinned private runtime outside checkout
         run: python scripts/stage-support-runtime.py --output "${{ runner.temp }}/support-runtime" --downloads "${{ runner.temp }}/support-downloads"
       - name: Actual relocated runtime and hostile cwd/environment
@@ -46,7 +47,7 @@ jobs:
         run: node tests/desktop-container-smoke.ts
       - name: Actual Linux container onboarding and single-instance branch
         if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/desktop-container-smoke.ts
+        run: DEBUG=pw:browser* xvfb-run -a node tests/desktop-container-smoke.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

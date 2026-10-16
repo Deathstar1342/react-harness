@@ -72,16 +72,51 @@ def information(handle):
     if standard.deletePending or not standard.directory and standard.links!=1:raise ValueError('LINK_OR_DELETION_REFUSED')
     return {'volume':str(identity.volume),'fileId':bytes(identity.id).hex(),'directory':bool(standard.directory),'size':standard.size}
 
+def object_identity(handle):
+    value=information(handle)
+    # Directory byte size changes as legitimate children/journal entries change;
+    # it is not object identity. Transfer freshness still uses complete fstat
+    # stamps, listings and hashes separately from this held mapping identity.
+    if value['directory']:value.pop('size')
+    return value
+
+
+class GenericMapping(C.Structure):_fields_=[('read',W.DWORD),('write',W.DWORD),('execute',W.DWORD),('all',W.DWORD)]
+a.DuplicateToken.argtypes=[HANDLE,C.c_int,C.POINTER(HANDLE)];a.DuplicateToken.restype=W.BOOL
+a.AccessCheck.argtypes=[C.c_void_p,HANDLE,W.DWORD,C.POINTER(GenericMapping),C.c_void_p,C.POINTER(W.DWORD),C.POINTER(W.DWORD),C.POINTER(W.BOOL)];a.AccessCheck.restype=W.BOOL
+
+def require_private_access(descriptor):
+    # Evaluate the actual process token, including group deny ACEs. A syntactic
+    # user allow ACE alone does not prove effective read/write access.
+    token=HANDLE();impersonation=HANDLE()
+    ok(a.OpenProcessToken(k.GetCurrentProcess(),8|2,C.byref(token)),'TOKEN_UNAVAILABLE')
+    try:
+        ok(a.DuplicateToken(token,2,C.byref(impersonation)),'TOKEN_UNAVAILABLE')
+        mapping=GenericMapping(0x120089,0x120116,0x1200a0,0x1f01ff)
+        privileges=C.create_string_buffer(4096);length=W.DWORD(len(privileges));granted=W.DWORD();access=W.BOOL()
+        ok(a.AccessCheck(descriptor,impersonation,0x12019f,C.byref(mapping),privileges,C.byref(length),C.byref(granted),C.byref(access)),'ACCESS_CHECK_FAILED')
+        if not access.value:raise ValueError('PRIVATE_USER_ACCESS_REQUIRED')
+    finally:
+        if impersonation:k.CloseHandle(impersonation)
+        k.CloseHandle(token)
+
+
+def validate_private_owner(actual_owner,user,protected_root=False):
+    trusted={user} if protected_root else {user,'S-1-5-18','S-1-5-32-544'}
+    if actual_owner not in trusted:raise ValueError('PRIVATE_OWNER_REQUIRED')
+
+
 def private_acl(handle,protected_root=False):
-    owner=C.c_void_p();dacl=C.c_void_p();descriptor=C.c_void_p()
-    result=a.GetSecurityInfo(handle,1,1|4,C.byref(owner),None,C.byref(dacl),None,C.byref(descriptor))
+    owner=C.c_void_p();group=C.c_void_p();dacl=C.c_void_p();descriptor=C.c_void_p()
+    result=a.GetSecurityInfo(handle,1,1|2|4,C.byref(owner),C.byref(group),C.byref(dacl),None,C.byref(descriptor))
     if result:raise OSError(result,'ACL_UNAVAILABLE')
     try:
         control=W.WORD();revision=W.DWORD()
         ok(a.GetSecurityDescriptorControl(descriptor,C.byref(control),C.byref(revision)),'ACL_CONTROL_UNAVAILABLE')
         if protected_root and not control.value&0x1000:raise ValueError('PROTECTED_ROOT_DACL_REQUIRED')
-        user=current_sid()
-        if sid_string(owner)!=user or not dacl.value:raise ValueError('PRIVATE_OWNER_REQUIRED')
+        user=current_sid();actual_owner=sid_string(owner)
+        validate_private_owner(actual_owner,user,protected_root)
+        if not dacl.value:raise ValueError('PRIVATE_DACL_REQUIRED')
         acl=C.cast(dacl,C.POINTER(ACL)).contents
         if acl.count>128:raise ValueError('ACL_LIMIT')
         allowed={user,'S-1-5-18','S-1-5-32-544'};user_allowed=False
@@ -94,12 +129,13 @@ def private_acl(handle,protected_root=False):
             if trustee not in allowed:raise ValueError('PRIVATE_DACL_REQUIRED')
             if trustee==user and not flags&8:user_allowed=True
         if not user_allowed:raise ValueError('PRIVATE_DACL_REQUIRED')
-        return {'ownerSid':user,'securityControl':control.value,'protected':bool(control.value&0x1000),'aclDigest':__import__('hashlib').sha256(C.string_at(dacl,acl.size)).hexdigest()}
+        require_private_access(descriptor)
+        return {'ownerSid':actual_owner,'securityControl':control.value,'protected':bool(control.value&0x1000),'aclDigest':__import__('hashlib').sha256(C.string_at(dacl,acl.size)).hexdigest()}
     finally:k.LocalFree(descriptor)
 
 def security_fingerprint(handle):
-    owner=C.c_void_p();dacl=C.c_void_p();descriptor=C.c_void_p()
-    result=a.GetSecurityInfo(handle,1,1|4,C.byref(owner),None,C.byref(dacl),None,C.byref(descriptor))
+    owner=C.c_void_p();group=C.c_void_p();dacl=C.c_void_p();descriptor=C.c_void_p()
+    result=a.GetSecurityInfo(handle,1,1|2|4,C.byref(owner),C.byref(group),C.byref(dacl),None,C.byref(descriptor))
     if result:raise OSError(result,'ACL_UNAVAILABLE')
     try:
         control=W.WORD();revision=W.DWORD()
@@ -124,7 +160,7 @@ class PinnedPath:
                 self.handles.append(handle);details=information(handle)
                 if not final and not details['directory']:raise ValueError('PARENT_NOT_DIRECTORY')
                 if canonical(handle).casefold()!=current.rstrip('\\').casefold() and canonical(handle).casefold()!=current.casefold():raise ValueError('PATH_ALIAS_REFUSED')
-            self.handle=self.handles[-1];self.identity=information(self.handle)
+            self.handle=self.handles[-1];self.identity=object_identity(self.handle)
             if directory is not None and self.identity['directory']!=directory:raise ValueError('UNEXPECTED_OBJECT_TYPE')
             fs=C.create_unicode_buffer(32)
             ok(k.GetVolumeInformationByHandleW(self.handle,None,0,None,None,None,fs,len(fs)),'VOLUME_UNAVAILABLE')
@@ -136,7 +172,7 @@ class PinnedPath:
     def __enter__(self):return self
     def __exit__(self,*_):self.close()
     def verify(self):
-        if information(self.handle)!=self.identity:raise ValueError('OPENED_IDENTITY_CHANGED')
+        if object_identity(self.handle)!=self.identity:raise ValueError('OPENED_IDENTITY_CHANGED')
     def private(self,protected_root=False):return {**self.identity,**private_acl(self.handle,protected_root)}
 
 def privatize_empty(value):
@@ -145,7 +181,7 @@ def privatize_empty(value):
         user=current_sid();descriptor=C.c_void_p();size=W.DWORD()
         sddl=f'O:{user}D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
         ok(a.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl,1,C.byref(descriptor),C.byref(size)),'PRIVATE_DACL_FAILED')
-        try:ok(a.SetFileSecurityW(str(value),4|0x80000000,descriptor),'PRIVATE_DACL_FAILED')
+        try:ok(a.SetFileSecurityW(str(value),1|4|0x80000000,descriptor),'PRIVATE_DACL_FAILED')
         finally:k.LocalFree(descriptor)
         return opened.private(protected_root=True)
 
@@ -175,7 +211,7 @@ class NativeStorageGuard:
         try:
             self.root=self.stack.enter_context(PinnedPath(root,directory=True))
             self.root_proof=self.root.private(protected_root=True)
-            self.ancestors=[(h,information(h),security_fingerprint(h)) for h in self.root.handles]
+            self.ancestors=[(h,object_identity(h),security_fingerprint(h)) for h in self.root.handles]
             self.pins={name:self.stack.enter_context(PinnedPath(Path(root)/relative,directory=True)) for name,relative in self.slots.items()}
             self.evidence={name:pin.private() for name,pin in self.pins.items()}
             if len({(v['volume'],v['fileId']) for v in self.evidence.values()})!=4:raise ValueError('STORAGE_SLOT_ALIAS')
@@ -183,7 +219,11 @@ class NativeStorageGuard:
     def verify(self):
         if self.root.private(protected_root=True)!=self.root_proof:raise ValueError('NATIVE_STORAGE_CHANGED')
         for handle,identity,security in self.ancestors:
-            if information(handle)!=identity or security_fingerprint(handle)!=security:raise ValueError('NATIVE_ANCESTOR_CHANGED')
+            current=object_identity(handle);security_changed=security_fingerprint(handle)!=security
+            if current!=identity or security_changed:
+                import sys,json
+                print(json.dumps({'event':'native-ancestor-changed','fields':[key for key in identity if current[key]!=identity[key]],'securityChanged':security_changed}),file=sys.stderr,flush=True)
+                raise ValueError('NATIVE_ANCESTOR_CHANGED')
         for name,pin in self.pins.items():
             pin.verify()
             if pin.private()!=self.evidence[name]:raise ValueError('NATIVE_SLOT_CHANGED')

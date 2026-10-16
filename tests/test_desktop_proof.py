@@ -10,7 +10,7 @@ class Proofs(unittest.TestCase):
     def setUp(self):
         self.now=1000;self.calls=0
         self.binding={'storageId':str(uuid.uuid4()),'engineId':'engine','context':'desktop-linux','controllerImage':'sha256:'+'a'*64,'probeImage':'sha256:'+'b'*64,'launchId':str(uuid.uuid4())}
-        entry={'volume':'123','fileId':'0'*32,'directory':True,'size':0,'ownerSid':'S-1-5-21-123','securityControl':4096,'protected':True,'aclDigest':'c'*64}
+        entry={'volume':'123','fileId':'0'*32,'directory':True,'ownerSid':'S-1-5-21-123','securityControl':4096,'protected':True,'aclDigest':'c'*64}
         self.native={'root':entry,'slots':{name:{**entry,'fileId':str(i)*32} for i,name in enumerate(['state','config','workspace','control'],1)}}
         self.guard=type('Guard',(),{'verify':lambda _self:copy.deepcopy(self.native)})()
         self.proofs=StorageProofs(self.binding,'d'*64,self.guard,self.probe,lambda:self.now)
