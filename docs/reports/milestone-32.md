@@ -1,18 +1,66 @@
 # Milestone 32 — guided container source setup and integrated handoff
 
-Status: implementation candidate under exact-source validation; not yet a frozen handoff.
+Status: implementation frozen for coordinator review and integration. All six required exact-source workflows and every applicable step passed; source artifacts audited. This is a source milestone handoff, not customer release or Windows Docker device acceptance.
 
-Candidate source: `0fd54626d500065a1ef9b7f6fb09bfd8cf18cabc`, tree `11d23ce9ac21c29e59514d37ca094a897f282cca`. Coordinator owns final independent review, integration and main validation. No main merge, M21 resumption, M33 or release is performed by this child.
+Frozen implementation source: `a3a9e137043db089d9073f3153d9c17e92e2d8e4`, tree `fc44f47b39cb3f489abe08d7dd684240ed13391f`. Coordinator owns final independent review, integration and main validation. No main merge, M21 resumption, M33 or release is performed by this child.
 
 Implemented native source defaults on Linux and Windows, exact tracked container builds, complete target payload with private runtimes, explicit external storage, guarded reruns/no replay, scoped trusted-host immutable worker binding, integrated acceptance fixtures and concrete [packaging delta](../m32-packaging-handoff.md). Public renderer/model/native-tool DTOs are unchanged. The only broker interface refinement is a trusted-host optional Linux worker IID argument; the desktop always supplies it and requires exact identity.
 
 Local evidence uses physical D paths throughout: typecheck passed; web/Electron external build passed; Windows portable application suite 1003 passed / 46 platform skips. After the worker-IID correction, Python worker suite passed35 / skipped19 Linux-only and desktop suite passed97 / skipped4 Linux-only; three new selected-image tests passed. Five complete-payload adversarial tests passed. Native source bootstrap tests and coordinator independent native checks passed with engine observations explicitly doubled. These are not actual Windows Docker, Linux-on-Windows, human picker or live-provider evidence.
 
-All exact-source workflow jobs, applicable steps and source-bound artifacts remain pending final audit below. Historical failures remain retained even after a corrected run passes.
+Historical failures remain retained even after the corrected source run passed. The report-only handoff commit changes this report only; the frozen implementation identity above is the tested source.
 
 Assigned source is D:/CodexData/.codex/worktrees/milestone-32-donly/REACT harness, branch codex/milestone-32, clean kickoff 49b3329009a40cac9dc310a8602f807b01f2ca8a. Normal access verified the clean worktree after restricted Git failed. All generated files and receipts use a separate physical-D M32 directory. Coordinator-owned status/milestone/review files remain untouched.
 
-## Original contract and accepted refinements
+## Final exact-source validation
+
+All rows refer to `a3a9e137043db089d9073f3153d9c17e92e2d8e4`. Platform-conditional and failure-only diagnostic skips were inspected; none substitutes for an applicable acceptance step.
+
+| Workflow | Run | Jobs | Result |
+| --- | --- | --- | --- |
+| Validate | 38963987395 | 117185778801 | Typecheck, 1042 application tests passed / 7 skips, 5 payload tests, source boundaries, build and unsupported-namespace refusal passed |
+| Container foundation | 38963987394 | 117185778543 | Every step passed: 55 worker Python tests, desktop protocol checks and actual container integration |
+| Desktop validation | 38963987410 | Ubuntu117186159153; Windows117186159365 | Every applicable native Electron step passed |
+| Private desktop support runtime | 38963987411 | Ubuntu117185778613; Windows117185779169 | Private runtime relocation/imports and native tests passed; Windows100 passed / 1 Linux-only skip, complete bootstrap fixtures passed |
+| Privileged helper regression | 38963987450 | 117185779336 | Every applicable historical helper regression step passed; no host deployment change |
+| Guided container source desktop | 38963987393 | Ubuntu24 117185778562; Ubuntu22 117185778667; Windows117188685456 | Every applicable production source, mode, rerun, actual GUI lifecycle and relocated Windows payload step passed |
+
+Linux source acceptance used actual exported Electron and private Python, actual Docker initialization/controller/broker, persistent project/chat/config/storage identity, runtime restart, clean close and explicit reopen. It started without the historical worker discovery tag, then preserved an unrelated tag during reopen. Idle chat stayed idle with no automatic goal. Native dialog returns were synthetic; no provider calls occurred. Source inventory/receipt stayed unchanged across reruns. Both supported Ubuntu releases checked outer runtime/snapshot0700 and immutable source directory0755/file0644.
+
+Windows acceptance verified the entire relocated cross-staged payload using its private Python and launched actual native Electron without a build-tree dependency junction. The receipt explicitly records engine unavailable and Windows Docker acceptance false. It does not establish production Windows Docker build/bind/SQLite/transport behavior.
+
+The exact Container artifact contains32 foundation,33 worker,15 historical source,53 Runtime disk-SQLite,20 M30 transfer and14 M31 supervisor checks. These integrated tests cover approval/install/process/native-tool/goal/guidance/skills/plan/editor/transfer/lifecycle boundaries; synthetic-provider results remain distinct from live STARK.
+
+## Audited artifacts
+
+All nine archives below were downloaded into the dedicated physical-D receipt directory and matched the GitHub SHA256 digest. Source receipts bind the frozen SHA. The complete Windows payload contains10383 files including its manifest; all10382 listed hashes and exact member equality were independently checked, totaling587355545 expanded bytes. No duplicate/case-colliding/traversal/symlink member, `.env` file, or host native `.node` under app was found. Source/platform/architecture/controller/worker bindings matched. Ubuntu and Windows screenshots were visually inspected. This is integrity evidence, not signing or a complete redistribution audit.
+
+| Artifact | ID | SHA256 |
+| --- | --- | --- |
+| Source Ubuntu22 | 12073703566 | `1deec1df7783eeb562bb03c7e1ee06949c5ee38f7805f6e35609197c5977d1a2` |
+| Source Ubuntu24 | 12073728434 | `8ecae849de82b29c3e9107d3debb05afea9d455dd7e71aaf76f2f0168b539329` |
+| Complete Windows source payload | 12073663907 | `42776f2bc6fc5a95527efa62649ebb6a492c5ec180586cace1ae950ff5334649` |
+| Source Windows native evidence | 12073169973 | `63d2d638fbab3344c73b11820f84814ec8501ea1f1154bfc835c7a369c3820d7` |
+| Container integration | 12073817901 | `58298ae87c15539b5edde0cbd570893f8de8db72340318a9d0e395c34fbab8fb` |
+| Desktop Ubuntu | 12073782745 | `2ffcea4b5c21d6ce7655cd0144914f2da618acd589be4af572ed0dac86eca1a8` |
+| Desktop Windows | 12073164169 | `83c944f019e47a68740a72d5914ba6e188e9932cd49521344cdcfe6b32b504d4` |
+| Private runtime Windows | 12074580861 | `8e423a3039904e6f76074523ed33c73c734d1ac27060f51c6b465eb270e33b04` |
+| Private runtime Ubuntu | 12073444193 | `6b9761b7cf1451987f5d20ed9eadccdb84e495f8fb13060688f70dee5243c150` |
+
+Receipt location: `D:/CodexData/.codex/visualizations/2026/10/16/01a14636-fe91-7c61-9edf-f100decaf387/m32/receipts`. The additional `final-windows-archive-audit.json` records the complete archive audit. No generated artifacts are committed.
+
+## Remaining gates and interface assumptions
+
+Actual Windows Docker Desktop on selected D storage, native-vs-Linux bind/SQLite/transport proof, worker dependency reparse compatibility, native human picker/dirty close, whole-host lifetime and close during privileged container install, work-only live STARK, and clean-machine/customer package acceptance remain open as detailed in [M32 acceptance](../m32-acceptance.md). No workstation Docker/WSL/helper/global provisioning occurred. Windows all-reparse refusal remains unchanged; no host shell fallback, automatic sync/write-back, credential publication or uncertain-effect replay was added.
+
+The source bootstrap owns build selection and exact payload integrity; existing app authority still owns storage initialization, approvals, versions, leases, secrets, native tool validation, process/install ownership and uncertain recovery. The Linux desktop-to-broker private argv adds the already selected worker IID, checked before resource recovery. The desktop cannot fall back to a tag for a missing/malformed IID. The internal historical CLI retains its prior explicit absence behavior; Windows and public model/renderer contracts are unchanged. Fixed failure-only categories classify existing denied operations; they do not authorize effects.
+
+M21 and earlier worktrees/unreviewed changes remain preserved. The [packaging resumption delta](../m32-packaging-handoff.md) identifies exact obsolete payload/dependency/manifest/notices/license/data-location/testing assumptions. Held Installer run38963987453 failed Linux job117185785547 step10 waiting for the obsolete `Persistent profile home (Linux path)` selector; later lifecycle and Windows package jobs were skipped. A missing `update-desktop-database` warning also remains in its log. None is counted as successful package acceptance or repaired in M32. No main merge, final release or M33 is performed or authorized here. There is no outstanding user-assistance blocker for this source handoff.
+
+## Original contract and progress receipts
+
+The following entries preserve their contemporaneous state and failed evidence; final acceptance is recorded above.
+
 
 - Supported source entrypoints become setup.sh/start.sh (non-root Linux x64 desktop, initially Ubuntu 24.04) and setup.ps1/start.ps1 (Windows x64 PowerShell). Preexisting local Linux Docker engine and build capability are required. Windows uses Docker Desktop's fixed installed CLI and local named-pipe context; Linux uses a local Unix socket. No remote/TCP/SSH endpoint, engine/WSL/policy installation, host apt/helper, global Node/Python, or host agent execution.
 - Build trusted desktop payloads inside the pinned Linux build image. Cross-build pure JavaScript desktop application for either OS; fetch pinned Electron for the target OS and private CPython 3.13.16 using recorded hashes/provenance. Linux support runtime compiles in the disposable build container. Export a complete source runtime inventory to an explicitly selected external local build/cache directory. No unmanaged host npm/compiler/Python requirement. Linux desktop system libraries remain a checked OS prerequisite, never installed by the scripts.
@@ -52,3 +100,5 @@ Failed aa3 Ubuntu22 artifact12072373889 was downloaded to the dedicated D receip
 Exact0fd Source38962389370 Ubuntu24 job117180421877 still failed initial-controller-start after immutable-IID correction. Downloaded/hashverified artifact12073019563 `46cc9092721e653adcce2cb1d3cae79302dd91cd6ebbfc6d7a98657593bdd0f9`; bounded receipt/screenshot shows ENGINE_OPERATION_FAILED, engine available, and no published storage/owner/session/backend markers. fd577 Source38962204347 also failed both Linux jobs at this stage. The IID defect remains valid but is not claimed as the sole cause. A failure-only finite operation/category diagnostic now distinguishes context/info/image/initializer/create/start and selected fixed initializer messages, without exporting raw argv/stderr/config text or changing denials/effect order. Nothing retries retained initialization.
 
 A second concrete source-boundary defect was found: nonroot GNU tar applies umask077 to extracted source, making Docker COPY inputs root-only although root build stages pass. Measured exact Git archives used0664/0775 by default; explicit tar.umask0022 gives0644/0755. Bootstrap now preserves these preflighted immutable source modes with --same-permissions/--no-same-owner and checks every extracted member mode. Selected outer runtime and snapshot remain0700; no app-storage/native ACL policy changes. Disposable production CI asserts both private outer roots and readable inner source before the actual nonroot GUI/controller path. GNU behavior is documented at https://www.gnu.org/software/tar/manual/html_node/Setting-Access-Permissions.html. Terminal failed desktop status now produces the same bounded diagnostics promptly rather than waiting out a visibility timeout. This correction still requires actual source lifecycle evidence.
+
+Diagnostic-only39d Source38963615622 Ubuntu24 artifact12073848000 was downloaded/hashverified `243defe8ff316cb36dca82e75f46ee44923b144abe59e5ff72503482dd2e2a6e`. Its finite code is ENGINE_INITIALIZE_PERMISSION_REFUSED and no storage directories or markers exist. The mode-corrected af8956e Source38963927483 passed both actual Ubuntu GUI lifecycle steps, including no-tag startup, persistent project/chat, restart, clean close/reopen and unchanged unrelated discovery tag; this is intermediate evidence, not the final a3a9e13 receipt.
