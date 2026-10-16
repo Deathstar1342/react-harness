@@ -1,5 +1,15 @@
 # Milestone 29 — independent coordinator review
 
+## Frozen source independently accepted — integration preparing
+
+Reviewed handoff `bf8b97bd0794cc2e86142de81bc01870a5896f06` differs from tested source `10aa3087a45311e0675e1c991930bfe4a4d580ae` / tree `841c99ff69f82e9e0d50a16dbfa77522bef51516` only in its milestone report. Assigned branch/worktree is clean. Coordinator reviewed native dispatch, bounded auth/claims, cleanup-only resource recovery, trusted runner/network/image boundaries, package policy/target/lineage and goal reconciliation; no remaining correction requested. Earlier failures and all worktrees remain preserved.
+
+Independent isolated physical-D validation passed: **920 Windows tests / 45 platform skips**, **30 Python broker checks**, typecheck, web/Electron build, actual Windows Electron sandbox/IPC/navigation/network-denial/restart/renderer-crash/restart with screenshot inspected. Expected CSP denial logs and existing bundle-size warning are not failures. Node 24.16.0 / Python 3.14.5; receipts retained outside Git under `m28-review/m29-validation`. No workstation Docker/WSL/helper/global changes or live-provider testing.
+
+EVERY applicable exact-source step independently verified green and recorded in `exact-source-ci.json`: Validate `38908635104` / `116998522562`; Desktop `38908635179` / Windows `116998528672`, Ubuntu `116998529215`; helper `38908635135` / `116998522421`; Container `38908635241` / `116998523203`. Platform-conditional and failure-only diagnostic skips inspected as expected, not waived required checks. Coordinator independently downloaded final container artifact `12048704630` and matched SHA256 `dff4b9306c1f277198e06be8e0a2dd35c7d1a884f0ed6cfea1afacdd5f2cdbe4`; audited exact-source worker **29**, source **15** and Runtime/disk-SQLite **53** checks, including tamper refusal and failed image publication/restart without replay.
+
+Source acceptance is complete; main integration and exact-main CI remain required before M30 dispatch. Windows/D storage and container-connected native GUI remain M31/M32 acceptance, work-only STARK remains deferred, M21 remains paused. Child was instructed to remain idle and preserve its source/receipts. No user blocker or release authorization.
+
 ## Early contract review — 2026-10-16
 
 Status: active, no implementation/handoff acceptance. Child `01a14497-9b67-7e52-9eae-f96c8f14037d` owns isolated `D:/CodexData/.codex/worktrees/milestone-29-donly/REACT harness`, branch `codex/milestone-29`, base `9c7d71d9324a2e47d4404f57a1f2f21181830df3`. Coordinator independently verified branch/base/clean state, then inspected the proposed report after initial source/security audit. Restricted Git worktree access failed; authorized normal access verified the same D source without host policy or metadata changes. M28 is delivered on reviewed main; M21 stays paused.
