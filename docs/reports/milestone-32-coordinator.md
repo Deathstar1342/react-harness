@@ -1,0 +1,17 @@
+# Milestone 32 coordinator review
+
+M31 reviewed implementation is delivered on GitHub main0f9d6f8955ef088a179308af28508e7288c4be48;every applicable exact-main step/fresh artifacts independently verified in milestone-31-coordinator.md. M32 is the final authorized container milestone;no M33 or release. Dedicated isolated physical-D branch/worktree/chat will be recorded after dispatch.
+
+## Authorized scope and early contract
+
+Update supported default setup.sh/start.sh and Windows setup.ps1/start.ps1 to guided container setup/start. Runtime/bootstrap/build downloads and bulk storage must have explicit user-selected location,source/version/hash/provenance/complete manifests and no unmanaged global Node/Python/apt/Bubblewrap prerequisite. Explain required preexisting supported local engine and its separate cache/backing location honestly. Never silently install/reconfigure engine,WSL,global policy or host packages. Source users may build images;customer package handoff must require no Git/npm/build commands. Reruns preserve established data/provider config and never reset or fall back toC.
+
+Require concrete early contract for supportedOS/prerequisites/entrypoints,private bootstrap runtime and image provenance,storage/build/cache selection+rerun/resume/uncertainty,Windows engine/source transport and measured dependency-link capability,secret input/diagnostic redaction,real disposable CI/evidence and packaging delta before substantial interfaces. Preserve native tool/goal/planStep/approval/version/lease/skill/guidance/private evidence/no-replay and exact durable dispatch ownership. Only trusted host Docker control,no socket/secrets/private/controller/original mounts in workers,hostshell fallback,privileged containers,host apt/helper or SSHFS.
+
+## Validation and carry gates
+
+Exercise native tools/goals/AGENTS/skills/plans/editor/workspace+separateinstall approvals/steering/PTY/import/export across persistent restart/recreate and clean source onboarding. Linux actual engine evidence is mandatory in disposable CI. Actual WindowsD/SQLite/nativepermissions/transport/linktags/wholehostjob/native-picker/cancel/close-during-privilegedcontainerinstall evidence stays separate. Current Windows worker refuses every reparse;no guessed tag allowance or npm-command rewrite. If an authorized disposable Windows environment cannot prove support,finish independent work and retain precise unsupported/manual acceptance gate;no fake pass/workstation provisioning.
+
+Known work-only STARK remains deferred,not implementation blocker;no credential polling. Preserve failed receipts including1270originalsource-preservation unknown. Audit existing packaging assumptions against container payload/runtime/provenance/storage/complete manifests/notices/source/signing/cleanmachine,handoff concrete M21delta without borrowing/merging/resuming its6fd9worktree or uncommitted source/notices. No final installers/release.
+
+Coordinator independently reviews/corrects/tests/integrates/pushes and verifies EVERY applicable exact-main CIjob/step/fresh artifact before delivery. Pause heartbeat after final M32delivery or genuine user-assistance blocker. Return chat approval refusal has repo report/branch handoff alternative,no repeated user permission requests needed. All generated outputs/runtime/userprojects/secrets/privatePDF stay outside Git and physicalD.
