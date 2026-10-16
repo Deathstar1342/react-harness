@@ -4,15 +4,13 @@ import re
 import sqlite3
 import threading
 import uuid
-from protocol import canonical, require
+from protocol import canonical, require, open_database
 
 class Resources:
     def __init__(self, docker):
         self.docker = docker
         self.lock = threading.RLock()
-        self.db = sqlite3.connect(str(docker.storage / 'runtime/worker-resources.sqlite'), check_same_thread=False)
-        self.db.execute('PRAGMA journal_mode=DELETE')
-        self.db.execute('PRAGMA synchronous=FULL')
+        self.db = open_database(docker.storage / 'runtime/worker-resources.sqlite',getattr(docker,'native_journals',False))
         self.db.execute('CREATE TABLE IF NOT EXISTS resources(token TEXT PRIMARY KEY,data TEXT NOT NULL)')
 
     def save(self, row):
@@ -20,7 +18,7 @@ class Resources:
             self.db.execute('INSERT INTO resources VALUES (?,?) ON CONFLICT(token) DO UPDATE SET data=excluded.data', (row['token'],canonical(row)))
 
     def create(self, args, image, kind):
-        require(kind in ('worker','maintenance','companion','attestation'))
+        require(kind in ('worker','maintenance','companion','attestation','controller'))
         token=str(uuid.uuid4())
         row={'token':token,'name':'abyssus-owned-'+token,'image':image,'kind':kind,'id':None,'phase':'intent'}
         with self.lock:

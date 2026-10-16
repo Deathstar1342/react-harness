@@ -1,0 +1,64 @@
+name: Private desktop support runtime
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Select disposable external staging
+        shell: pwsh
+        run: |
+          "M31_SUPPORT_RUNTIME=$env:RUNNER_TEMP/support-runtime" >> $env:GITHUB_ENV
+          "M31_RECEIPTS=$env:RUNNER_TEMP/support-receipts" >> $env:GITHUB_ENV
+          "M31_APP_ROOT=$env:GITHUB_WORKSPACE/build/app" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/native-fixtures" -Force | Out-Null
+          "M31_TEST_ROOT=$env:RUNNER_TEMP/native-fixtures" >> $env:GITHUB_ENV
+      - run: npm ci
+      - name: Build prerequisites only in disposable Ubuntu runner
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libsqlite3-dev libffi-dev zlib1g-dev libbz2-dev liblzma-dev libreadline-dev libncurses-dev xvfb libgbm1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Stage pinned private runtime outside checkout
+        run: python scripts/stage-support-runtime.py --output "${{ runner.temp }}/support-runtime" --downloads "${{ runner.temp }}/support-downloads"
+      - name: Actual relocated runtime and hostile cwd/environment
+        run: npx tsx tests/desktop-support-runtime-probe.ts
+      - name: Actual native Windows ownership and two-process locks
+        if: runner.os == 'Windows'
+        run: |
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Electron binary installation failed' }
+          $env:M31_ELECTRON_EXE=(node -e "process.stdout.write(require('electron'))")
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $env:M31_ELECTRON_EXE -PathType Leaf)) { throw 'Pinned Electron binary staging failed' }
+          & "$env:M31_SUPPORT_RUNTIME/python.exe" -I -B -m unittest discover -s tests -p "test_desktop_*.py" -v
+      - name: Linux private-runtime protocol and host proof checks
+        if: runner.os == 'Linux'
+        run: "$M31_SUPPORT_RUNTIME/bin/python3.13 -I -B -m unittest discover -s tests -p 'test_desktop_*.py' -v"
+      - run: npm run desktop:build
+      - name: Actual native Windows container onboarding and single-instance branch
+        if: runner.os == 'Windows'
+        run: node tests/desktop-container-smoke.ts
+      - name: Actual Linux container onboarding and single-instance branch
+        if: runner.os == 'Linux'
+        run: DEBUG=pw:browser* xvfb-run -a node tests/desktop-container-smoke.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: private-runtime-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/support-runtime/manifest.json
+            ${{ runner.temp }}/support-runtime/provenance.json
+            ${{ runner.temp }}/support-receipts/
+            ${{ runner.temp }}/support-downloads/python-build.log

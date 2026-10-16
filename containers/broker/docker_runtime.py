@@ -25,6 +25,8 @@ class Docker:
         endpoint = self.call(['context', 'inspect', context, '--format', '{{.Endpoints.docker.Host}}']).strip()
         require(endpoint.startswith('unix:///') and Path(endpoint[7:]).is_socket(), 'LOCAL_ENGINE_REQUIRED')
         info = json.loads(self.call(['info', '--format', '{{json .}}']))
+        self.engine_id=info['ID']
+        self.source_digest=hashlib.sha256(b''.join(file.name.encode()+b'\0'+file.read_bytes() for file in sorted((self.source/'containers/broker').glob('*.py')))).hexdigest()
         require(info['OSType'] == 'linux' and info['Architecture'] in ('x86_64', 'amd64'), 'UNSUPPORTED_ENGINE')
         require(not any('rootless' in str(v) or 'userns' in str(v) for v in info.get('SecurityOptions', [])), 'UNSUPPORTED_UID_MAPPING')
         self.image = self.call(['image', 'inspect', 'abyssus-worker:m29', '--format', '{{.Id}}']).strip()
@@ -41,6 +43,12 @@ class Docker:
             self.blank.write_bytes(b'')
             self.blank.chmod(0o600)
         require(self.blank.is_file() and not self.blank.is_symlink() and self.blank.stat().st_size == 0, 'UNSAFE_MASK')
+
+    def storage_barrier(self):
+        require(os.name!='nt','NATIVE_ADAPTER_REQUIRED')
+
+    def egress_mount(self):
+        return f'type=bind,src={self.storage / "runtime" / "egress"},dst=/run/egress,readonly'
 
     def argv(self, args):
         return ['docker', '--context', self.context, *args]
@@ -85,6 +93,16 @@ class Docker:
         return root, masks, {'storageId': self.storage_id, 'projectId': project_id,
                              'imageId': self.images.get(project_id, self.image), 'layout': digest(masks)}
 
+    def prepare_cache(self, project_id):
+        cache = self.storage / 'runtime' / 'dependencies' / project_id
+        for directory in (cache.parent, cache, cache / 'home', cache / 'cache'):
+            directory.mkdir(mode=0o700, exist_ok=True)
+            require(directory.resolve() == directory and directory.stat().st_uid == self.uid, 'UNSAFE_CACHE')
+        return cache
+
+    def process_options(self):
+        return {}
+
     def prepare(self, request):
         root, masks, identity = self.topology(request['project'], request['operation']['kind'] == 'git')
         key = request['contextId']
@@ -94,10 +112,7 @@ class Docker:
             self.verify(existing)
             return identity
         require(len(self.contexts) < 32, 'CONTEXT_LIMIT')
-        cache = self.storage / 'runtime' / 'dependencies' / identity['projectId']
-        for directory in (cache.parent, cache, cache / 'home', cache / 'cache'):
-            directory.mkdir(mode=0o700, exist_ok=True)
-            require(directory.resolve() == directory and directory.stat().st_uid == self.uid, 'UNSAFE_CACHE')
+        cache = self.prepare_cache(identity['projectId'])
         self.attestor.verify(identity['imageId'])
         target = '/workspace/' + request['project']
         args = ['--label', 'abyssus.context=' + key, '--network', 'none', '--init', '--read-only',
@@ -107,7 +122,7 @@ class Docker:
                 '--mount', f'type=bind,src={root},dst={target}',
                 '--mount', f'type=bind,src={cache / "home"},dst=/home/worker',
                 '--mount', f'type=bind,src={cache / "cache"},dst=/cache',
-                '--mount', f'type=bind,src={self.storage / "runtime" / "egress"},dst=/run/egress,readonly']
+                '--mount', self.egress_mount()]
         for mask in masks:
             destination = target + '/' + mask['path']
             if mask['directory']:
@@ -134,7 +149,8 @@ class Docker:
         self.verify(owned)
         args = ['exec', '-i', '--user', '0:0', owned['container'], '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin',
                 '/usr/bin/python3', '-I', '/opt/abyssus-worker/worker-runner.py']
-        process = subprocess.Popen(self.argv(args), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
+        self.storage_barrier()
+        process = subprocess.Popen(self.argv(args), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env, **self.process_options())
         request = {k: record[k] for k in ('claimId', 'project', 'operation', 'timeoutMs', 'outputLimit')}
         request.update(uid=self.uid, gid=self.gid, proofKey=proof_key)
         return process, (json.dumps(request, separators=(',', ':')) + '\n').encode()

@@ -1,3 +1,4 @@
+import {assertNativePath} from './native-storage.js';
 import { closeSync, constants, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync, fstatSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +32,7 @@ export class ProviderSettingsFile {
     this.snapshot = this.read();
   }
   private read(): {text:string; stat?:Stats} {
+    assertNativePath(this.filename,true,true);
     const parent = lstatSync(this.parent);
     if (!parent.isDirectory() || parent.isSymbolicLink() || parent.dev !== this.parentIdentity.dev || parent.ino !== this.parentIdentity.ino || realpathSync(this.parent) !== this.parent) throw fail('Backend configuration directory changed; restart after checking it');
     let stat: Stats;
@@ -52,6 +54,7 @@ export class ProviderSettingsFile {
   config(): Config { return readConfig({...parse(this.snapshot.text), ...this.overrides},this.parent); }
   lockedFields(): string[] { return Object.entries(fields).filter(([,key]) => this.overrides[key] !== undefined).map(([key]) => key); }
   write(patch: ProviderSettingsPatch) {
+    assertNativePath(this.filename,true,true);
     if (this.requiresRestart) throw fail('Backend .env changed after saving; restart to load it before saving again');
     const updates: Record<string,string> = {};
     for (const [role,id] of Object.entries(patch.models ?? {})) updates[fields[role as keyof typeof fields]] = id;
@@ -86,8 +89,10 @@ export class ProviderSettingsFile {
       try { writeFileSync(fd,text); fsyncSync(fd); temporaryIdentity=fstatSync(fd); } finally { closeSync(fd); }
       const latest = this.read();
       if (latest.text !== current.text || Boolean(latest.stat) !== Boolean(current.stat) || latest.stat && current.stat && !same(latest.stat,current.stat)) throw fail('Backend .env changed before saving');
+      assertNativePath(temporary);
       const candidate=lstatSync(temporary);
       if (!candidate.isFile() || candidate.isSymbolicLink() || candidate.nlink!==1 || !same(candidate,temporaryIdentity)) throw fail('Temporary configuration file changed before saving');
+      assertNativePath(this.filename,true,true);
       renameSync(temporary,this.filename); created = false;
       // No awaited/fallible operation between disk commit and active publication.
       this.snapshot = {text,stat:temporaryIdentity};

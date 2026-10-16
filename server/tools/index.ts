@@ -1,3 +1,4 @@
+import {runNativeOperation,assertNativePath} from '../native-storage.js';
 import {ContainerShellPool} from '../container-shell.js';
 import { lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -37,7 +38,7 @@ export class WorkspaceTools implements ToolService {
   private async mutate<T>(root:string,operation:()=>Promise<T>,owner?:symbol):Promise<T> {
     this.mutationGuard(root,owner);
     const reservation=reserveMutation(root,owner);
-    try {return await operation();} finally {reservation.release();}
+    try {return await runNativeOperation(()=>{assertNativePath(root,false);return operation();});} finally {reservation.release();}
   }
   closeCommandContext(context:ToolContext) {return this.shells.closeContext(context);}
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {

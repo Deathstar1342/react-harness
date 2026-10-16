@@ -1,3 +1,4 @@
+import {runNativeOperation,assertNativePath} from './native-storage.js';
 import {lstatSync,realpathSync} from 'node:fs';
 import {lstat,realpath} from 'node:fs/promises';
 import path from 'node:path';
@@ -49,17 +50,27 @@ export class ProjectTransfers {
       const client=await this.connect();
       let receipt=await this.copy(client,code,'import',null,signal);
       if(!z.uuid().safeParse(receipt.project).success)throw new Error('Imported project identity is not a fresh managed UUID');
-      const redeemed=statusSchema.parse(await client.request('transfer_receipt',{code}));
-      if(JSON.stringify(redeemed)!==JSON.stringify(receipt))throw new Error('Redeemed receipt differs from the verified completed transfer');
-      receipt=redeemed;
-      const root=path.join(this.workspace,receipt.project),info=await lstat(root,{bigint:true});
-      if(signal.aborted||!info.isDirectory()||info.isSymbolicLink()||await realpath(root)!==root||!receipt.identity||info.dev.toString()!==receipt.identity[0]||info.ino.toString()!==receipt.identity[1]||receipt.storageId!==client.storageId||receipt.sessionId!==client.sessionId)throw new Error('Managed copy identity changed before registration');
-      return this.store.transaction(()=>{
-        const current=lstatSync(root,{bigint:true});
-        if(signal.aborted||realpathSync(root)!==root||!current.isDirectory()||current.isSymbolicLink()||current.dev.toString()!==receipt.identity![0]||current.ino.toString()!==receipt.identity![1]||this.store.projects().some(project=>project.path===root))throw new Error('Managed identity changed or was already registered');
-        const project=this.store.createProject(name,root);
-        this.store.setState(key(code),{phase:'registered',projectId:project.id,receipt});
-        return {project,receipt};
+      const root=path.join(this.workspace,receipt.project);
+      const verifyCompleted=async()=>{
+        const retained=this.store.getState<{phase?:string;receipt?:ProjectTransferReceipt}>(key(code),{}),info=await lstat(root,{bigint:true});
+        if(signal.aborted||!['succeeded','redeeming'].includes(retained.phase??'')||JSON.stringify(retained.receipt)!==JSON.stringify(receipt)||!info.isDirectory()||info.isSymbolicLink()||await realpath(root)!==root||!receipt.identity||info.dev.toString()!==receipt.identity[0]||info.ino.toString()!==receipt.identity[1]||receipt.storageId!==client.storageId||receipt.sessionId!==client.sessionId||this.store.projects().some(project=>project.path===root))throw new Error('Managed copy identity changed or completed receipt binding changed before redemption');
+      };
+      // Copy has a terminal exact receipt. Redemption is a separate one-use,
+      // still-undispatched publication phase, never a repeat of accepted copy.
+      await verifyCompleted();this.store.setState(key(code),{phase:'redeeming',receipt});
+      return await runNativeOperation(async()=>{
+        await verifyCompleted();assertNativePath(root,false);
+        const redeemed=statusSchema.parse(await client.request('transfer_receipt',{code}));
+        if(JSON.stringify(redeemed)!==JSON.stringify(receipt))throw new Error('Redeemed receipt differs from the verified completed transfer');
+        receipt=redeemed;
+        await verifyCompleted();assertNativePath(root,false);
+        return this.store.transaction(()=>{
+          const current=lstatSync(root,{bigint:true});assertNativePath(root,false);
+          if(signal.aborted||realpathSync(root)!==root||!current.isDirectory()||current.isSymbolicLink()||current.dev.toString()!==receipt.identity![0]||current.ino.toString()!==receipt.identity![1]||this.store.projects().some(project=>project.path===root))throw new Error('Managed identity changed or was already registered');
+          const project=this.store.createProject(name,root);
+          this.store.setState(key(code),{phase:'registered',projectId:project.id,receipt});
+          return {project,receipt};
+        });
       });
     } catch(error) {
       this.store.setState(key(code),{...this.store.getState<Record<string,unknown>>(key(code),{}),phase:'unregistered',message:'Transfer outcome requires inspection. No automatic registration or replay.'});

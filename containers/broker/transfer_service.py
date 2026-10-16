@@ -3,7 +3,7 @@ import contextlib
 import hashlib
 import re
 import json
-import os
+from native_io import fs as os, private_fd
 from pathlib import Path
 import secrets
 import stat
@@ -24,7 +24,8 @@ def private_json(file, limit=MAX_MANIFEST):
         fd=os.open(file.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         try:
             info=os.fstat(fd)
-            require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.getuid() and info.st_mode & 0o077 == 0 and info.st_size <= limit, 'UNSAFE_TRANSFER_RECORD')
+            require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= limit, 'UNSAFE_TRANSFER_RECORD')
+            private_fd(fd)
             with os.fdopen(os.dup(fd), 'r') as stream:
                 return json.load(stream)
         finally:
@@ -47,10 +48,10 @@ def write_new(file, value):
 def area(storage):
     result=Path(storage)/'runtime/transfers'
     for directory in (result, result/'tickets', result/'stages'):
-        directory.mkdir(mode=0o700, exist_ok=True)
+        directory.mkdir(mode=0o777 if os.name=='nt' else 0o700, exist_ok=True)
         with root_handle(directory) as fd:
             info=os.fstat(fd)
-            require(info.st_uid == os.getuid() and info.st_mode & 0o077 == 0, 'UNSAFE_TRANSFER_STORAGE')
+            private_fd(fd)
     return result
 
 
@@ -66,6 +67,12 @@ MAX_LINEAGE = 1024**2
 def lineage_lock(base, wait=False):
     # Every host process uses this same lock. Broker admission never waits while
     # holding its own lock; the copy thread waits before taking the broker lock.
+    if os.name=='nt':
+        from windows_handles import exclusive_lock
+        try:
+            with exclusive_lock(Path(base)/'origins.lock',wait):yield
+        except BlockingIOError:raise Denied('TRANSFER_LINEAGE_BUSY') from None
+        return
     import fcntl
     with root_handle(base) as parent:
         fd=os.open('origins.lock',os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,0o600,dir_fd=parent)
@@ -92,7 +99,7 @@ def lineage(base, storage_id):
             require(type(item['ticketId']) is str and UUID.fullmatch(item['ticketId']) and item['ticketId'] not in seen,'TRANSFER_LINEAGE_CHANGED');seen.add(item['ticketId'])
             source=item['source']
             require(type(source) is str and len(source.encode())<=4096 and Path(source).is_absolute() and source==os.path.normpath(source) and '\x00' not in source,'TRANSFER_LINEAGE_CHANGED')
-            require(type(item['identity']) is list and len(item['identity'])==2 and all(type(i) is str and re.fullmatch(r'[0-9]{1,30}',i) for i in item['identity']),'TRANSFER_LINEAGE_CHANGED')
+            require(type(item['identity']) is list and len(item['identity'])==2 and all(type(i) is str and re.fullmatch(r'[0-9]{1,39}' if os.name=='nt' else r'[0-9]{1,30}',i) for i in item['identity']),'TRANSFER_LINEAGE_CHANGED')
         return index
     except Denied: raise
     except Exception: raise Denied('TRANSFER_LINEAGE_CHANGED') from None
@@ -108,6 +115,10 @@ def save_lineage(base,index):
 
 
 def independent_mount(path):
+    if os.name=='nt':
+        # Full ancestor traversal rejects junctions and volume mount reparses.
+        with root_handle(path):pass
+        return
     # Only the most-specific containing mount matters: ordinary '/'-rooted
     # filesystems remain supported. A subtree bind/subvolume has another root.
     # Full-filesystem aliases are handled by ancestor device/inode comparison.
@@ -128,7 +139,7 @@ def protect_originals(index,destination):
     independent_mount(destination.parent)
     identities=set()
     for ancestor in (destination.parent,*destination.parent.parents):
-        if ancestor==Path('/'): continue
+        if ancestor==Path(ancestor.anchor): continue
         with root_handle(ancestor) as fd:identities.add(tuple(stamp(os.fstat(fd))[:2]))
     for origin in index['roots']:
         source=Path(origin['source'])
@@ -318,10 +329,20 @@ class Transfers:
         if op=='transfer_receipt':
             require(row['phase']=='succeeded' and row['kind']=='import', 'TRANSFER_NOT_COMPLETE')
             require(not row.get('redeemed'), 'TRANSFER_RECEIPT_CONSUMED')
-            with root_handle(row['destination']) as fd:
-                require(stamp(os.fstat(fd))[:2]==row['identity'], 'TRANSFER_IDENTITY_CHANGED')
-            require(verify_stage(row['destination'],row['manifest'])==row['identity'],'TRANSFER_IDENTITY_CHANGED')
-            row['redeemed']=True;self.save(row)
+            try:
+                with root_handle(row['destination']) as fd:
+                    native=row.get('nativeIdentity',row['identity'])
+                    require(stamp(os.fstat(fd))[:2]==native, 'TRANSFER_IDENTITY_CHANGED')
+                    require(verify_stage(row['destination'],row['manifest'])==native,'TRANSFER_IDENTITY_CHANGED')
+                    if os.name=='nt':
+                        require(row.get('linuxMapping') is not None,'PROJECT_MAPPING_REQUIRED')
+                        require(self.broker.docker.project_identity(row['project'])==row['linuxMapping'],'PROJECT_MAPPING_CHANGED')
+                        require(verify_stage(row['destination'],row['manifest'])==native,'TRANSFER_IDENTITY_CHANGED')
+                    row['redeemed']=True;self.save(row)
+            except Exception:
+                if os.name=='nt':
+                    row.update(phase='uncertain',code='PROJECT_MAPPING_UNCERTAIN',residue=True);self.save(row)
+                raise
             return self.public(row)
         raise ValueError('Unknown transfer operation')
 
@@ -356,6 +377,8 @@ class Transfers:
     def run_locked(self,row):
         def check():
             with self.broker.lock:
+                barrier=getattr(self.broker.docker,'storage_barrier',None)
+                if barrier:barrier()
                 require(row['id'] not in self.cancelled and not self.broker.closing, 'TRANSFER_CANCELLED')
                 require(now()<row['expiresAt'] and time.monotonic()-self.heartbeats[row['id']]<15, 'TRANSFER_HEARTBEAT_LOST')
                 if row['kind']=='export': self.idle(row['project'])
@@ -375,7 +398,15 @@ class Transfers:
                 row.update(phase='publishing',code='PUBLISHING');self.save(row)
                 publish(stage,Path(row['destination']),stage_identity,row['destinationParent'])
                 with root_handle(row['destination']) as fd:
-                    row['identity']=stamp(os.fstat(fd))[:2]
+                    published_identity=stamp(os.fstat(fd))[:2]
+                    row['identity']=None if os.name=='nt' else published_identity
+                    if os.name=='nt' and row['kind']=='import':
+                        row['nativeIdentity']=published_identity
+                        require(verify_stage(row['destination'],row['manifest'])==row['nativeIdentity'],'TRANSFER_IDENTITY_CHANGED')
+                        row['linuxMapping']=self.broker.docker.project_identity(row['project'])
+                        require(verify_stage(row['destination'],row['manifest'])==row['nativeIdentity'],'TRANSFER_IDENTITY_CHANGED')
+                        row['identity']=row['linuxMapping']['identity']
+                check()
                 row.update(phase='succeeded',code='COMPLETE_WITH_EXCLUSIONS' if row['excludedCount'] else 'COMPLETE',residue=False)
                 self.save(row)
         except Exception as error:

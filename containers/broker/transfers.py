@@ -8,10 +8,11 @@ import ctypes
 import errno
 import hashlib
 import json
-import os
+from native_io import fs as os, root_handle as native_root_handle
 from pathlib import Path
 import re
 import stat
+import sys
 import time
 import unicodedata
 from protocol import Denied, require, canonical
@@ -22,7 +23,7 @@ MAX_FILE = 256 * 1024**2
 MAX_DEPTH = 32
 MAX_PATH = 240
 CACHE = {"node_modules", ".venv", "venv", "__pycache__", ".cache", ".next", ".nuxt", "dist", "build", "target", "coverage", ".pytest_cache", ".mypy_cache", ".tox"}
-NEVER = {".config", ".docker", ".kube", "application_default_credentials.json", ".aws", ".azure", ".ssh", ".gnupg", ".codex", ".harness", ".container-source", ".storage-id", "state.sqlite", "state.sqlite-wal", "state.sqlite-shm", "worker-journal.sqlite", "session.json", ".gitmodules"}
+NEVER = {".native-operator-intent.json", "current.json", "native-phase.sqlite", "lifetime.lock", ".native-setup.json", "native-bind.json", "desktop-launch.json", "desktop-owner.json", "worker-resources.sqlite", ".config", ".docker", ".kube", "application_default_credentials.json", ".aws", ".azure", ".ssh", ".gnupg", ".codex", ".harness", ".container-source", ".storage-id", "state.sqlite", "state.sqlite-wal", "state.sqlite-shm", "worker-journal.sqlite", "session.json", ".gitmodules"}
 SENSITIVE = {".env", ".npmrc", ".pypirc", ".netrc", "credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
 GIT_BAD = {"alternates", "http-alternates", "commondir", "gitdir", "modules", "worktrees", "grafts", "replace"}
 GIT_ROOT = {"objects", "refs", "HEAD", "index", "packed-refs", "shallow"}
@@ -50,13 +51,21 @@ def stamp(info):
     return [str(info.st_dev), str(info.st_ino), info.st_mode, info.st_nlink, info.st_size, str(info.st_mtime_ns), str(info.st_ctime_ns)]
 
 
+def same_stamp(actual,expected,phase):
+    if actual==expected:return True
+    fields=['device','inode','mode','links','size','mtime_ns','ctime_ns']
+    # Bounded failure-only diagnostics: no paths, contents, IDs or capabilities.
+    print(canonical({'event':'transfer-metadata-changed','phase':phase,'fields':[fields[i] for i in range(7) if actual[i]!=expected[i]],'heldHandle':True,'monotonicNs':str(time.monotonic_ns())}),file=sys.stderr,flush=True)
+    return False
+
+
 def policy(rel, included, history):
     parts = relative(rel)
     lower = [p.casefold() for p in parts]
     require('.gitmodules' not in lower,'UNSAFE_GIT_METADATA')
     if '.git' in lower:
         require(lower.index('.git')==0 and parts[0]=='.git' and lower.count('.git')==1,'UNSAFE_GIT_METADATA')
-    if any(p in NEVER for p in lower):
+    if any(p in NEVER or p.startswith('.native-operator-') for p in lower):
         return 'Application or credential storage is never included'
     if lower[0] == '.git':
         if not history:
@@ -79,6 +88,9 @@ def policy(rel, included, history):
 
 @contextlib.contextmanager
 def root_handle(root):
+    if os.name=='nt':
+        with native_root_handle(root) as fd:yield fd
+        return
     require(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW'), 'TRANSFER_PLATFORM_UNSUPPORTED')
     root = str(root)
     require(root.startswith('/') and os.path.normpath(root) == root and root != '/', 'UNSAFE_ROOT')
@@ -172,7 +184,7 @@ def scan(root, included=(), history=False, secrets=(), check=lambda: None):
                     continue
                 if stat.S_ISDIR(info.st_mode):
                     with entry_handle(rootfd, rel, True) as child:
-                        require(stamp(os.fstat(child)) == stamp(info), 'SOURCE_CHANGED')
+                        require(same_stamp(stamp(os.fstat(child)),stamp(info),'directory-open'), 'SOURCE_CHANGED')
                         result['entries'].append({'path': rel, 'kind': 'directory', 'stamp': stamp(info)})
                         walk(child, rel + '/')
                 else:
@@ -180,15 +192,15 @@ def scan(root, included=(), history=False, secrets=(), check=lambda: None):
                     result['bytes'] += info.st_size
                     require(result['bytes'] <= MAX_BYTES, 'BYTE_LIMIT')
                     with entry_handle(rootfd, rel) as file:
-                        require(stamp(os.fstat(file)) == stamp(info), 'SOURCE_CHANGED')
+                        require(same_stamp(stamp(os.fstat(file)),stamp(info),'file-hash-window'), 'SOURCE_CHANGED')
                         digest = hash_stream(file, secrets, check)
-                        require(stamp(os.fstat(file)) == stamp(info), 'SOURCE_CHANGED')
+                        require(same_stamp(stamp(os.fstat(file)),stamp(info),'file-hash-window'), 'SOURCE_CHANGED')
                     result['entries'].append({'path': rel, 'kind': 'file', 'stamp': stamp(info), 'hash': digest})
-            require(stamp(os.fstat(fd)) == before and sorted(os.listdir(fd)) == names, 'SOURCE_CHANGED')
+            require(same_stamp(stamp(os.fstat(fd)),before,'directory-scan') and sorted(os.listdir(fd)) == names, 'SOURCE_CHANGED')
         walk(rootfd)
-        require(stamp(os.fstat(rootfd)) == result['root'], 'SOURCE_CHANGED')
+        require(same_stamp(stamp(os.fstat(rootfd)),result['root'],'root-scan'), 'SOURCE_CHANGED')
     with root_handle(root) as current:
-        require(stamp(os.fstat(current)) == result['root'], 'SOURCE_CHANGED')
+        require(same_stamp(stamp(os.fstat(current)),result['root'],'root-reopen'), 'SOURCE_CHANGED')
     result['digest'] = hashlib.sha256(canonical(result).encode()).hexdigest()
     return result
 
@@ -290,6 +302,9 @@ def publish(stage, destination, stage_identity=None, parent_identity=None):
             require(stamp(os.fstat(target))[:2] == parent_identity, 'DESTINATION_CHANGED')
         if stage_identity is not None:
             require(stamp(os.stat(stage.name, dir_fd=parent, follow_symlinks=False))[:2] == stage_identity, 'STAGE_CHANGED')
+        if os.name=='nt':
+            from windows_handles import publish_new
+            publish_new(stage,destination);return
         rename = ctypes.CDLL(None, use_errno=True).renameat2
         rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
         rename.restype = ctypes.c_int

@@ -113,13 +113,37 @@ def claim_identity(body):
     require(type(body['claimId']) is str and UUID.fullmatch(body['claimId']))
     require(type(body['binding']) is str and HEX.fullmatch(body['binding']))
 
+def open_database(file,persistent=False):
+    factory=sqlite3.Connection
+    if persistent:
+        import os
+        require(os.name=='nt','NATIVE_JOURNAL_REQUIRED')
+        from native_sqlite import NativeConnection
+        factory=NativeConnection
+    database=sqlite3.connect(str(file),check_same_thread=False,factory=factory)
+    try:configure_database(database,persistent);return database
+    except BaseException:database.close();raise
+
+
+def configure_database(database,persistent=False):
+    # Only explicit trusted Windows host callers choose retained journals.
+    # Linux/controller databases retain their existing modes and locking model.
+    if persistent:
+        import os
+        require(os.name=='nt','NATIVE_JOURNAL_REQUIRED')
+    mode='PERSIST' if persistent else 'DELETE'
+    observed=database.execute('PRAGMA journal_mode='+mode).fetchone()
+    memory=not persistent and observed==('memory',) and all(not row[2] for row in database.execute('PRAGMA database_list'))
+    require(observed==(mode.lower(),) or memory,'JOURNAL_MODE_CHANGED')
+    database.execute('PRAGMA synchronous=FULL')
+    require(database.execute('PRAGMA synchronous').fetchone()==(2,),'JOURNAL_DURABILITY_CHANGED')
+
+
 class Journal:
     """One serialized owner. FULL commit precedes effects; capacity never evicts claims."""
-    def __init__(self, file, session):
+    def __init__(self, file, session, *, persistent=False):
         self.session = session
-        self.db = sqlite3.connect(file, check_same_thread=False)
-        self.db.execute('PRAGMA journal_mode=DELETE')
-        self.db.execute('PRAGMA synchronous=FULL')
+        self.db = open_database(file,persistent)
         self.db.executescript('''
           CREATE TABLE IF NOT EXISTS claims(id TEXT PRIMARY KEY, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS nonces(id TEXT PRIMARY KEY, expires INTEGER NOT NULL);

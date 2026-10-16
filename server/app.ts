@@ -1,3 +1,4 @@
+import {registerNativeStorageScope} from './native-storage.js';
 import {ProjectTransfers,transferCode} from './project-transfers.js';
 import Fastify from 'fastify';
 import staticFiles from '@fastify/static';
@@ -135,6 +136,7 @@ export async function createApp(options: AppOptions) {
     reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({error:e.message.replaceAll(config.apiKey || '\u0000','[redacted]')});
   });
   options.transportAuth?.register(app);
+  registerNativeStorageScope(app);
   options.lifecycle?.identity.register(app,options.lifecycle.close);
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
   app.get('/api/chats/:id/skills',async request=>{await runtime.checkSkills(paramId(request.params));return {catalog:await runtime.skills.files(paramId(request.params)).catalog(),selection:runtime.skills.view(paramId(request.params)),drafts:runtime.skills.drafts(paramId(request.params))};});

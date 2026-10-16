@@ -155,7 +155,16 @@ try {const result=await tools.execute({projectRoot:root,chatId:'m30-worker',agen
     token,ticket=select(str(storage),sid,str(root),'export',str(collision),managed.name);authorize(storage,token,ticket)
     collision.mkdir();(collision/'keep').write_text('never replace')
     check('destination appearing after authorization is never overwritten',api('/projects/'+project['id']+'/export',{'code':token},fail=True)>=400 and (collision/'keep').read_text()=='never replace')
-    check('original source bytes mtime and mode preserved',before=={str(p.relative_to(source)):(p.read_bytes(),p.stat().st_mtime_ns,p.stat().st_mode) for p in source.rglob('*') if p.is_file()})
+    after={str(p.relative_to(source)):(p.read_bytes(),p.stat().st_mtime_ns,p.stat().st_mode) for p in source.rglob('*') if p.is_file()}
+    if before!=after:
+        differences=[]
+        for name in sorted(set(before)|set(after)):
+            left,right=before.get(name),after.get(name)
+            if left!=right:
+                differences.append({'path':name,'fields':['presence'] if left is None or right is None else [field for field,a,b in zip(['bytes','mtimeNs','mode'],left,right) if a!=b], 'beforeHash':hashlib.sha256(left[0]).hexdigest() if left else None,'afterHash':hashlib.sha256(right[0]).hexdigest() if right else None})
+        (root/'test-results/container/m30-original-differences.json').write_text(json.dumps(differences[:100],indent=2))
+        print('Original fixture difference fields: '+json.dumps(differences[:100]),flush=True)
+    check('original source bytes mtime and mode preserved',before==after)
     # Delete only second managed copy through actual exact-path confirmation.
     preview=api('/projects/'+second['id']+'/deletion-preview',{})
     api('/projects/'+second['id'],{'mode':'disk','canonicalPath':preview['canonicalPath'],'confirmationToken':preview['confirmationToken']},method='DELETE')

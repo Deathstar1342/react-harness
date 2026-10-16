@@ -1,3 +1,4 @@
+import {assertNativePath,nativeStorageActive} from './native-storage.js';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
@@ -8,21 +9,27 @@ import { ProviderSettingsFile } from './provider-settings.js';
 
 const fail = (message:string) => new Error(message);
 export function privateDirectory(directory:string) {
+  assertNativePath(directory,true,true,'directory');
   mkdirSync(directory,{recursive:true,mode:0o700});
+  assertNativePath(directory);
   const stat=lstatSync(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw fail('Application directory must not be a link');
-  if (process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode & 0o077)!==0)) throw fail('Application directory must be owned by this user with mode 0700');
+  if (!nativeStorageActive() && process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode & 0o077)!==0)) throw fail('Application directory must be owned by this user with mode 0700');
 }
-export function regularFile(filename:string) {
+export function regularFile(filename:string,privateClass=true) {
+  assertNativePath(filename,privateClass);
   const stat=lstatSync(filename);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink!==1) throw fail('Application files must be regular and unlinked');
 }
 export function durableWrite(filename:string, value:string) {
+  assertNativePath(filename,true,true);
   if(existsSync(filename))regularFile(filename);
   const temporary=`${filename}.${randomUUID()}.tmp`;
   const fd=openSync(temporary,'wx',0o600);
   try {writeFileSync(fd,value);fsyncSync(fd);} finally {closeSync(fd);}
+  assertNativePath(temporary);assertNativePath(filename,true,true);
   renameSync(temporary,filename);
+  assertNativePath(filename);
   // Windows does not support opening directories for fsync. File contents are flushed on both platforms.
   if (process.platform!=='win32') {const dir=openSync(path.dirname(filename),'r');try{fsyncSync(dir);}finally{closeSync(dir);}}
 }
@@ -35,6 +42,7 @@ function treeHash(directory:string):string {
   const digest=createHash('sha256');let count=0;
   const visit=(dir:string,relative:string,depth:number)=>{
     if(depth>64)throw fail('Profile tree is too deep');
+    assertNativePath(dir);
     for(const name of readdirSync(dir).sort()) {
       if(++count>10000)throw fail('Profile has too many files');
       const filename=path.join(dir,name),rel=path.join(relative,name),stat=lstatSync(filename);
@@ -50,13 +58,16 @@ function treeHash(directory:string):string {
 export class ProfileOwnership {
   private db?:DatabaseSync;
   constructor(directory:string) {
+    assertNativePath(directory,true,true,'directory');
     mkdirSync(directory,{recursive:true,mode:0o700});
     if (lstatSync(directory).isSymbolicLink()) throw fail('Ownership directory must not be a link');
+    assertNativePath(directory);
     const canonical=realpathSync(directory),filename=path.join(canonical,'.backend-owner.sqlite');
+    assertNativePath(filename,true,true,'sqlite');
     if (!existsSync(filename)) {try{closeSync(openSync(filename,'wx',0o600));}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;}}
     regularFile(filename);
     const db=new DatabaseSync(filename);
-    try {db.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');this.db=db;}
+    try {assertNativePath(filename);db.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');this.db=db;}
     catch {db.close();throw fail('Profile is owned by another backend; stop that instance before starting or migrating');}
   }
   close() {this.db?.close();this.db=undefined;}
@@ -65,7 +76,7 @@ export class ProfileOwnership {
 export function lockResources(directories:string[]) {
   const locks:ProfileOwnership[]=[];
   try {
-    for(const dir of directories) {mkdirSync(dir,{recursive:true,mode:0o700});if(lstatSync(dir).isSymbolicLink())throw fail('Resource directory must not be a link');}
+    for(const dir of directories) {privateDirectory(dir);if(lstatSync(dir).isSymbolicLink())throw fail('Resource directory must not be a link');}
     const canonical=[...new Set(directories.map(dir=>realpathSync(dir)))].sort();
     for(const dir of canonical) locks.push(new ProfileOwnership(dir));
     return {close:()=>{for(const lock of locks.reverse())lock.close();}};
@@ -84,7 +95,7 @@ function copyArtifacts(source:string,destination:string) {
       if(stat.isDirectory()){privateDirectory(dest);visit(src,dest,depth+1);}
       else {
         regularFile(src);bytes+=stat.size;if(bytes>1024*1024*1024)throw fail('Legacy artifact tree exceeds 1 GiB');
-        copyFileSync(src,dest);chmodSync(dest,0o600);
+        assertNativePath(dest,true,true);copyFileSync(src,dest);chmodSync(dest,0o600);assertNativePath(dest);
         const fd=openSync(dest,'r+');try{fsyncSync(fd);}finally{closeSync(fd);}
       }
     }
@@ -137,7 +148,9 @@ export async function prepareProfile(options:ProfileOptions={}):Promise<Prepared
       if(json<Marker>(path.join(stage,'profile.json')).protocol!=='native-tools-v1')throw fail('Incompatible prototype staging; preserve it and initialize a fresh HARNESS_HOME.');
       if (treeHash(stage)!==r.treeHash) throw fail('Migration staging changed; preserve it and recover explicitly');
       if (existsSync(paths.profile)) throw fail('Destination profile exists; refusing to overwrite or merge');
+      assertNativePath(stage);assertNativePath(paths.profile,true,true,'directory');
       renameSync(stage,paths.profile);
+      assertNativePath(paths.profile);
       options.checkpoint?.('published');
       r.phase='committed';durableWrite(journal,JSON.stringify(r));
     };
