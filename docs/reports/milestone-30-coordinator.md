@@ -1,0 +1,11 @@
+# Milestone 30 — independent coordinator review
+
+## Dispatch — 2026-10-16
+
+Dedicated chat `01a144fc-512a-7721-8970-19c921566020` (**Milestone 30**), host local, owns isolated `D:/CodexData/.codex/worktrees/milestone-30-donly/REACT harness`, branch `codex/milestone-30`, exact published kickoff `62bd6a14af8fd470b1e49ab96056d1bb3ca5d6ea`. Coordinator independently verified clean branch/base/D-only Git metadata and explicitly waited for active initial progress, cursor `f43fd0e8-1296-498d-8f6d-fbe343668c0d:1`.
+
+M29 delivery gate was satisfied on GitHub main `0ae688572a0652708b55cbd608bb62449e34ca22`: every applicable exact-main CI job/step independently green, fresh main container receipt downloaded/hash-verified and source-bound worker29/source15/Runtime53 checks audited. Kickoff differs by documentation only. All earlier worktrees, failures and idle M29 are preserved. M21 remains paused.
+
+M30 owns one-time copy-on-import into a fresh authoritative managed project, explicit safe export to a new destination, publication/registration identity and cancellation/restart handling, quiet project UI and narrowly required native-picker/host transfer seams. No synchronization/refresh/write-back/original deletion or source mounts. Original paths remain trusted-host-only; controller/model cannot request arbitrary host copies. Early concrete contract is required before substantial interfaces: human selection/authorization/channel, bounded manifest/count/bytes/depth, stage/fsync/no-clobber publication, Git history/dirty changes, secret/cache exclusions and explicit inclusion, unsafe links/special files/Windows collisions, editor/active-worker/install reservations, failure residue and durable no replay.
+
+No implementation/interface acceptance yet. Full Electron/container lifecycle and Windows transport remain M31; guided default scripts/Windows source launchers remain M32. Browser source needs an honest explicit host-side transfer path; do not call a path input a native picker. Preserve all native/runtime/version/lease/goal/skill/approval/uncertainty/secrets boundaries. Physical D only for writes; no workstation provisioning or global changes. No user blocker; normal 15-minute check-in continues quietly.
