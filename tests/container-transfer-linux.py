@@ -42,10 +42,11 @@ def terminal_code(root,source):
     pid,fd=pty.fork()
     if pid==0:
         os.chdir(root);os.execvpe('bash',['bash','scripts/project-transfer.sh'],{'HOME':os.environ['HOME'],'PATH':'/usr/bin:/bin','TERM':'xterm'})
-    output=bytearray();offset=0
+    output=bytearray();offset=0;stage='initial prompt'
     try:
         answers=[('[import/export]:','import\n'),('Absolute source folder:',str(source)+'\n'),('(blank for none):','\n'),('fresh repository:','INCLUDE HISTORY\n'),('15 minutes:','AUTHORIZE COPY\n')]
         for marker,answer in answers:
+            stage=marker
             end=time.monotonic()+30
             while marker.encode() not in output[offset:]:
                 assert time.monotonic()<end,'transfer terminal prompt missing: '+marker
@@ -64,7 +65,11 @@ def terminal_code(root,source):
         assert code,'transfer code missing'
         return code[1].decode()
     except Exception:
-        diagnostic=re.sub(r'[a-f0-9]{48,64}','[redacted capability]',bytes(output).decode(errors='replace'))[-12000:]
+        diagnostic=re.sub(r'[a-f0-9]{48,64}','[redacted capability]',bytes(output).decode(errors='replace')).replace(str(source.parent),'[private fixture]').replace(str(root),'[source checkout]')[-12000:]
+        ended,status=os.waitpid(pid,os.WNOHANG) if pid else (0,0)
+        exit_status=os.waitstatus_to_exitcode(status) if ended else 'not yet observed'
+        if ended:pid=0
+        diagnostic=f'Prompt stage: {stage}; child exit: {exit_status}\n'+diagnostic
         (root/'test-results/container/m30-terminal-failure.log').write_text(diagnostic)
         print(diagnostic,flush=True)
         raise
@@ -89,7 +94,9 @@ def run(root,storage,controller,start_output):
     (source/'node_modules').mkdir();(source/'node_modules/cache').write_text('excluded')
     (source2/'other.txt').write_text('second unrelated source')
     before={str(p.relative_to(source)):(p.read_bytes(),p.stat().st_mtime_ns,p.stat().st_mode) for p in source.rglob('*') if p.is_file()}
-    code=terminal_code(root,source)
+    # Independent authorizations test the earlier intermittent pre-copy terminal exit.
+    # A failed authorization stops the matrix; no transfer or failed code is retried.
+    for _ in range(5):code=terminal_code(root,source)
     result=api('/project-transfers/import',{'name':'Copied with history','code':code})
     project=result['project'];managed=storage/'workspace'/Path(project['path']).name
     check('actual PTY host authorization imports into fresh managed project',managed.is_dir() and result['receipt']['history'])
