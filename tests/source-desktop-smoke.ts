@@ -71,7 +71,8 @@ try{
   const uuid=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
   return {runtime:state.runtime==='container'?'container':'unknown',phase:['setup','starting','ready','stopping','failed'].includes(state.phase)?state.phase:'unknown',available:state.container?.available===true,storageSelected:!!state.container?.storage,storageId:uuid.test(state.container?.storage?.id??'')?state.container!.storage!.id:undefined,transitioning:state.transitioning===true};
  })):undefined;
- const codes=page&&!page.isClosed()?await bounded(page.getByRole('alert').allTextContents().then(lines=>[...new Set(lines.join(' ').match(/\b[A-Z][A-Z_]{2,63}\b/g)??[])].slice(0,16))):undefined;
+ const knownCodes=new Set(['ENGINE_OPERATION_FAILED','SUPERVISION_UNCERTAIN','INVALID_LAUNCH','INVALID_IMAGE','INVALID_WORKER_IMAGE','WORKER_IMAGE_CHANGED','RUNTIME_IMAGE_MISSING','BROKER_START_FAILED','BROKER_START_TIMEOUT','BROKER_IDENTITY_CHANGED','CONTROLLER_NOT_READY','CONTROLLER_NOT_RUNNING','OWNERSHIP_CHANGED','CLEANUP_UNCERTAIN','UNSAFE_STORAGE','STORAGE_CHANGED']);
+ const codes=page&&!page.isClosed()?await bounded(page.getByRole('alert').allTextContents().then(lines=>[...new Set(lines.join(' ').match(/\b[A-Z][A-Z_]{2,63}\b/g)??[])].filter(code=>knownCodes.has(code)).slice(0,16))):undefined;
  const storage=path.join(path.dirname(root),'m32-managed-storage');
  const files=Object.fromEntries(['.storage-id','state/container-storage.json','runtime/desktop-owner.json','runtime/desktop-owner.sqlite','runtime/control/session.json','state/backend.json'].map(name=>[name,existsSync(path.join(storage,name))]));
  let owner:Record<string,unknown>|undefined;
