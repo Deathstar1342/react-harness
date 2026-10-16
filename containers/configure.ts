@@ -23,7 +23,8 @@ try {
     if(baseUrl!==current.baseUrl&&current.apiKey&&apiKey===current.apiKey)throw new Error();
     const models={...current.models};
     for(const role of ['architect','coder','critic'] as const)models[role]=(await rl.question(`${role} exact model ID (blank keeps current): `,{signal:abort.signal})).trim()||models[role];
-    file.write({baseUrl,apiKey,models});
+    if(baseUrl!==current.baseUrl||apiKey!==current.apiKey||(['architect','coder','critic'] as const).some(role=>models[role]!==current.models[role]))file.write({baseUrl,apiKey,models});
+    file.refreshIdentity();
     console.log('Private settings saved. No provider request was made.');
   } finally {rl.close();output.end();profile.ownership.close();}
 } catch {console.error('Private setup stopped. Check ownership, inputs, or an already-running controller; private inputs are not printed.');process.exitCode=1;}

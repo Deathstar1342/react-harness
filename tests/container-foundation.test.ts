@@ -11,6 +11,7 @@ import { LinuxSandbox } from '../server/tools/sandbox.js';
 import { PackageHelperClient } from '../server/package-helper.js';
 import { readConfig, publicSettings } from '../server/config.js';
 import { WorkspaceLocations } from '../server/workspace.js';
+import { startBackend } from '../server/bootstrap.js';
 
 const cleanup:(()=>void)[]=[];
 afterEach(()=>{vi.unstubAllEnvs();for(const fn of cleanup.splice(0).reverse())fn();});
@@ -68,4 +69,8 @@ it('does not expose host browsing or mutable workspace selection in container mo
   const locations=new WorkspaceLocations(store,'/workspace',undefined,true);
   expect(locations.settings().workspaceRoot).toBe('/workspace');
   await expect(locations.update('/tmp')).rejects.toThrow(/supervisor/);await expect(locations.browse('/abyssus')).rejects.toThrow(/unavailable/);
+});
+it('does not let a profile file enable a public container listener outside trusted bootstrap',async()=>{
+  const t=await fixture();durableWrite(t.profile.paths.configFile,'HARNESS_EXECUTION_MODE=container\nHOST=0.0.0.0\n');
+  await expect(startBackend({env:{HARNESS_HOME:t.home},cwd:t.root,installRoot:t.root})).rejects.toThrow(/trusted launcher/);
 });

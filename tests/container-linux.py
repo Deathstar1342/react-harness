@@ -140,6 +140,11 @@ try:
     pair()
     settings = api('GET', '/api/settings')
     check('container mode public contract and provider privacy', settings['executionMode'] == 'container' and settings['executionAvailable'] is False and synthetic not in json.dumps(api('GET', '/api/provider-settings')))
+    api('POST', '/api/projects', {'name': 'Outside', 'mode': 'create', 'path': '/abyssus/forbidden'}, expected=400)
+    api('POST', '/api/projects', {'name': 'Import', 'mode': 'import', 'path': '/workspace/external'}, expected=400)
+    api('PATCH', '/api/workspace', {'workspaceRoot': '/abyssus'}, expected=400)
+    api('GET', '/api/directories?path=/abyssus', expected=400)
+    check('file/project control APIs reject outside paths, import and host browsing', not (storage / 'state/forbidden').exists())
     project = api('POST', '/api/projects', {'name': 'Foundation', 'mode': 'create'}, expected=201)
     chat = api('POST', f"/api/projects/{project['id']}/chats", {'title': 'Persistence receipt'}, expected=201)
     assert project['path'] == '/workspace/foundation'
@@ -187,6 +192,23 @@ try:
     c('up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '90', 'controller')
     host_proof()
     check('restored original storage starts without reset')
+    c('stop', 'controller')
+    # Persisted registrations are checked before runtime recovery or file watchers.
+    edit = "import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync('/abyssus/profile/state/state.sqlite');const row=db.prepare('SELECT id,data FROM projects').get();const data=JSON.parse(row.data);data.path=process.argv[1];db.prepare('UPDATE projects SET root=?,data=? WHERE id=?').run(data.path,JSON.stringify(data),row.id);db.close();"
+    c('run', '--rm', '--no-deps', '-T', 'controller', 'node', '--input-type=module', '-e', edit, '/abyssus')
+    refused = c('run', '--rm', '--no-deps', '-T', 'controller', ok=False)
+    check('persisted outside project registration refuses startup', refused.returncode != 0)
+    c('run', '--rm', '--no-deps', '-T', 'controller', 'node', '--input-type=module', '-e', edit, project['path'])
+    c('up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '90', 'controller')
+    pair()
+    folder=storage/'workspace/foundation'
+    saved_folder=storage/'workspace/foundation-saved'
+    folder.rename(saved_folder);folder.symlink_to('/abyssus/profile',target_is_directory=True)
+    try:
+        api('GET', f"/api/projects/{project['id']}/file?path=config/.env", expected=400)
+        check('file API rechecks replaced project root and refuses private-state symlink')
+    finally:
+        folder.unlink();saved_folder.rename(folder)
 except Exception as error:
     (OUT / 'failure.txt').write_text(str(error).replace(synthetic, '[synthetic key]').replace(build_secret, '[build sentinel]'))
     raise

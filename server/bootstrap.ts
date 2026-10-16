@@ -43,6 +43,7 @@ export async function startBackend(options:ProfileOptions & {transportToken?:str
     if(!existsSync(profile.paths.configFile))throw new Error('Selected configuration is missing; restore profile/config/.env before startup');
     const {config,file}=loadBackendConfig({...env,HARNESS_HOME:profile.paths.home},profile.paths.configFile);
     config.appHome=profile.paths.home;
+    if(config.executionMode==='container'&&env.HARNESS_EXECUTION_MODE!=='container')throw new Error('Container mode must be selected by the trusted launcher, not profile configuration');
     if(env.HARNESS_EXECUTION_MODE==='container' && (config.executionMode!=='container'||config.dataDir!=='/abyssus/profile/state'||config.workspaceRoot!=='/workspace'||Object.keys(config.promptFiles).length))throw new Error('Container profile path overrides are unsupported');
     if(options.desktop){config.host='127.0.0.1';config.port=0;}
     if(config.port>65535)throw new Error('PORT must be at most 65535');
