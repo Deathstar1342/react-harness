@@ -11,7 +11,10 @@ from protocol import Denied, require, digest
 PROTECTED = re.compile(r'^(?:\.git(?:$|\.)|\.env|\.ssh$|\.aws$|\.azure$|\.docker$|\.kube$|application_default_credentials\.json$|\.config$|\.gnupg$|\.npmrc$|\.netrc$|\.pypirc$|\.gitconfig$|credentials(?:$|\.)|secrets?(?:$|\.)|id_(?:rsa|dsa|ecdsa|ed25519)(?:$|\.))|\.(?:pem|key|p12|pfx|keystore)$', re.I)
 
 class Docker:
-    def __init__(self, storage, storage_id, source, context):
+    def __init__(self, storage, storage_id, source, context, worker_image=None):
+        # Desktop supplies its selected immutable image through trusted host argv only.
+        if worker_image is not None:
+            require(type(worker_image) is str and re.fullmatch(r'sha256:[a-f0-9]{64}', worker_image), 'INVALID_WORKER_IMAGE')
         self.storage = Path(storage)
         self.storage_id = storage_id
         self.source = Path(source)
@@ -29,8 +32,9 @@ class Docker:
         self.source_digest=hashlib.sha256(b''.join(file.name.encode()+b'\0'+file.read_bytes() for file in sorted((self.source/'containers/broker').glob('*.py')))).hexdigest()
         require(info['OSType'] == 'linux' and info['Architecture'] in ('x86_64', 'amd64'), 'UNSUPPORTED_ENGINE')
         require(not any('rootless' in str(v) or 'userns' in str(v) for v in info.get('SecurityOptions', [])), 'UNSUPPORTED_UID_MAPPING')
-        self.image = self.call(['image', 'inspect', 'abyssus-worker:m29', '--format', '{{.Id}}']).strip()
+        self.image = self.call(['image', 'inspect', worker_image if worker_image is not None else 'abyssus-worker:m29', '--format', '{{.Id}}']).strip()
         require(re.fullmatch(r'sha256:[a-f0-9]{64}', self.image), 'WORKER_IMAGE_MISSING')
+        require(worker_image is None or self.image == worker_image, 'WORKER_IMAGE_CHANGED')
         from resources import Resources
         self.resources = Resources(self)
         self.resources.recover()

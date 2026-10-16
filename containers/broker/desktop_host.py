@@ -45,7 +45,6 @@ class DesktopHost:
         self.engine()
         for image in ('controllerImage','workerImage'):
             require(self.call(['image','inspect',launch[image],'--format','{{.Id}}']).strip()==launch[image], 'RUNTIME_IMAGE_MISSING')
-        require(self.call(['image','inspect','abyssus-worker:m29','--format','{{.Id}}']).strip()==launch['workerImage'], 'WORKER_IMAGE_CHANGED')
 
     def call(self,args,timeout=30):
         p=subprocess.run(['docker','--context',self.launch['context'],*args],env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
@@ -130,7 +129,7 @@ class DesktopHost:
             if old:self.call(['rm',old['Id']])
         try:self.broker_hello()
         except (FileNotFoundError,ConnectionRefusedError):
-            self.broker=subprocess.Popen([sys.executable,'-I','-B',str(self.source/'containers/broker/server.py'),str(self.storage),self.launch['storageId'],str(self.source),self.launch['context']],env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            self.broker=subprocess.Popen([sys.executable,'-I','-B',str(self.source/'containers/broker/server.py'),str(self.storage),self.launch['storageId'],str(self.source),self.launch['context'],self.launch['workerImage']],env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             end=time.monotonic()+180
             while True:
                 require(self.broker.poll() is None,'BROKER_START_FAILED')
