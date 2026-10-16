@@ -97,6 +97,6 @@ export class ContainerShellPool {
     try{z.object({project:z.literal(project),reset:z.literal(true),recipesRetained:z.literal(true),reinstallRequiresNewApproval:z.literal(true)}).strict().parse(await(await this.client()).request('reset',{project}));}
     catch{this.quarantined.add(root);throw new ToolError('Worker reset outcome is uncertain.','SANDBOX_CLEANUP_FAILED');}
   }
-  async dispose(){this.disposed=true;for(const entry of this.contexts.values())await entry.tail;for(const [id,entry] of this.contexts)await this.closeId(id,entry.root);if(this.quarantined.size)throw new ToolError('Worker cleanup is uncertain.','SANDBOX_CLEANUP_FAILED');}
+  async dispose(){this.disposed=true;await Promise.allSettled([...this.contexts.values()].map(entry=>entry.tail));await Promise.allSettled([...this.contexts].map(([id,entry])=>this.closeId(id,entry.root)));if(this.quarantined.size)throw new ToolError('Worker cleanup is uncertain.','SANDBOX_CLEANUP_FAILED');}
 
 }

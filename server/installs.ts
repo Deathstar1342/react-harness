@@ -94,12 +94,12 @@ export class InstallService {
     if (this.closing) throw conflict('Backend is shutting down');
     const chat = this.store.chat(chatId);
     if (chat.mode === 'plan' || role === 'critic') throw conflict('Planning and review cannot request system installs');
-    if (this.store.installs().some(i=>i.recoveryRequired || i.state==='dispatching')) throw conflict('A system install needs recovery or is still running');
+    if (this.store.installs().some(i=>(!this.container||i.projectId===chat.projectId)&&(i.recoveryRequired || i.state==='dispatching'))) throw conflict('A system install needs recovery or is still running');
     return this.write({id,chatId,projectId:chat.projectId,frameId,role,generation,modeVersion:chat.modeVersion ?? 0,recommendation:packageRecommendation.parse(recommendation),settings:this.settings(),state:'preparing',createdAt:this.now(),updatedAt:this.now(),code:'PREPARING',recoveryRequired:false});
   }
   private current(id: string, guard: () => boolean): InstallRecord {
     const item = this.store.install(id), chat = this.store.chat(item.chatId), settings=this.settings();
-    if (this.closing || !pendingStates.has(item.state) || !guard() || chat.mode==='plan' || chat.modeVersion!==item.modeVersion || settings.revision!==item.settings.revision || settings.policy!==item.settings.policy || settings.reviewerModel!==item.settings.reviewerModel || !this.container && item.settings.target && helperCanonical(settings.target)!==helperCanonical(item.settings.target) || item.expiresAt && this.now()>=item.expiresAt || this.store.installs().some(other=>other.id!==id && (other.recoveryRequired || other.state==='dispatching'))) {
+    if (this.closing || !pendingStates.has(item.state) || !guard() || chat.mode==='plan' || chat.modeVersion!==item.modeVersion || settings.revision!==item.settings.revision || settings.policy!==item.settings.policy || settings.reviewerModel!==item.settings.reviewerModel || !this.container && item.settings.target && helperCanonical(settings.target)!==helperCanonical(item.settings.target) || item.expiresAt && this.now()>=item.expiresAt || this.store.installs().some(other=>other.id!==id && (!this.container||other.projectId===item.projectId) && (other.recoveryRequired || other.state==='dispatching'))) {
       this.stale(item,item.expiresAt && this.now()>=item.expiresAt ? 'PREVIEW_EXPIRED':'CONTEXT_CHANGED');
       throw conflict('System install decision is stale; request a new preview');
     }

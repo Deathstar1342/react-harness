@@ -22,12 +22,14 @@ class Broker:
         self.lock = threading.RLock()
         self.jobs = {}
         self.closing = False
+        self.shutdown_done = threading.Event()
+        self.shutdown_error = False
         from packages import Packages
         self.packages = Packages(self)
 
     def dispatch(self, op, body):
         with self.lock:
-            require(not self.closing or op == 'observe', 'BROKER_CLOSING')
+            require(not self.closing or op in ('observe','install_status'), 'BROKER_CLOSING')
             if op.startswith('install_') or op == 'reset':
                 return self.packages.dispatch(op, body)
             if op == 'hello':
@@ -181,19 +183,62 @@ class Broker:
                     stream.close()
 
     def shutdown(self):
-        for thread in self.packages.threads.values():
-            thread.join(timeout=330)
-            require(not thread.is_alive(), 'INSTALL_DRAIN_UNCERTAIN')
         with self.lock:
-            self.closing = True
-            for id, job in self.jobs.items():
+            already = self.closing
+            if not already:
+                self.closing = True  # Admission barrier precedes snapshots and every await.
+                install_threads = list(self.packages.threads.values())
+                jobs = list(self.jobs.values())
+        if already:
+            require(self.shutdown_done.wait(380) and not self.shutdown_error, 'DRAIN_UNCERTAIN')
+            return
+        errors = []
+        try:
+            import time
+            deadline = time.monotonic() + 330
+            for thread in install_threads:
+                thread.join(timeout=max(0, deadline-time.monotonic()))
+                if thread.is_alive():
+                    errors.append('INSTALL_DRAIN_UNCERTAIN')
+            with self.lock:
+                for job in jobs:
+                    if job['thread'].is_alive():
+                        job['cancelled'] = True
+                for context in list(self.docker.contexts):
+                    try:
+                        self.docker.close(context)
+                    except Exception:
+                        errors.append('WORKER_CLEANUP_UNCERTAIN')
+                for (raw,) in self.journal.db.execute('SELECT data FROM worker_installs').fetchall():
+                    row = json.loads(raw)
+                    if row['phase'] in ('prepared','authorized','preparing'):
+                        try:
+                            self.packages.cleanup(row)
+                            row['phase'] = 'failed'
+                            if row.get('record'):
+                                row['record'].update(state='failed',code='BROKER_CLOSED')
+                            self.packages.save(row)
+                        except Exception:
+                            errors.append('INSTALL_CLEANUP_UNCERTAIN')
+                    elif row['phase'] in ('uncertain','executing','publishing'):
+                        for field in ('container','companion'):
+                            if row.get(field):
+                                try:
+                                    self.docker.call(['stop','--time','5',row[field]])
+                                    info=json.loads(self.docker.call(['inspect',row[field]]))[0]
+                                    require(not info['State']['Running'],'INSTALL_CLEANUP_UNCERTAIN')
+                                except Exception:
+                                    errors.append('INSTALL_CLEANUP_UNCERTAIN')
+            for job in jobs:
+                job['thread'].join(timeout=15)
                 if job['thread'].is_alive():
-                    job['cancelled'] = True
-            for context in list(self.docker.contexts):
-                self.docker.close(context)
-        for job in self.jobs.values():
-            job['thread'].join(timeout=15)
-            require(not job['thread'].is_alive(), 'DRAIN_UNCERTAIN')
+                    errors.append('WORKER_DRAIN_UNCERTAIN')
+            require(not errors, 'DRAIN_UNCERTAIN')
+        except Exception:
+            self.shutdown_error = True
+            raise
+        finally:
+            self.shutdown_done.set()
 
 
 def serve(storage, storage_id, source, context):
@@ -259,7 +304,12 @@ def serve(storage, storage_id, source, context):
             file.flush()
             os.fsync(file.fileno())
         def stop(*_):
-            threading.Thread(target=server.shutdown, daemon=True).start()
+            def drain():
+                try:
+                    broker.shutdown()
+                finally:
+                    server.shutdown()
+            threading.Thread(target=drain, daemon=True).start()
         signal.signal(signal.SIGTERM, stop)
         signal.signal(signal.SIGINT, stop)
         try:

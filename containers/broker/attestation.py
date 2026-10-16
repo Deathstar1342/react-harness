@@ -8,6 +8,7 @@ import time
 import threading
 from protocol import require, digest
 
+EXPORT_SECONDS = 300
 TREES = ('usr/lib/python3.11', 'usr/lib/python3/dist-packages', 'usr/local/lib/python3.11',
          'usr/lib/x86_64-linux-gnu', 'usr/lib/git-core', 'usr/share/git-core',
          'usr/local/lib/node_modules', 'opt/abyssus-worker', 'opt/abyssus-packages',
@@ -19,6 +20,7 @@ PARENTS = {str(parent) for item in (*TREES, *FILES) for parent in PurePosixPath(
 
 def normalized(name):
     name = name.rstrip('/')
+    require(len(name.encode('utf-8', errors='strict')) <= 4096 and not any(ord(c) < 32 for c in name), 'UNSAFE_IMAGE_PATH')
     require(name and not name.startswith('/') and '\\' not in name and '\0' not in name, 'UNSAFE_IMAGE_PATH')
     require(all(part not in ('', '.', '..') for part in name.split('/')), 'UNSAFE_IMAGE_PATH')
     return name
@@ -91,6 +93,8 @@ def manifest(stream, max_bytes=8 * 1024**3, max_members=500000, deadline=None):
 class Attestor:
     def __init__(self, docker):
         self.docker = docker
+        self.expected_env = json.loads(docker.call(['image','inspect',docker.image]))[0]['Config'].get('Env',[])
+        require(not any(item.split('=',1)[0] in ('LD_PRELOAD','LD_LIBRARY_PATH','PYTHONPATH','PYTHONHOME','BASH_ENV','ENV') for item in self.expected_env), 'IMAGE_ENV_INJECTION')
         self.base = self.inspect(docker.image)
         for member,source in [('opt/abyssus-worker/worker-runner.py','containers/worker-runner.py'),('opt/abyssus-worker/worker-bridge.py','containers/worker-bridge.py'),('opt/abyssus-worker/broker/egress.py','containers/broker/egress.py'),('opt/abyssus-packages/apt_adapter.py','helper/apt_adapter.py'),('opt/abyssus-packages/core.py','helper/core.py'),('opt/abyssus-packages/container-apt.py','containers/container-apt.py')]:
             require(self.base.get(member,{}).get('sha256') == hashlib.sha256((docker.source / source).read_bytes()).hexdigest(), 'IMAGE_SOURCE_MISMATCH')
@@ -99,7 +103,7 @@ class Attestor:
 
     def inspect(self, image):
         info = json.loads(self.docker.call(['image', 'inspect', image]))[0]
-        require(info['Id'] == image and not info['Config'].get('Volumes'), 'IMAGE_CONTROL_METADATA')
+        require(info['Id'] == image and not info['Config'].get('Volumes') and info['Config'].get('Env',[]) == self.expected_env, 'IMAGE_CONTROL_METADATA')
         require(info.get('Architecture') == 'amd64' and info.get('Os') == 'linux', 'IMAGE_PLATFORM')
         container = self.docker.call(['create', '--network', 'none', '--entrypoint', '/usr/bin/true', image]).strip()
         process = None
@@ -110,7 +114,7 @@ class Attestor:
             def expire():
                 timed_out.set()
                 process.kill()
-            watchdog = threading.Timer(300, expire)
+            watchdog = threading.Timer(EXPORT_SECONDS, expire)
             watchdog.daemon = True
             watchdog.start()
             result = manifest(process.stdout)

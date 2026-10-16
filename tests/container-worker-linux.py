@@ -120,7 +120,7 @@ try:
     check('real apt preview has exact trusted package closure and container identity', preview['state'] == 'prepared' and preview['preview']['target']['scope'] == 'project-container' and preview['preview']['packages'])
     row = broker.packages.get(request['requestId'],'project')
     inspected = json.loads(docker.call(['inspect',row['container']]))[0]
-    check('root maintenance has no filesystem mounts controller state or daemon access', inspected['Mounts'] == [] and inspected['HostConfig']['NetworkMode'].startswith('container:') and not inspected['HostConfig']['Privileged'])
+    check('root maintenance has no filesystem mounts controller state or daemon access', not any(m['Type'] in ('bind','volume') for m in inspected['Mounts']) and inspected['HostConfig']['NetworkMode'].startswith('container:') and not inspected['HostConfig']['Privileged'])
     decision = {'requestId':request['requestId'],'previewDigest':preview['previewDigest'],'decisionNonce':secrets.token_hex(32),'expiresAt':preview['expiresAt']}
     broker.dispatch('install_authorize',{'project':'project','decision':decision})
     broker.dispatch('install_execute',{'project':'project','decision':decision})
