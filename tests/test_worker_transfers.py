@@ -194,4 +194,24 @@ class TransferFaults(unittest.TestCase):
         with self.assertRaises(Exception):replaced.verify_journal()
         with self.assertRaises(Exception):replaced.dispatch('transfer_release',body)
 
+
+
+    def test_terminal_eof_and_eio_are_failures_with_bounded_redacted_evidence(self):
+        import importlib.util
+        import io
+        from unittest.mock import patch
+        spec=importlib.util.spec_from_file_location('m30_terminal_fixture',Path(__file__).with_name('container-transfer-linux.py'))
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        (self.install/'test-results/container').mkdir(parents=True)
+        secret='a'*64
+        initial=(str(self.source)+' '+str(self.install)+' '+secret).encode()
+        for ending in (b'',OSError(5,'fixture EIO')):
+            with patch.object(module.pty,'fork',return_value=(43210,123)),patch.object(module.selector,'select',return_value=([123],[],[])),patch.object(module.os,'read',side_effect=[initial,ending]),patch.object(module.os,'waitpid',return_value=(43210,256)),patch.object(module.os,'close'),patch.object(module.os,'kill') as kill,patch('sys.stdout',new_callable=io.StringIO):
+                with self.assertRaises((EOFError,OSError)):module.terminal_code(self.install,self.source)
+                kill.assert_not_called()
+            diagnostic=(self.install/'test-results/container/m30-terminal-failure.log').read_text()
+            self.assertIn('child exit: 1',diagnostic);self.assertIn('Prompt stage: [import/export]:',diagnostic)
+            self.assertNotIn(secret,diagnostic);self.assertNotIn(str(self.source),diagnostic);self.assertNotIn(str(self.install),diagnostic)
+            self.assertLess(len(diagnostic),12500)
+
 if __name__ == '__main__': unittest.main()

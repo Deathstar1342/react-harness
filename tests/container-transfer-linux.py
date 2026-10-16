@@ -42,7 +42,7 @@ def terminal_code(root,source):
     pid,fd=pty.fork()
     if pid==0:
         os.chdir(root);os.execvpe('bash',['bash','scripts/project-transfer.sh'],{'HOME':os.environ['HOME'],'PATH':'/usr/bin:/bin','TERM':'xterm'})
-    output=bytearray();offset=0;stage='initial prompt'
+    output=bytearray();offset=0;stage='initial prompt';child_exit=None
     try:
         answers=[('[import/export]:','import\n'),('Absolute source folder:',str(source)+'\n'),('(blank for none):','\n'),('fresh repository:','INCLUDE HISTORY\n'),('15 minutes:','AUTHORIZE COPY\n')]
         for marker,answer in answers:
@@ -50,7 +50,10 @@ def terminal_code(root,source):
             end=time.monotonic()+30
             while marker.encode() not in output[offset:]:
                 assert time.monotonic()<end,'transfer terminal prompt missing: '+marker
-                if selector.select([fd],[],[],.1)[0]: output.extend(os.read(fd,8192))
+                if selector.select([fd],[],[],.1)[0]:
+                    block=os.read(fd,8192)
+                    if not block:raise EOFError('Transfer terminal closed before prompt')
+                    output.extend(block)
             offset=len(output);os.write(fd,answer.encode())
         end=time.monotonic()+30
         while time.monotonic()<end:
@@ -59,15 +62,15 @@ def terminal_code(root,source):
                 except OSError: break
                 if not block:break
                 output.extend(block)
-        _,status=os.waitpid(pid,0);pid=0
-        assert os.waitstatus_to_exitcode(status)==0,'transfer CLI failed'
+        _,status=os.waitpid(pid,0);pid=0;child_exit=os.waitstatus_to_exitcode(status)
+        assert child_exit==0,'transfer CLI failed'
         code=re.search(rb'Transfer code \(paste into the app\): ([a-f0-9]{64})',output)
         assert code,'transfer code missing'
         return code[1].decode()
     except Exception:
         diagnostic=re.sub(r'[a-f0-9]{48,64}','[redacted capability]',bytes(output).decode(errors='replace')).replace(str(source.parent),'[private fixture]').replace(str(root),'[source checkout]')[-12000:]
         ended,status=os.waitpid(pid,os.WNOHANG) if pid else (0,0)
-        exit_status=os.waitstatus_to_exitcode(status) if ended else 'not yet observed'
+        exit_status=os.waitstatus_to_exitcode(status) if ended else child_exit if child_exit is not None else 'not yet observed'
         if ended:pid=0
         diagnostic=f'Prompt stage: {stage}; child exit: {exit_status}\n'+diagnostic
         (root/'test-results/container/m30-terminal-failure.log').write_text(diagnostic)
