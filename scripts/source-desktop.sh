@@ -20,8 +20,8 @@ done
 for name in DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG DOCKER_API_VERSION; do [[ -z "${!name:-}" ]] || fail "Remove inherited $name before setup/start."; done
 for command in docker git tar realpath stat sha256sum timeout sed sync head; do command -v "$command" >/dev/null || fail "Missing $command. Nothing was installed; use your approved administrator."; done
 docker_cli="$(command -v docker)"
-d() { ( env -i HOME="$HOME" PATH="$PATH" TMPDIR="${runtime:-/tmp}" timeout --foreground 1800 "$docker_cli" "$@" 2>&1 | head -c 67108865 ); }
-q() { local reply; reply="$(d "$@" | head -c 262145)"; (( ${#reply} <= 262144 )) || fail "Engine reply limit"; printf '%s' "$reply"; }
+d() { ( seconds=1800; if [[ "${1:-}" == --query ]]; then seconds=20; shift; fi; env -i HOME="$HOME" PATH="$PATH" TMPDIR="${runtime:-/tmp}" timeout --foreground "$seconds" "$docker_cli" "$@" 2>&1 | head -c 67108865 ); }
+q() { local reply; reply="$(d --query "$@" | head -c 262145)"; (( ${#reply} <= 262144 )) || fail "Engine reply limit"; printf '%s' "$reply"; }
 g() { env -i HOME="$HOME" PATH="$PATH" git --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null "$@"; }
 context="$(q context show)"
 [[ "$context" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$ ]] || fail 'Invalid local context'
@@ -35,6 +35,11 @@ driver="$(sed -n 's/^Driver:[[:blank:]]*//p' <<< "$builder")"
 build_endpoint="$(sed -n 's/^Endpoint:[[:blank:]]*//p' <<< "$builder")"
 builder="$driver|$build_endpoint"
 [[ "$builder" == "docker|$context" || "$builder" == "docker|$endpoint" ]] || fail 'Use the local context Docker build driver; remote/custom builders are refused.'
+assert_engine() {
+  [[ "$(q context show)" == "$context" && "$(q context inspect "$context" --format '{{.Endpoints.docker.Host}}')" == "$endpoint" && "$(q --context "$context" info --format '{{.ID}}|{{.OSType}}|{{.Architecture}}|{{.DockerRootDir}}|{{json .SecurityOptions}}')" == "$engine" ]] || fail 'Engine changed during setup/start; retained intent is uncertain'
+  local actual; actual="$(q --context "$context" buildx inspect "$context")"
+  [[ "$(sed -n 's/^Driver:[[:blank:]]*//p' <<< "$actual")" == docker && "$(sed -n 's/^Endpoint:[[:blank:]]*//p' <<< "$actual")" == "$build_endpoint" ]] || fail 'Build endpoint changed; nothing replayed'
+}
 printf 'Local engine ready. Engine data root: %s\n' "$(cut -d '|' -f4 <<< "$engine")"
 printf 'Docker images/build cache remain in that separate engine storage. A VM backing drive is not proven by this path and is never moved by setup.\n'
 [[ "$action" != setup || "$option" != --check ]] || exit 0
@@ -59,6 +64,7 @@ verify() {
   cmp -s <(cut -c67- "$runtime/payload/SHA256SUMS" | LC_ALL=C sort) <(cd "$runtime/payload" && find . -type f ! -path './SHA256SUMS' -printf '%P\n' | LC_ALL=C sort) || fail 'Complete runtime member set differs'
   (cd "$runtime/payload" && sha256sum --check --status SHA256SUMS) || fail 'Runtime integrity failed; files preserved'
   for directory in desktop-data logs crashes temp; do private_dir "$runtime/$directory"; done
+  assert_engine
   for image in controller worker; do
     regular "$runtime/$image.iid"; iid="$(cat "$runtime/$image.iid")"
     [[ "$iid" =~ ^sha256:[a-f0-9]{64}$ && "$(q --context "$context" image inspect "$iid" --format '{{.Id}}')" == "$iid" ]] || fail 'Exact runtime image missing; start never pulls or builds'
@@ -82,6 +88,7 @@ else
   source="$(g -C "$ROOT" rev-parse HEAD)"; [[ "$source" =~ ^[a-f0-9]{40}$ ]] || fail 'Exact Git source commit required'
   parent="$(dirname -- "$runtime")"; leaf="$(basename -- "$runtime")"
   [[ "$(realpath -e "$parent")" == "$parent" ]] || fail 'Runtime parent aliases refused'
+  case "$(stat -f -c %T "$parent")" in ext2/ext3|xfs|btrfs) ;; *) fail 'Choose local Linux ext4/xfs/btrfs source runtime storage';; esac
   exec {parent_pin}<"$parent"
   [[ "$(realpath /proc/$$/fd/$parent_pin)" == "$parent" ]] || fail 'Runtime parent changed'
   mkdir -- "/proc/$$/fd/$parent_pin/$leaf"; private_dir "$runtime"
@@ -91,7 +98,7 @@ else
   exec {source_pin}<"$ROOT"
   [[ "$(realpath /proc/$$/fd/$source_pin)" == "$ROOT" ]] || fail 'Source parent changed'
   mkdir -- "/proc/$$/fd/$source_pin/.container-desktop-source"; printf '%s\n' "$runtime" > "$selection"
-  printf '%s\n' "$source" > "$runtime_io/build-intent"
+  printf '%s\n' "$source" "$context" "$endpoint" "$engine" > "$runtime_io/build-intent"
   mkdir "$runtime_io/snapshot" "$runtime_io/desktop-data" "$runtime_io/logs" "$runtime_io/crashes" "$runtime_io/temp"
   sync -f "$runtime_io/build-intent"; sync -f "$selection"; sync -f "$runtime"; sync -f "$ROOT/.container-desktop-source"
   # Preflight exact immutable tree BEFORE extraction: no links/submodules/escaped paths.
@@ -109,15 +116,18 @@ else
   [[ -z "$(find "$runtime_io/snapshot" -type l -o ! -type f ! -type d)" ]] || fail 'Source snapshot contains unsupported links/special files'
   for image in controller worker; do
     dockerfile=containers/Dockerfile; [[ "$image" != worker ]] || dockerfile=containers/Worker.Dockerfile
+    assert_engine
     printf '%s\n' "build-$image" >> "$runtime_io/build-intent"
     sync -f "$runtime_io/build-intent"
     d --context "$context" buildx build --builder "$context" --load --iidfile "$runtime_io/$image.iid" -f "$runtime_io/snapshot/$dockerfile" "$runtime_io/snapshot" > "$runtime_io/logs/$image-build.log" 2>&1 || fail "Image build failed; inspect $runtime_io/logs/$image-build.log. Interrupted setup is retained."
     (( $(stat -c %s "$runtime_io/logs/$image-build.log") <= 67108864 )) || fail "Build output limit; retained intent is uncertain"
   done
+  assert_engine
   printf 'build-export-payload\n' >> "$runtime_io/build-intent"
   sync -f "$runtime_io/build-intent"
   d --context "$context" buildx build --builder "$context" --build-arg TARGET_OS=linux --build-arg "SOURCE_COMMIT=$source" --build-arg "CONTROLLER_IMAGE=$(cat "$runtime_io/controller.iid")" --build-arg "WORKER_IMAGE=$(cat "$runtime_io/worker.iid")" --output "type=local,dest=$runtime_io/payload" -f "$runtime_io/snapshot/containers/Source.Dockerfile" "$runtime_io/snapshot" > "$runtime_io/logs/payload-build.log" 2>&1 || fail "Payload build failed; inspect $runtime_io/logs/payload-build.log. Nothing replayed or deleted."
   (( $(stat -c %s "$runtime_io/logs/payload-build.log") <= 67108864 )) || fail "Payload output limit; retained intent is uncertain"
+  assert_engine
   printf '%s\n' linux "$source" "$context" "$endpoint" "$engine" "$(sha256sum "$runtime_io/payload/SHA256SUMS" | cut -d ' ' -f1)" > "$runtime_io/receipt"
   verify
 fi

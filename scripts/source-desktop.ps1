@@ -107,6 +107,12 @@ $endpoints=[regex]::Matches($taskBuilderReply,'(?m)^Endpoint:[ \t]*([^\r\n]+)\r?
 if ($drivers.Count -ne 1 -or $endpoints.Count -ne 1) { throw 'Ambiguous local build driver' }
 $taskBuilder=$drivers[0].Groups[1].Value+'|'+$endpoints[0].Groups[1].Value
 if ($taskBuilder -notin @("docker|$taskContext","docker|$taskEndpoint")) { throw 'Use the local context Docker build driver; remote/custom builders are refused.' }
+function Assert-Engine {
+    if ((Run-Tool $taskDocker @('context','show')) -cne $taskContext -or (Run-Tool $taskDocker @('context','inspect',$taskContext,'--format','{{.Endpoints.docker.Host}}')) -cne $taskEndpoint -or (Run-Tool $taskDocker @('--context',$taskContext,'info','--format','{{.ID}}|{{.OSType}}|{{.Architecture}}|{{.DockerRootDir}}|{{json .SecurityOptions}}')) -cne $taskEngine) { throw 'Engine changed; retained intent is uncertain. Nothing replayed.' }
+    $actual=Run-Tool $taskDocker @('--context',$taskContext,'buildx','inspect',$taskContext)
+    $driver=[regex]::Matches($actual,'(?m)^Driver:[ \t]*([^\r\n]+)\r?$');$endpoint=[regex]::Matches($actual,'(?m)^Endpoint:[ \t]*([^\r\n]+)\r?$')
+    if ($driver.Count -ne 1 -or $endpoint.Count -ne 1 -or $driver[0].Groups[1].Value+'|'+$endpoint[0].Groups[1].Value -cne $taskBuilder) { throw 'Build endpoint changed; nothing replayed' }
+}
 Write-Output ('Engine data root inside Docker: '+$taskEngine.Split('|')[3]+'. Actual Windows backing/cache drive is unknown. Selecting D: below does not move Docker storage.')
 if ($Action -eq 'setup' -and $Check) { Close-SourcePins; exit 0 }
 $taskSelectionDir=Join-Path $taskSource '.container-desktop-source'
@@ -132,14 +138,23 @@ function Verify-Runtime {
         Close-SourcePins $keep
         if ($seen.Count -gt 50000) { throw 'Runtime member limit' }
     }
-    $files=@(Get-ChildItem -LiteralPath $payload -Recurse -Force)
-    foreach ($file in $files) { if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Runtime reparse point refused' } }
-    if (@($files | Where-Object { -not $_.PSIsContainer }).Count -ne $seen.Count+1) { throw 'Extra/missing runtime files' }
+    $directories=New-Object 'Collections.Generic.Queue[string]';$directories.Enqueue($payload);$fileCount=0;$entryCount=0
+    while ($directories.Count) {
+        $directory=$directories.Dequeue();$keep=$script:SourcePins.Count;[void](Pin-SourcePath $directory -Private)
+        try {
+            foreach ($member in Get-ChildItem -LiteralPath $directory -Force) {
+                if (++$entryCount -gt 100000 -or $member.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Runtime enumeration limit/reparse refusal' }
+                if ($member.PSIsContainer) { $directories.Enqueue($member.FullName) } else { $fileCount++ }
+            }
+        } finally { Close-SourcePins $keep }
+    }
+    if ($fileCount -ne $seen.Count+1) { throw 'Extra/missing runtime files' }
     foreach ($name in @('desktop-data','logs','crashes','temp')) { No-Links (Join-Path $taskRuntime $name) }
     foreach($metadata in @('app/container-runtime.json','provenance.json')) { if ((Get-Item -LiteralPath (Join-Path $payload $metadata)).Length -gt 16384) { throw 'Payload metadata size limit' } }
     $payloadMetadata=Get-Content -LiteralPath (Join-Path $payload 'app/container-runtime.json') -Raw | ConvertFrom-Json
     $provenance=Get-Content -LiteralPath (Join-Path $payload 'provenance.json') -Raw | ConvertFrom-Json
     if ($payloadMetadata.source -cne $receipt.source -or $provenance.source -cne $receipt.source -or $provenance.platform -cne 'win32') { throw 'Payload source/platform binding mismatch' }
+    Assert-Engine
     foreach ($name in @('controller','worker')) {
         $iid=[IO.File]::ReadAllText((Join-Path $taskRuntime "$name.iid")).Trim()
         $property=$name+'Image'; if ($payloadMetadata.$property -cne $iid -or $provenance.$property -cne $iid) { throw 'Payload immutable image binding mismatch' }
@@ -169,12 +184,13 @@ if (Test-Path -LiteralPath $taskSelection) {
     foreach ($name in @('snapshot','desktop-data','logs','crashes','temp')) { [IO.Directory]::CreateDirectory((Join-Path $taskRuntime $name)) | Out-Null }
     Private-Directory $taskSelectionDir -Create
     [IO.File]::WriteAllText($taskSelection,$taskRuntime+"`n")
-    [IO.File]::WriteAllText((Join-Path $taskRuntime 'build-intent'),$sourceCommit+"`n"); Flush-SourceFile (Join-Path $taskRuntime 'build-intent'); Flush-SourceFile $taskSelection
+    [IO.File]::WriteAllText((Join-Path $taskRuntime 'build-intent'),(@{source=$sourceCommit;context=$taskContext;endpoint=$taskEndpoint;engine=$taskEngine;phase='reserved'}|ConvertTo-Json -Compress)+"`n"); Flush-SourceFile (Join-Path $taskRuntime 'build-intent'); Flush-SourceFile $taskSelection
     $tree=Run-Tool $taskGit @('-c','core.fsmonitor=false','-c','core.hooksPath=NUL','-C',$taskSource,'ls-tree','-r','--long',$sourceCommit)
-    $totalBytes=0L;$members=0
+    $totalBytes=0L;$members=0;$sourceNames=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($line in $tree.Split("`n")) {
         if ($line -notmatch '^100(644|755) blob [a-f0-9]{40} +([0-9]+)	([^
 ]+)$') { throw 'Source tree links/special modes or escaped names refused before extraction' }
+        if (-not $sourceNames.Add($Matches[3])) { throw 'Source snapshot case collision refused' }
         $totalBytes+=[long]$Matches[2];$members++;Assert-SourcePath (Join-Path (Join-Path $taskRuntime 'snapshot') $Matches[3].Replace('/','\'))
         if ($totalBytes -gt 268435456 -or $members -gt 20000) { throw 'Source tree size/count limit' }
     }
@@ -183,13 +199,16 @@ if (Test-Path -LiteralPath $taskSelection) {
     Run-Tool (Join-Path $env:SystemRoot 'System32\tar.exe') @('-xf',$archive,'-C',(Join-Path $taskRuntime 'snapshot'))
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $taskRuntime 'snapshot') -Recurse -Force) { if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Source snapshot links refused' } }
     foreach ($name in @('controller','worker')) {
+        Assert-Engine
         $dockerfile='containers/Dockerfile'; if ($name -eq 'worker') { $dockerfile='containers/Worker.Dockerfile' }
         [IO.File]::AppendAllText((Join-Path $taskRuntime 'build-intent'),"build-$name`n"); Flush-SourceFile (Join-Path $taskRuntime 'build-intent')
         Run-Tool $taskDocker @('--context',$taskContext,'buildx','build','--builder',$taskContext,'--load','--iidfile',(Join-Path $taskRuntime "$name.iid"),'-f',(Join-Path $taskRuntime "snapshot/$dockerfile"),(Join-Path $taskRuntime 'snapshot')) (Join-Path $taskRuntime "logs/$name-build.log") 1800
     }
+    Assert-Engine
     [IO.File]::AppendAllText((Join-Path $taskRuntime 'build-intent'),"build-export-payload`n"); Flush-SourceFile (Join-Path $taskRuntime 'build-intent')
     $controller=[IO.File]::ReadAllText((Join-Path $taskRuntime 'controller.iid')).Trim(); $worker=[IO.File]::ReadAllText((Join-Path $taskRuntime 'worker.iid')).Trim()
     Run-Tool $taskDocker @('--context',$taskContext,'buildx','build','--builder',$taskContext,'--build-arg','TARGET_OS=win32','--build-arg',"SOURCE_COMMIT=$sourceCommit",'--build-arg',"CONTROLLER_IMAGE=$controller",'--build-arg',"WORKER_IMAGE=$worker",'--output',"type=local,dest=$taskRuntime/payload",'-f',(Join-Path $taskRuntime 'snapshot/containers/Source.Dockerfile'),(Join-Path $taskRuntime 'snapshot')) (Join-Path $taskRuntime 'logs/payload-build.log') 1800
+    Assert-Engine
     $inventory=(Get-FileHash -LiteralPath (Join-Path $taskRuntime 'payload/SHA256SUMS') -Algorithm SHA256).Hash.ToLowerInvariant()
     @{platform='win32';source=$sourceCommit;context=$taskContext;endpoint=$taskEndpoint;engine=$taskEngine;inventory=$inventory} | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $taskRuntime 'receipt.json') -Encoding UTF8
     Flush-SourceFile (Join-Path $taskRuntime 'receipt.json')

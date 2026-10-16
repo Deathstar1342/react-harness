@@ -41,5 +41,28 @@ try {
  Run-Tool $exe @('-NoProfile','-Command',$overflowCode) $desktopLog 0
  if (-not (Test-Path -LiteralPath $survival) -or (Get-Item -LiteralPath $desktopLog).Length -gt 67108864) {throw 'Desktop lifetime was lost or logging exceeded its cap'}
  Write-Output 'PASS GUI-lifetime output saturation drains without killing child (fixed child fixture)'
+ # Exercise the actual Windows Verify-Runtime function with only engine image lookup doubled.
+ $payloadRoot=Join-Path $FixtureRoot ('payload-'+[guid]::NewGuid().ToString('N'));Private-Directory $payloadRoot -Create
+ $taskRuntime=$payloadRoot;$taskContext='fixture';$taskEndpoint='npipe://./pipe/docker_engine';$taskEngine='fixture|linux|amd64|/engine|[]'
+ foreach($directory in @('payload/app','desktop-data','logs','crashes','temp')) {[IO.Directory]::CreateDirectory((Join-Path $payloadRoot $directory))|Out-Null}
+ $controller='sha256:'+('b'*64);$worker='sha256:'+('c'*64);$sourceCommit='a'*40
+ [IO.File]::WriteAllText((Join-Path $payloadRoot 'controller.iid'),$controller);[IO.File]::WriteAllText((Join-Path $payloadRoot 'worker.iid'),$worker)
+ $metadata=@{version=1;source=$sourceCommit;controllerImage=$controller;workerImage=$worker}
+ $metadata|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $payloadRoot 'payload/app/container-runtime.json') -Encoding UTF8
+ $provenance=@{version=1;source=$sourceCommit;controllerImage=$controller;workerImage=$worker;platform='win32';arch='x64'}
+ $provenance|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $payloadRoot 'payload/provenance.json') -Encoding UTF8
+ [IO.File]::WriteAllText((Join-Path $payloadRoot ('payload/snowman-'+[char]0x2603+'.txt')),'unicode')
+ [IO.File]::WriteAllText((Join-Path $payloadRoot 'payload/.hidden'),'fixed hidden fixture')
+ $manifestLines=@(Get-ChildItem -LiteralPath (Join-Path $payloadRoot 'payload') -Recurse -Force -File|ForEach-Object {(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant()+'  '+$_.FullName.Substring((Join-Path $payloadRoot 'payload').Length+1).Replace('\','/')})
+ [IO.File]::WriteAllText((Join-Path $payloadRoot 'payload/SHA256SUMS'),($manifestLines -join "`n")+"`n",(New-Object Text.UTF8Encoding($false)))
+ $inventory=(Get-FileHash -LiteralPath (Join-Path $payloadRoot 'payload/SHA256SUMS')).Hash.ToLowerInvariant()
+ @{platform='win32';source=$sourceCommit;context=$taskContext;endpoint=$taskEndpoint;engine=$taskEngine;inventory=$inventory}|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $payloadRoot 'receipt.json') -Encoding UTF8
+ $taskDocker='synthetic-image-observer-only'
+ function Assert-Engine {} # Only engine inventory is synthetic in this native payload fixture.
+ function Run-Tool([string]$Executable,[string[]]$Arguments,[string]$Log='', [int]$Seconds=30) {if($Executable -ne 'synthetic-image-observer-only' -or $Arguments[2] -ne 'image' -or $Arguments[3] -ne 'inspect'){throw 'Unexpected synthetic operation'};return $Arguments[4]}
+ Verify-Runtime
+ [IO.File]::WriteAllText((Join-Path $payloadRoot 'payload/extra'),'unexpected')
+ Refuses {Verify-Runtime} 'actual complete Windows inventory rejects extra file'
+ Write-Output 'PASS actual Windows inventory Unicode/hidden/native validation with synthetic image lookup'
  Write-Output 'PASS native DACL/identity/stream/parent and bounded process fixtures; no Docker/device acceptance'
 } finally {Close-SourcePins}
