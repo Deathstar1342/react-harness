@@ -25,6 +25,8 @@ class Docker:
         endpoint = self.call(['context', 'inspect', context, '--format', '{{.Endpoints.docker.Host}}']).strip()
         require(endpoint.startswith('unix:///') and Path(endpoint[7:]).is_socket(), 'LOCAL_ENGINE_REQUIRED')
         info = json.loads(self.call(['info', '--format', '{{json .}}']))
+        self.engine_id=info['ID']
+        self.source_digest=hashlib.sha256(b''.join(file.name.encode()+b'\0'+file.read_bytes() for file in sorted((self.source/'containers/broker').glob('*.py')))).hexdigest()
         require(info['OSType'] == 'linux' and info['Architecture'] in ('x86_64', 'amd64'), 'UNSUPPORTED_ENGINE')
         require(not any('rootless' in str(v) or 'userns' in str(v) for v in info.get('SecurityOptions', [])), 'UNSUPPORTED_UID_MAPPING')
         self.image = self.call(['image', 'inspect', 'abyssus-worker:m29', '--format', '{{.Id}}']).strip()

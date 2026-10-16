@@ -19,5 +19,5 @@ import(require('node:url').pathToFileURL(path.resolve(__dirname,'../build/app/de
       const result=await original.apply(this,args);await hold(operation);return result;
     };
   }
-  return import(require('node:url').pathToFileURL(path.resolve(__dirname,'../build/app/desktop/main.js')).href);
+  return import(require('node:url').pathToFileURL(path.resolve(__dirname,'../build/app/desktop/direct-main.js')).href);
 });

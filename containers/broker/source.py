@@ -66,7 +66,7 @@ def main():
     env = {name: os.environ[name] for name in ('HOME', 'PATH') if name in os.environ}
     env['LANG'] = 'C.UTF-8'
     log = open(Path(storage) / 'runtime/broker.log', 'ab', buffering=0)
-    child = subprocess.Popen(['/usr/bin/python3', '-I', str(Path(source) / 'containers/broker/server.py'), storage, storage_id, source, context],
+    child = subprocess.Popen([sys.executable, '-I', '-B', str(Path(source) / 'containers/broker/server.py'), storage, storage_id, source, context],
                              env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, close_fds=True)
     log.close()
     end = time.monotonic() + 180

@@ -37,6 +37,9 @@ class Broker:
             if op.startswith('install_') or op == 'reset':
                 require(not self.transfers.busy(body.get('project')), 'TRANSFER_BUSY')
                 return self.packages.dispatch(op, body)
+            if op == 'desktop_hello':
+                exact(body, [])
+                return {'protocol':PROTOCOL,'revision':1,'sessionId':self.journal.session,'storageId':self.docker.storage_id,'imageId':self.docker.image,'engineId':self.docker.engine_id,'context':self.docker.context,'sourceDigest':self.docker.source_digest}
             if op == 'hello':
                 exact(body, [])
                 self.docker.call(['image', 'inspect', self.docker.image, '--format', '{{.Id}}'])
@@ -278,7 +281,7 @@ def serve(storage, storage_id, source, context):
     broker = Broker(journal, docker)
     broker.transfers.verify_journal()
     proxy_env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
-    proxy = subprocess.Popen(['/usr/bin/python3', '-I', str(Path(source) / 'containers/broker/egress.py'), str(runtime / 'egress/proxy.sock')], env=proxy_env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proxy = subprocess.Popen([sys.executable, '-I', '-B', str(Path(source) / 'containers/broker/egress.py'), str(runtime / 'egress/proxy.sock')], env=proxy_env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     class Handler(socketserver.StreamRequestHandler):
         def handle(self):
             self.request.settimeout(35)

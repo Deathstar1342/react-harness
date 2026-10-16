@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { DesktopStatus } from '../desktop/contracts';
+import { ContainerWorkspace } from './ContainerWorkspace';
 import { App } from './App';
 import { OptionalSystemInstalls } from './OptionalSystemInstalls';
 import { errorText, post, request } from './api';
@@ -28,6 +29,7 @@ export function DesktopRoot() {
       {pairRequired&&<form onSubmit={e=>{e.preventDefault();void run(async()=>{await post('/auth/pair',{code});setCode('');setPaired(true);});}}><label>Pairing code<input type="password" autoComplete="off" value={code} onChange={e=>setCode(e.target.value)}/></label><button className="button primary" disabled={busy}>Connect</button></form>}
       {error&&<p role="alert">{error}</p>}</main>;
   }
+  if(status?.runtime==='container')return <ContainerWorkspace bridge={bridge} status={status}/>;
   const needsSetup=!opened||showSetup||(status?.phase!=='ready'&&!offlineEditor);
   return <>
     {opened&&status?.sessionId&&<App key={status.sessionId}/>}
