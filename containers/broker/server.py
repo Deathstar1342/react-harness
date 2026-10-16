@@ -26,11 +26,16 @@ class Broker:
         self.shutdown_error = False
         from packages import Packages
         self.packages = Packages(self)
+        from transfer_service import Transfers
+        self.transfers = Transfers(self)
 
     def dispatch(self, op, body):
         with self.lock:
             require(not self.closing or op in ('observe','install_status'), 'BROKER_CLOSING')
+            if op.startswith('transfer_'):
+                return self.transfers.dispatch(op, body)
             if op.startswith('install_') or op == 'reset':
+                require(not self.transfers.busy(body.get('project')), 'TRANSFER_BUSY')
                 return self.packages.dispatch(op, body)
             if op == 'hello':
                 exact(body, [])
@@ -40,6 +45,7 @@ class Broker:
             if op == 'prepare':
                 from protocol import command_request
                 command_request(body)
+                require(not self.transfers.busy(body['project']), 'TRANSFER_BUSY')
                 require(not self.packages.busy(body['project']), 'INSTALL_RECOVERY_REQUIRED')
                 for (raw,) in self.journal.db.execute('SELECT data FROM claims'):
                     retained = json.loads(raw)
@@ -53,6 +59,7 @@ class Broker:
             if op == 'activate':
                 record = self.journal.owned(body)
                 require(record['state']=='prepared','CLAIM_CONSUMED')
+                require(not self.transfers.busy(record['project']), 'TRANSFER_BUSY')
                 require(record['contextId'] in self.docker.contexts,'WORKER_LOST')
                 require(not self.packages.busy(record['project']), 'INSTALL_RECOVERY_REQUIRED')
                 _, _, identity = self.docker.topology(record['project'], record['operation']['kind'] == 'git')
@@ -198,6 +205,10 @@ class Broker:
         try:
             import time
             deadline = time.monotonic() + 330
+            try:
+                self.transfers.close()
+            except Exception:
+                errors.append('TRANSFER_DRAIN_UNCERTAIN')
             for thread in install_threads:
                 thread.join(timeout=max(0, deadline-time.monotonic()))
                 if thread.is_alive():
@@ -262,6 +273,8 @@ def serve(storage, storage_id, source, context):
     key = secrets.token_hex(32)
     journal = Journal(str(runtime / 'worker-journal.sqlite'), session)
     docker = Docker(storage, storage_id, source, context)
+    from transfer_service import area
+    area(storage)
     broker = Broker(journal, docker)
     proxy_env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
     proxy = subprocess.Popen(['/usr/bin/python3', '-I', str(Path(source) / 'containers/broker/egress.py'), str(runtime / 'egress/proxy.sock')], env=proxy_env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

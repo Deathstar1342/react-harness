@@ -20,7 +20,7 @@ class Docker:
 
 class Lifecycle(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.journal=Journal(str(Path(self.tmp.name)/'claims.sqlite'),str(uuid.uuid4()));self.docker=Docker();self.broker=Broker(self.journal,self.docker)
+        self.tmp=tempfile.TemporaryDirectory();self.journal=Journal(str(Path(self.tmp.name)/'claims.sqlite'),str(uuid.uuid4()));self.docker=Docker();self.docker.storage=Path(self.tmp.name);self.broker=Broker(self.journal,self.docker)
     def tearDown(self):self.journal.db.close();self.tmp.cleanup()
     def prepared(self):
         request={'claimId':str(uuid.uuid4()),'project':'project','contextId':'b'*64,'operation':{'kind':'shell','command':'touch effect'},'timeoutMs':1000,'outputLimit':1000}

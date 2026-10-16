@@ -1,3 +1,4 @@
+import {TransferDialog} from './TransferDialog';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallHistory } from './InstallControls';
 import {
@@ -595,6 +596,7 @@ export function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [exporting,setExporting]=useState<Project>();
   const [removing, setRemoving] = useState<{project:Project;chat?:Chat}>();
   const project = projects.find((item) => item.id === projectId);
   const mounted = useRef(true);
@@ -737,7 +739,7 @@ export function App() {
           </select>
           <ChevronsUpDown size={14} />
         </div>
-        {project && <Overflow label={`Project ${project.name}`} onRemove={()=>setRemoving({project})}/>}
+        {project && <Overflow label={`Project ${project.name}`} onExport={settings?.executionMode==='container'?()=>setExporting(project):undefined} onRemove={()=>setRemoving({project})}/>}
         </div>
         {project?.removalError && <button className="navigation-row danger-text" onClick={()=>setRemoving({project})}>Review incomplete removal</button>}
         <button
@@ -945,6 +947,7 @@ export function App() {
         </div>
       </div>
       {showSettings && <SettingsDialog chatId={chatId || undefined} onPreferences={setPreferences} onSettings={setSettings} onClose={() => setShowSettings(false)} />}
+      {exporting && <TransferDialog project={exporting} onClose={()=>setExporting(undefined)}/>}
       {removing && <RemovalDialog project={projects.find(p=>p.id===removing.project.id) ?? removing.project} chat={removing.chat} blocked={dirty}
         onClose={()=>setRemoving(undefined)} onFailure={()=>{void request<Project[]>('/projects').then(setProjects).catch(e=>setError(errorText(e)));}}
         onRemoved={()=>{

@@ -4,7 +4,7 @@ export type ChatStatus = 'idle' | 'running' | 'awaiting_approval' | 'paused' | '
 export interface Project { id: string; name: string; path: string; createdAt: string; removalError?: string }
 export interface DeletionPreview { canonicalPath: string; confirmationToken: string; expiresAt: string }
 export type ProjectRemoval = { mode: 'app-only' } | { mode: 'disk'; canonicalPath: string; confirmationToken: string };
-export interface WorkspaceSettings { workspaceRoot: string; defaultWorkspaceRoot: string }
+export interface WorkspaceSettings { transferMode?:'source-code'; workspaceRoot: string; defaultWorkspaceRoot: string }
 export interface Preferences { debugMode: boolean; defaultApprovalMode: ApprovalMode }
 export interface ConnectionCheck { evidence?: 'ordinary'|'native'|'streaming'; model?:string; requestId?:string; target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
 export interface ConnectionReport { catalog?:ModelCatalogEntry[]; ok: boolean; checks: ConnectionCheck[]; completedAt: string }
@@ -141,4 +141,16 @@ export interface InstallRecord {
   preview?: PackageHelperPreview; previewDigest?: string; expiresAt?: number;
   decision?: { source: 'human'|'auto'|'ai'; outcome: 'approve'|'reject'|'ask'; reason: string; at: number };
   code: string; recoveryRequired: boolean; reconciliation?: PackageHelperRecord['reconciliation'];
+}
+
+/** Sanitized receipt; original host source/destination paths never cross this boundary. */
+export interface ProjectTransferReceipt {
+  id:string;kind:'import'|'export';project:string;phase:'copying'|'publishing'|'succeeded'|'failed'|'cancelled'|'uncertain';
+  code:string;residue:boolean;manifestDigest:string;files:number;bytes:number;excludedCount:number;
+  excluded:{path:string;reason:string}[];history:boolean;storageId:string;sessionId:string;identity:[number,number]|null;
+}
+/** M31 supplies the native host runtime; the current source adapter uses terminal-issued codes. */
+export interface HostProjectTransferPicker {
+  authorizeImport():Promise<{code:string}|null>;
+  authorizeExport(managedFolder:string):Promise<{code:string}|null>;
 }

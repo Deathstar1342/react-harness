@@ -4,7 +4,7 @@ import type { Chat, DeletionPreview, Project, ProjectRemoval } from '../shared/t
 import { errorText, id, post, request } from './api';
 import { Modal } from './Modal';
 
-export function Overflow({label,onRemove}: {label:string;onRemove:()=>void}) {
+export function Overflow({label,onRemove,onExport}: {label:string;onRemove:()=>void;onExport?:()=>void}) {
   const [open,setOpen]=useState(false);
   const trigger=useRef<HTMLButtonElement>(null);
   const menuId=useId();
@@ -12,7 +12,7 @@ export function Overflow({label,onRemove}: {label:string;onRemove:()=>void}) {
     onKeyDown={event=>{if(event.key==='Escape') {event.stopPropagation();setOpen(false);trigger.current?.focus();}}}>
     <button ref={trigger} className="icon-button overflow-trigger" aria-label={`${label} options`} aria-expanded={open} aria-controls={menuId}
       onClick={()=>setOpen(!open)}><MoreHorizontal size={16}/></button>
-    {open && <div id={menuId} className="overflow-popover"><button className="navigation-row danger-text" onClick={()=>{trigger.current?.focus();setOpen(false);onRemove();}}>Remove {label.startsWith('Project') ? 'project' : 'chat'}</button></div>}
+    {open && <div id={menuId} className="overflow-popover">{onExport&&<button className="navigation-row" onClick={()=>{setOpen(false);onExport();}}>Export project copy</button>}<button className="navigation-row danger-text" onClick={()=>{trigger.current?.focus();setOpen(false);onRemove();}}>Remove {label.startsWith('Project') ? 'project' : 'chat'}</button></div>}
   </div>;
 }
 
