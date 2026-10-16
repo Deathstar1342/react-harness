@@ -238,8 +238,9 @@ class Packages:
                     self.db.execute('UPDATE worker_heads SET data=? WHERE project=?', (canonical(head), row['target']['projectId']))
                     self.db.execute('UPDATE worker_installs SET data=? WHERE id=?', (canonical(row), row['id']))
                 self.docker.images[row['target']['projectId']] = image
-        except Exception:
+        except Exception as error:
             with self.broker.lock:
+                row['failureCode'] = str(error) if isinstance(error, Denied) and re.fullmatch('[A-Z_]{1,64}',str(error)) else type(error).__name__
                 row['phase'] = 'uncertain'
                 row['record'].update(state='uncertain', code='INSTALL_PUBLICATION_UNCERTAIN')
                 row['record'].pop('reconciliation', None)

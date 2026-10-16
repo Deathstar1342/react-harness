@@ -133,6 +133,7 @@ class Attestor:
     def verify(self, image):
         if image not in self.verified:
             current = self.inspect(image)
+            self.last_difference = [name for name in sorted(set(current)|set(self.base)) if current.get(name)!=self.base.get(name)][:64]
             require(current == self.base, 'TRUSTED_EXECUTION_BASE_CHANGED')
             self.verified[image] = self.base_digest
         return {'imageId': image, 'baseImageId': self.docker.image, 'manifestDigest': self.verified[image]}

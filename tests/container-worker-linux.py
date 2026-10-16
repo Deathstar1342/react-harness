@@ -131,6 +131,10 @@ try:
         if receipt['state'] in ('succeeded','failed','uncertain'):
             break
         time.sleep(.2)
+    row=broker.packages.get(request['requestId'],'project')
+    diagnostic={'state':receipt['state'],'code':receipt.get('code'),'phase':row['phase'],'failureCode':row.get('failureCode'),'trustedDifferences':getattr(docker.attestor,'last_difference',[])}
+    (OUT/'m29-install-diagnostic.json').write_text(json.dumps(diagnostic,indent=2))
+    print('Install observation:',json.dumps(diagnostic),flush=True)
     check('real apt transaction commits only an attested image after exact cleanup', receipt['state']=='succeeded')
     result, output = command('hello')
     check('approved package executes from the new worker generation', result['exitCode']==0 and 'Hello, world!' in output)
@@ -150,12 +154,17 @@ except Exception as error:
     (OUT/'m29-worker-failure.txt').write_text(repr(error))
     raise
 finally:
+    cleanup_error=None
     if broker:
         try:
             broker.shutdown()
         except Exception as error:
             (OUT/'m29-worker-cleanup-failure.txt').write_text(type(error).__name__)
+            cleanup_error=error
     if proxy:
         proxy.terminate()
         proxy.wait(timeout=10)
     (OUT/'m29-worker.json').write_text(json.dumps({'source':os.environ.get('GITHUB_SHA'),'checks':checks,'count':len(checks),'kind':'actual-disposable-linux-containers'},indent=2))
+
+    if cleanup_error is not None:
+        raise RuntimeError('Owned worker cleanup was not confirmed') from cleanup_error
