@@ -53,6 +53,9 @@ def stamp(info):
 def policy(rel, included, history):
     parts = relative(rel)
     lower = [p.casefold() for p in parts]
+    require('.gitmodules' not in lower,'UNSAFE_GIT_METADATA')
+    if '.git' in lower:
+        require(lower.index('.git')==0 and parts[0]=='.git' and lower.count('.git')==1,'UNSAFE_GIT_METADATA')
     if any(p in NEVER for p in lower):
         return 'Application or credential storage is never included'
     if lower[0] == '.git':

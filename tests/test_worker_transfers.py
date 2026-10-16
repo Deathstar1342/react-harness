@@ -18,6 +18,8 @@ class TransferPolicy(unittest.TestCase):
         self.assertIsNotNone(policy('.git/config', [], True))
         self.assertIsNone(policy('.git/objects/ab/0123', [], True))
         with self.assertRaises(Exception): policy('.git/objects/info/alternates', [], True)
+        for unsafe in ('nested/.git/config','.GIT/HEAD','.gitmodules','nested/.gitmodules'):
+            with self.subTest(path=unsafe),self.assertRaises(Exception):policy(unsafe,[],True)
 
 @unittest.skipUnless(os.name == 'posix', 'Linux descriptor-relative source implementation')
 class TransferCopy(unittest.TestCase):
