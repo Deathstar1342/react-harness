@@ -77,3 +77,18 @@ Reviewed fd577e264c3675eef0c28c3697dea74c5eda3b97/treecad887529ff582bae043b17dcc
 Coordinator archived exact broker source plus test_worker_image.py to new external Dm32-validation/fd577-image-source and ran3/3 targeted Python tests successfully in0.009s, receiptfd577-independent-image.log. Engine calls doubled; not actual Docker acceptance. Child typecheck passed. Fresh Source38962204347,Validate38962204362,Desktop38962204360,support38962204341,helper38962204383,Container38962204355 pending; installer38962204357 separate helddelta. No final source/main acceptance.
 
 Failure capture has bounded stage/status/identity projection and masked-input screenshot before cleanup. Requested replacing uppercase regex token extraction with a finite known error-code allowlist: bounded syntax alone must not serialize arbitrary uppercase provider/account strings. Required CI must discover new Python tests. Child active,unfrozen,no product merge/user blocker/M21 change.
+
+## Exact candidate regression CI and fresh receipts independently audited
+
+Reviewed diagnostic-only0fd54626d500065a1ef9b7f6fb09bfd8cf18cabc/tree11d23ce9ac21c29e59514d37ca094a897f282cca: finite known-code filter replaces arbitrary uppercase token projection. Confirmed required Container unittest discovery test_worker_*.py includes new image tests. Child affected worker54total/19Linuxskips and desktop101total/4Linuxskips reported passed,not repeated by coordinator beyond exact3/3 targeted image tests.
+
+Coordinator independently verified EVERY applicable exact0fd step:Validate38962389345/job117180421349;Desktop38962389375 Windows117180459735/Ubuntu117180460011;support38962389346 Ubuntu117180421348/Windows117180421779;helper38962389385/job117180421496;Container38962389405/job117180421329. Only expected opposite-platform and on-failure diagnostics skipped. Source38962389370 Linux22job117180421581/Linux24job117180421877 setup/rerun pass,expanded actual exported GUI step8 still running; crosspayload/Windows pending. This is not whole-source acceptance or freeze.
+
+Independently downloaded all five fresh source-bound artifacts into external Dm32-validation/0fd-ID.zip; SHA256 verified against GitHub digests:
+- desktopWindows12073860373:f1e17ca843f4abb01d16b62697dba784325315c2ca2df210d63821c54424f75d
+- desktopUbuntu12073725844:3362d2df7959863ad7fbc28bfe95af24bc78b303cb48917152e2dda58150224a
+- supportWindows12073656035:cd3a4041720cf8315641282266795849c16f31d4161cbc88ef3233d0c42e217d
+- supportUbuntu12072848972:bd61e36e38069c7d33c232f90ff7ccf0cff3a5774c39a3b3100d84b78ad48a59
+- Container12072844326:9901e1b5243c5432888b2f030c8f652c4254225a442cbfb234f1a957291bf5b2
+
+Inspected archive members and scoped private-runtime provenance/relocation receipts (Windows35files/Linux2923files); these contain manifests/receipts/screenshots,not full distributable runtimes. Support Linux compiled24.04 is separate from REQUIRED Source22.04 baseline payload. Desktop archives contain actual regression screenshots,not final new source lifecycle proof. Container source fields match exact0fd; audited32foundation/33worker/15source/53Runtime/20M30/14M31 including actual11sPTY/npm containedlinks/crossproject refusal/install-uncertainty/no-replay/transferlineage/TLS/supervisor persistence. No anchored FAIL/Traceback lines in bounded logs; failure-injection PASS remains evidence,not a failed receipt. No WindowsDocker/live-provider/human/clean-machine/package acceptance inferred. Child remains active/unfrozen; full final coordinator validation/exact Source and exact-main gates remain required.
