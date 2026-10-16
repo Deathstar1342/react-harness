@@ -63,6 +63,11 @@ def terminal_code(root,source):
         code=re.search(rb'Transfer code \(paste into the app\): ([a-f0-9]{64})',output)
         assert code,'transfer code missing'
         return code[1].decode()
+    except Exception:
+        diagnostic=re.sub(r'[a-f0-9]{48,64}','[redacted capability]',bytes(output).decode(errors='replace'))[-12000:]
+        (root/'test-results/container/m30-terminal-failure.log').write_text(diagnostic)
+        print(diagnostic,flush=True)
+        raise
     finally:
         os.close(fd)
         if pid:
