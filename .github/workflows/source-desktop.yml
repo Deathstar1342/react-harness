@@ -18,7 +18,12 @@ jobs:
           sudo apt-get install -y xvfb libgbm1
           if test -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
       - name: Clean production setup with explicit external runtime
-        run: bash setup.sh --no-start --runtime-root "$RUNNER_TEMP/m32-runtime"
+        run: |
+          bash setup.sh --no-start --runtime-root "$RUNNER_TEMP/m32-runtime"
+          test "$(stat -c %a "$RUNNER_TEMP/m32-runtime")" = 700
+          test "$(stat -c %a "$RUNNER_TEMP/m32-runtime/snapshot")" = 700
+          test "$(stat -c %a "$RUNNER_TEMP/m32-runtime/snapshot/containers")" = 755
+          test "$(stat -c %a "$RUNNER_TEMP/m32-runtime/snapshot/containers/initialize.ts")" = 644
       - name: Production rerun and start validation preserve selection
         run: |
           sha256sum "$RUNNER_TEMP/m32-runtime/receipt" > "$RUNNER_TEMP/receipt-before"

@@ -15,6 +15,12 @@ const launch=()=>electron.launch({executablePath:exe,args:[path.join(payload,'ap
 let stage='launch',page:Page|undefined;
 let app=await launch();
 const mark=(value:string)=>{stage=value;console.log('M32 source stage: '+stage);};
+const connected=async()=>{
+ assert(page&&!page.isClosed());const current=page;
+ await expect.poll(async()=>['ready','failed'].includes((await current.evaluate(()=>window.abyssusDesktop!.status())).phase),{timeout:240000,intervals:[250,500,1000]}).toBe(true);
+ assert.equal((await current.evaluate(()=>window.abyssusDesktop!.status())).phase,'ready','Controller did not reach ready');
+ await expect(current.getByRole('heading',{name:'Your workspace is connected'})).toBeVisible();
+};
 try{
  mark('onboarding');page=await app.firstWindow();await expect(page.getByRole('heading',{name:'Open your workspace'})).toBeVisible();
  assert.equal(await app.evaluate(({app})=>app.getPath('userData')),path.join(root,'desktop-data'));
@@ -32,14 +38,14 @@ try{
   const storage=path.join(path.dirname(root),'m32-managed-storage');mkdirSync(storage,{mode:0o700});
   await app.evaluate(({dialog},selected)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[selected]});dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});},storage);
   await page.getByRole('button',{name:'Choose storage folder'}).click();mark('initial-controller-start');await page.getByRole('button',{name:'Open workspace',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'Your workspace is connected'})).toBeVisible({timeout:240000});
+  await connected();
   mark('create-persistent-fixture');
   const project=await page.evaluate(async()=>{const response=await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Source persistent fixture',mode:'create'})});if(!response.ok)throw new Error('Project creation failed');return response.json();});
   const chat=await page.evaluate(async id=>{const response=await fetch('/api/projects/'+id+'/chats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Idle source fixture'})});if(!response.ok)throw new Error('Chat creation failed');return response.json();},project.id);
   const marker=readFileSync(path.join(storage,'.storage-id'),'utf8'),settings=readFileSync(path.join(storage,'config/.env'),'utf8');
   mark('restart-controller');
   const reopened=app.waitForEvent('window',{timeout:240000});await page.getByRole('button',{name:'Restart runtime',exact:true}).click();page=await reopened;
-  await expect(page.getByRole('heading',{name:'Your workspace is connected'})).toBeVisible({timeout:240000});
+  await connected();
   const projects=await page.evaluate(async()=>{const response=await fetch('/api/projects');return response.json();});
   assert(projects.some((item:{id:string})=>item.id===project.id));assert.equal(readFileSync(path.join(storage,'.storage-id'),'utf8'),marker);assert.equal(readFileSync(path.join(storage,'config/.env'),'utf8'),settings);
   mark('clean-close');await app.close();mark('conflicting-tag-isolation');
@@ -50,7 +56,7 @@ try{
   const retained=await page.evaluate(()=>window.abyssusDesktop!.status());assert.equal(retained.container?.storage?.id,marker.trim());
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
   mark('reopen-existing-storage');await page.getByRole('button',{name:'Open workspace',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'Your workspace is connected'})).toBeVisible({timeout:240000});
+  await connected();
   mark('verify-persistence');
   const detail=await page.evaluate(async id=>{const response=await fetch('/api/chats/'+id);return response.json();},chat.id);
   const goal=await page.evaluate(async id=>{const response=await fetch('/api/chats/'+id+'/goal');return response.json();},chat.id);

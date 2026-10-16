@@ -195,7 +195,7 @@ if (Test-Path -LiteralPath $taskSelection) {
         if ($totalBytes -gt 268435456 -or $members -gt 20000) { throw 'Source tree size/count limit' }
     }
     $archive=Join-Path $taskRuntime 'source.tar'
-    Run-Tool $taskGit @('-c','core.fsmonitor=false','-c','core.hooksPath=NUL','-c','core.attributesFile=NUL','-C',$taskSource,'archive','--format=tar',"--output=$archive",$sourceCommit,'.dockerignore','package.json','package-lock.json','tsconfig.json','vite.config.ts','index.html','client','server','shared','desktop','containers','helper/core.py','helper/apt_adapter.py','helper/apt.conf','scripts/desktop-build.mjs','scripts/stage-support-runtime.py','scripts/stage-container-runtime.py','scripts/source-payload.py','scripts/source-payload-verify.py')
+    Run-Tool $taskGit @('-c','core.fsmonitor=false','-c','core.hooksPath=NUL','-c','core.attributesFile=NUL','-c','tar.umask=0022','-C',$taskSource,'archive','--format=tar',"--output=$archive",$sourceCommit,'.dockerignore','package.json','package-lock.json','tsconfig.json','vite.config.ts','index.html','client','server','shared','desktop','containers','helper/core.py','helper/apt_adapter.py','helper/apt.conf','scripts/desktop-build.mjs','scripts/stage-support-runtime.py','scripts/stage-container-runtime.py','scripts/source-payload.py','scripts/source-payload-verify.py')
     Run-Tool (Join-Path $env:SystemRoot 'System32\tar.exe') @('-xf',$archive,'-C',(Join-Path $taskRuntime 'snapshot'))
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $taskRuntime 'snapshot') -Recurse -Force) { if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Source snapshot links refused' } }
     foreach ($name in @('controller','worker')) {

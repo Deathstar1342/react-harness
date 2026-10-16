@@ -111,8 +111,9 @@ else
     (( total <= 268435456 && entries <= 20000 )) || fail 'Source tree size/count limit'
   done < <(g -C "$ROOT" ls-tree -r --long "$source")
   # Exact tracked allowlist. No working-tree/untracked files enter any build context.
-  g -C "$ROOT" archive --format=tar --output="$runtime_io/source.tar" "$source" .dockerignore package.json package-lock.json tsconfig.json vite.config.ts index.html client server shared desktop containers helper/core.py helper/apt_adapter.py helper/apt.conf scripts/desktop-build.mjs scripts/stage-support-runtime.py scripts/stage-container-runtime.py scripts/source-payload.py scripts/source-payload-verify.py
-  tar -xf "$runtime_io/source.tar" -C "$runtime_io/snapshot"
+  g -c tar.umask=0022 -C "$ROOT" archive --format=tar --output="$runtime_io/source.tar" "$source" .dockerignore package.json package-lock.json tsconfig.json vite.config.ts index.html client server shared desktop containers helper/core.py helper/apt_adapter.py helper/apt.conf scripts/desktop-build.mjs scripts/stage-support-runtime.py scripts/stage-container-runtime.py scripts/source-payload.py scripts/source-payload-verify.py
+  tar --no-same-owner --same-permissions -xf "$runtime_io/source.tar" -C "$runtime_io/snapshot"
+  [[ -z "$(find "$runtime_io/snapshot" -mindepth 1 \( -type d ! -perm 0755 -o -type f ! -perm 0644 ! -perm 0755 \))" ]] || fail 'Tracked source extraction modes changed'
   [[ -z "$(find "$runtime_io/snapshot" -type l -o ! -type f ! -type d)" ]] || fail 'Source snapshot contains unsupported links/special files'
   for image in controller worker; do
     dockerfile=containers/Dockerfile; [[ "$image" != worker ]] || dockerfile=containers/Worker.Dockerfile
