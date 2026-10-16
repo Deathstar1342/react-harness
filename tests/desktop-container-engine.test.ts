@@ -7,6 +7,7 @@ it('accepts explicit local transports without claiming a Windows backing disk',a
   const windows=await detectContainerEngine('win32',query('npipe://./pipe/dockerDesktopLinuxEngine'));
   expect(windows).toMatchObject({platform:'win32',dataRoot:'/var/lib/docker'});
   expect(windows).not.toHaveProperty('windowsBackingPath');
+  expect(await detectContainerEngine('win32',query('npipe:////./pipe/dockerDesktopLinuxEngine'))).toMatchObject({platform:'win32',id:info.ID});
 });
 it.each(['tcp://127.0.0.1:2375','ssh://localhost','npipe://server/pipe/docker_engine','unix:///var/run/docker.sock','npipe://./pipe/arbitrary'])('refuses Windows endpoint %s before engine query',async endpoint=>{
   const run=query(endpoint);await expect(detectContainerEngine('win32',run)).rejects.toThrow();expect(run).toHaveBeenCalledTimes(2);

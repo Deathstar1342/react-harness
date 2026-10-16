@@ -1,5 +1,5 @@
 import { spawn,type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { randomBytes,randomUUID } from 'node:crypto';
+import { randomBytes,randomUUID,createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -17,7 +17,7 @@ const payloadSchema=z.object({version:z.literal(1),source:z.string().regex(/^[a-
 export interface ContainerSelection {path:string;storageId:string}
 /** Only main creates selection inputs. Renderer gets no supervisor request method. */
 export class ContainerDesktopController {
-  state:DesktopStatus={runtime:'container',platform:process.platform,phase:'setup',distributions:[],container:{available:false},message:'Checking the local container runtime…'};
+  state:DesktopStatus={runtime:'container',platform:process.platform,phase:'setup',distributions:[],container:{available:false},message:'Checking the local container runtime...'};
   private engine?:EngineIdentity;
   private child?:ChildProcessWithoutNullStreams;
   private active?:BackendTarget;
@@ -32,8 +32,8 @@ export class ContainerDesktopController {
   constructor(private readonly appRoot:string,private readonly changed:()=>void=()=>{}){}
   target(){return this.state.phase==='ready'?this.active:undefined;}
   async inventory(){
-    try{this.engine=await detectContainerEngine(process.platform,engineQuery(this.appRoot));this.state.container={...this.state.container,available:true,engine:this.engine.context,engineDataRoot:this.engine.dataRoot};this.state.message='Choose persistent app storage, then open your workspace. Docker images and build cache use the engine’s separate storage.';}
-    catch{this.engine=undefined;this.state.container={...this.state.container,available:false};this.state.message='A supported local Docker Linux engine is unavailable. Start Docker Desktop on Windows or your local Docker Engine on Linux, then check again. No runtime or system settings were changed.';}
+    try{this.engine=await detectContainerEngine(process.platform,engineQuery(this.appRoot));this.state.container={...this.state.container,available:true,engine:this.engine.context,engineDataRoot:this.engine.dataRoot};this.state.message='Choose persistent app storage, then open your workspace. Docker images and build cache use the separate engine storage location.';}
+    catch(error){this.engine=undefined;this.state.container={...this.state.container,available:false};this.state.message=error instanceof Error&&error.name==='SupportRuntimeUnavailable'?'The private desktop runtime is missing or failed validation. Repair desktop runtime staging, then check again.':'A supported local Docker Linux engine is unavailable. Start Docker Desktop on Windows or your local Docker Engine on Linux, then check again. No runtime or system settings were changed.';}
     return this.state;
   }
   async start(selection:ContainerSelection,mode:'existing'|'initialize'){
@@ -44,8 +44,8 @@ export class ContainerDesktopController {
       const actual=await detectContainerEngine(process.platform,engineQuery(this.appRoot));sameEngine(this.engine,actual);
       const executable=supportRuntime(path.resolve(this.appRoot,'../support-runtime'));
       const payload=payloadSchema.parse(JSON.parse(readFileSync(path.join(this.appRoot,'container-runtime.json'),'utf8')));
-      this.selection=selection;this.state={...this.state,phase:'starting',container:{...this.state.container!,storage:{displayPath:selection.path,id:selection.storageId}},message:'Checking storage ownership and starting the private controller…'};this.changed();
-      const env:NodeJS.ProcessEnv={};for(const key of ['PATH','HOME','USERPROFILE','SystemRoot','WINDIR','TEMP','TMP','TMPDIR'])if(process.env[key])env[key]=process.env[key];
+      this.selection=selection;this.state={...this.state,phase:'starting',container:{...this.state.container!,storage:{displayPath:selection.path,id:selection.storageId}},message:'Checking storage ownership and starting the private controller...'};this.changed();
+      const env:NodeJS.ProcessEnv={};for(const key of ['PATH','HOME','USERPROFILE','APPDATA','LOCALAPPDATA','SystemRoot','WINDIR','TEMP','TMP','TMPDIR'])if(process.env[key])env[key]=process.env[key];
       const child=spawn(executable,['-I','-B',path.join(this.appRoot,'containers/broker/support_entry.py')],{cwd:path.dirname(executable),env,windowsHide:true,stdio:'pipe'});this.child=child;
       this.poisoned=false;
       let line='',bytes=0,settled=false;
@@ -66,7 +66,7 @@ export class ContainerDesktopController {
       });
       child.stderr.on('data',()=>{});
       child.once('close',()=>{if(this.child!==child)return;this.child=undefined;this.active=undefined;this.failPending();if(this.state.phase!=='setup'&&this.closingChild!==child){this.state.phase='failed';this.state.message='Desktop supervision ended. Explicitly reopen the same storage to verify recovery; no commands or goals will replay.';this.changed();}});
-      child.stdin.write(JSON.stringify({...selection,storage:selection.path,path:undefined,mode,context:this.engine.context,engineId:this.engine.id,controllerImage:payload.controllerImage,workerImage:payload.workerImage,key:randomBytes(32).toString('hex'),token:randomBytes(32).toString('hex'),launchId:randomUUID()})+'\n');
+      child.stdin.write(JSON.stringify({...selection,...(process.platform==='win32'?{runtimeDigest:createHash('sha256').update(readFileSync(path.resolve(this.appRoot,'../support-runtime/manifest.json'))).digest('hex')}:{}),storage:selection.path,path:undefined,mode,context:this.engine.context,engineId:this.engine.id,controllerImage:payload.controllerImage,workerImage:payload.workerImage,key:randomBytes(32).toString('hex'),token:randomBytes(32).toString('hex'),launchId:randomUUID()})+'\n');
       const descriptor=await ready,address=loopbackAddress(descriptor.address);
       const readiness=new AbortController();
       const unavailable=()=>readiness.abort(new Error('Supervisor exited during readiness.'));

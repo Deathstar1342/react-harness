@@ -45,6 +45,31 @@ def trusted_program_acl(handle,trusted):
             require(not mask&0x500d0156 or sid_string(pointer.value+8) in trusted,'WRITABLE_DOCKER_INSTALL')
     finally:k.LocalFree(descriptor)
 
+def fixed_cli():
+    binary=program_files()/'Docker/Docker/resources/bin/docker.exe';pin=PinnedPath(binary,directory=False)
+    try:
+        trusted={'S-1-5-18','S-1-5-32-544',trusted_installer_sid()}
+        for handle in pin.handles[len(program_files().parts)-1:]:trusted_program_acl(handle,trusted)
+        fingerprints=[security_fingerprint(handle) for handle in pin.handles]
+        env={name:os.environ[name] for name in ('SystemRoot','WINDIR','USERPROFILE','APPDATA','LOCALAPPDATA','TEMP','TMP') if name in os.environ}
+        env['PATH']=str(binary.parent)+os.pathsep+str(Path(env['SystemRoot'])/'System32')
+        return pin,fingerprints,env
+    except BaseException:pin.close();raise
+
+
+def fixed_engine_query(args):
+    require(type(args) is list and all(type(v) is str for v in args),'INVALID_ENGINE_QUERY')
+    valid=args==['context','show']
+    if len(args)==5 and args[:2]==['context','inspect'] and args[3:]==['--format','{{.Endpoints.docker.Host}}']:valid=bool(re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',args[2]))
+    if len(args)==5 and args[0]=='--context' and args[2:]==['info','--format','{{json .}}']:valid=bool(re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',args[1]))
+    require(valid,'FIXED_ENGINE_QUERY_ONLY');pin,fingerprints,env=fixed_cli()
+    try:
+        pin.verify();require([security_fingerprint(h) for h in pin.handles]==fingerprints,'DOCKER_INSTALL_CHANGED')
+        result=subprocess.run([pin.path,*args],cwd=str(Path(pin.path).parent),env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=12,creationflags=subprocess.CREATE_NO_WINDOW)
+        require(result.returncode==0 and len(result.stdout.encode())<=256*1024,'ENGINE_QUERY_FAILED');return result.stdout
+    finally:pin.close()
+
+
 class WindowsEngine(Docker):
     def __init__(self,storage,storage_id,source,context,engine_id,worker_image):
         require(os.name=='nt','WINDOWS_ENGINE_REQUIRED')
@@ -52,15 +77,8 @@ class WindowsEngine(Docker):
         require(type(worker_image) is str and re.fullmatch('sha256:[a-f0-9]{64}',worker_image),'INVALID_WORKER_IMAGE')
         self.storage=Path(storage);self.storage_id=storage_id;self.source=Path(source);self.context=context;self.engine_id=engine_id;self.image=worker_image
         self.guard=None;self.project_mapper=None;self.authority=None;self.uid=1000;self.gid=1000 # Linux execution identity, never a native NTFS ownership claim.
-        binary=program_files()/'Docker/Docker/resources/bin/docker.exe';self.cli=PinnedPath(binary,directory=False)
+        self.cli,self.fingerprints,self.env=fixed_cli()
         try:
-            trusted={'S-1-5-18','S-1-5-32-544',trusted_installer_sid()}
-            # The held known-folder subtree cannot be renamed/replaced during use.
-            first=len(program_files().parts)-1
-            for handle in self.cli.handles[first:]:trusted_program_acl(handle,trusted)
-            self.fingerprints=[security_fingerprint(handle) for handle in self.cli.handles]
-            self.env={name:os.environ[name] for name in ('SystemRoot','WINDIR','USERPROFILE','APPDATA','LOCALAPPDATA','TEMP','TMP') if name in os.environ}
-            self.env['PATH']=str(binary.parent)+os.pathsep+str(Path(self.env['SystemRoot'])/'System32')
             self.source_digest=hashlib.sha256(b''.join(file.name.encode()+b'\0'+file.read_bytes() for file in sorted((self.source/'containers/broker').glob('*.py')))).hexdigest()
             self.verify_engine()
             require(self.call(['image','inspect',worker_image,'--format','{{.Id}}']).strip()==worker_image,'WORKER_IMAGE_CHANGED')

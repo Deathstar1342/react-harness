@@ -1,3 +1,4 @@
+import {assertNativeDispatch} from './native-storage.js';
 import type {NativeObservation} from './native-state-check.js';
 import type {NativeBindPolicy} from './native-bind-policy.js';
 import {createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
@@ -56,6 +57,7 @@ export class WorkerClient implements WorkerTransport {
     policy.verifyRoots();WorkerClient.nativeClient=client;return client;
   }
   request(op:string,body:unknown):Promise<unknown> {
+    if(!('socket' in this.descriptor))assertNativeDispatch(op);
     const nonce=randomBytes(32).toString('hex');
     const unsigned={protocol:workerProtocol,sessionId:this.sessionId,nonce,expiresAt:Date.now()+30000,op,body};
     const wire=workerCanonical({...unsigned,mac:workerMac(unsigned,this.descriptor.key)})+'\n';
@@ -64,7 +66,7 @@ export class WorkerClient implements WorkerTransport {
       const socket='socket' in this.descriptor?connect(this.descriptor.socket):connect({host:this.descriptor.host,port:this.descriptor.port}),parts:Buffer[]=[];let size=0,settled=false;
       const finish=(error?:Error,value?:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);socket.destroy();error?reject(error):resolve(value);};
       const timer=setTimeout(()=>finish(new WorkerError('WORKER_REPLY_UNCERTAIN')),40000);
-      socket.once('connect',()=>socket.write(wire));
+      socket.once('connect',()=>{try{if(!('socket' in this.descriptor))assertNativeDispatch(op);socket.write(wire);}catch(error){finish(error instanceof Error?error:new WorkerError('NATIVE_DISPATCH_REFUSED'));}});
       socket.on('data',(chunk:Buffer)=>{
         size+=chunk.length;if(size>262144)return finish(new WorkerError('WORKER_REPLY_LIMIT'));parts.push(chunk);
         if(!chunk.includes(10))return;

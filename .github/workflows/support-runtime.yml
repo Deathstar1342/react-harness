@@ -38,7 +38,10 @@ jobs:
       - name: Actual native Windows ownership and two-process locks
         if: runner.os == 'Windows'
         run: |
-          $env:M31_ELECTRON_EXE=(Resolve-Path 'node_modules/electron/dist/electron.exe').Path
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Electron binary installation failed' }
+          $env:M31_ELECTRON_EXE=(node -e "process.stdout.write(require('electron'))")
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $env:M31_ELECTRON_EXE -PathType Leaf)) { throw 'Pinned Electron binary staging failed' }
           & "$env:M31_SUPPORT_RUNTIME/python.exe" -I -B -m unittest discover -s tests -p "test_desktop_*.py" -v
       - name: Linux private-runtime protocol and host proof checks
         if: runner.os == 'Linux'

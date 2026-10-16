@@ -3,6 +3,7 @@ import ctypes
 import os
 from pathlib import Path
 import runpy
+import sys
 
 def confine_dll_search():
     if os.name=='nt':
@@ -13,4 +14,7 @@ def confine_dll_search():
 
 if __name__=='__main__':
     confine_dll_search()
-    runpy.run_path(str(Path(__file__).resolve().with_name('desktop_host.py')),run_name='__main__')
+    modes={(): 'desktop_host.py',('engine-query',):'engine_query.py',('retained-supervisor',):'retained_supervisor.py'}
+    target=modes.get(tuple(sys.argv[1:]))
+    if target is None:raise SystemExit(1)
+    runpy.run_path(str(Path(__file__).resolve().with_name(target)),run_name='__main__')

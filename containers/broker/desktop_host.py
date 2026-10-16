@@ -232,7 +232,10 @@ class DesktopHost:
 def main():
     os.umask(0o077)
     raw=sys.stdin.buffer.readline(16385);require(len(raw)<=16384 and raw.endswith(b'\n'),'INVALID_LAUNCH')
-    host=DesktopHost(json.loads(raw))
+    if os.name=='nt':
+        from windows_client import WindowsDesktopHost
+        host=WindowsDesktopHost(json.loads(raw))
+    else:host=DesktopHost(json.loads(raw))
     try:value=host.start()
     except Exception as error:
         print(canonical({'startupFailure':type(error).__name__,'ownedPhase':host.owner.get('phase') if host.owner else None}),file=sys.stderr,flush=True)
@@ -246,6 +249,7 @@ def main():
         try:reply={'id':request['id'],'result':host.dispatch(request['request'])}
         except Exception as error:reply={'id':request['id'],'error':str(error) if isinstance(error,Denied) else 'SUPERVISION_UNCERTAIN'}
         print(canonical(reply),flush=True)
+    if os.name=='nt':host.close()
     # Parent loss does not kill guessed PIDs or replay cleanup. Exact owned state
     # and private capabilities remain for explicit authenticated reconnect/drain.
 

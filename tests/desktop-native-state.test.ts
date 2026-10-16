@@ -2,7 +2,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {Worker} from 'node:worker_threads';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
-import {mkdtempSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,lstatSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -57,3 +57,21 @@ it('streaming private-state callbacks after eleven seconds use new bounded units
   expect(store.getState('later-callback',null)).toBe('recorded');expect(()=>authority.assertNativePath('/workspace/project',false)).toThrow(/freshness/);
  }finally{store.close();}
 },20000);
+
+
+it.each([false,true])('completed import after eleven seconds starts one exact redemption phase; lost reply=%s is not replayed',async lost=>{
+ const t=await peer(),root=mkdtempSync(path.join(tmpdir(),'native-copy-')),workspace=path.join(root,'workspace'),projectId=randomUUID();mkdirSync(workspace);const folder=path.join(workspace,projectId);mkdirSync(folder);
+ let clock=Date.now();const date=vi.spyOn(Date,'now').mockImplementation(()=>clock),hostDirname=path.dirname.bind(path),dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(hostDirname):undefined,absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockReturnValue(true):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;
+ const authority=await import('../server/native-storage.js'),policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{workspace},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
+ const check=vi.fn(async()=>({...policy.record,gateId:'e'.repeat(64),issuedAt:clock,expiresAt:clock+10000}));authority.installNativeStorage(policy,check,t.descriptor);
+ const {Store}=await import('../server/store.js'),{ProjectTransfers}=await import('../server/project-transfers.js'),store=new Store(path.join(root,'state.sqlite'));const identity=lstatSync(folder,{bigint:true}),ops:string[]=[];
+ const receipt={id:randomUUID(),kind:'import',project:projectId,phase:'succeeded',code:'COMPLETE',residue:false,manifestDigest:'a'.repeat(64),files:1,bytes:4,excludedCount:0,excluded:[],history:false,storageId:t.descriptor.storageId,sessionId:t.descriptor.sessionId,identity:[identity.dev.toString(),identity.ino.toString()]};
+ const client={storageId:t.descriptor.storageId,sessionId:t.descriptor.sessionId,request:async(op:string)=>{authority.assertNativeDispatch(op);ops.push(op);if(op==='transfer_begin'){clock+=11001;return receipt;}if(op==='transfer_receipt'){if(lost)throw new Error('lost redeemed reply');return receipt;}throw new Error('unexpected dispatch');}};
+ const service=new ProjectTransfers(store,{} as never,{} as never,async()=>client,workspace),code='9'.repeat(64);
+ try{
+  const importing=authority.runNativeOperation(()=>service.import('Long copy',code,new AbortController().signal));
+  if(lost){await expect(importing).rejects.toThrow('lost redeemed reply');expect(store.projects()).toHaveLength(0);}else{expect((await importing).project.path).toBe(folder);expect(store.projects()).toHaveLength(1);}
+  expect(check).toHaveBeenCalledTimes(2);expect(ops).toEqual(['transfer_begin','transfer_receipt']);
+  await expect(service.import('Retry',code,new AbortController().signal)).rejects.toThrow('already consumed');expect(ops).toHaveLength(2);
+ }finally{store.close();date.mockRestore();absolute?.mockRestore();normalize?.mockRestore();dirname?.mockRestore();}
+});

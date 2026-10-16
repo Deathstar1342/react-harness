@@ -4,7 +4,7 @@ from pathlib import Path
 import secrets
 import threading
 import uuid
-from protocol import Journal,PROTOCOL,canonical,require
+from protocol import Journal,PROTOCOL,canonical,require,UUID
 from native_session import NativeSession
 from storage_proof import StorageProofs
 from storage_probe import FixedStorageProbe
@@ -14,14 +14,19 @@ from windows_handles import PinnedPath,rename_handle
 
 class NativePhase:
     def __init__(self,docker,launch,guard):
-        self.docker=docker;self.launch=launch;self.guard=guard;self.server=None;self.thread=None;self.session=None;self.journal=None
+        self.docker=docker;self.launch=launch;self.guard=guard;self.server=None;self.thread=None;self.session=None;self.journal=None;self.failed=False
         self.binding={key:launch[key] for key in ('storageId','launchId','context','engineId','controllerImage')};self.binding['probeImage']=launch['controllerImage']
     def publish(self,name,value):
+        require(not self.failed and self.thread is None and name in ('native-bind.json','session.json','desktop-launch.json'),'NATIVE_PUBLICATION_REFUSED')
         self.guard.verify();file=self.docker.storage/'runtime/control'/name
         temporary=file.with_name(str(uuid.uuid4())+'.pending');write_new(temporary,value);rename_handle(temporary,file,replace=True)
-    def activate(self,phase,dispatch=None):
+    def activate(self,phase,dispatch=None,session_id=None):
+        require(not self.failed,'NATIVE_PHASE_RECOVERY_REQUIRED')
+        try:return self._activate(phase,dispatch,session_id)
+        except BaseException:self.failed=True;raise
+    def _activate(self,phase,dispatch,session_id):
         require(self.session is None and self.thread is None,'NATIVE_PHASE_STILL_ACTIVE')
-        session_id=str(uuid.uuid4());key=secrets.token_hex(32)
+        session_id=session_id or str(uuid.uuid4());require(type(session_id) is str and UUID.fullmatch(session_id),'INVALID_NATIVE_SESSION');key=secrets.token_hex(32)
         # Re-prove the same bound socket with the new phase session and nonce.
         self.server=prove_server(self.docker,self.launch['controllerImage'],session_id,self.server)
         database=self.docker.storage/'runtime/native-phase.sqlite'
@@ -39,6 +44,9 @@ class NativePhase:
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         return hashlib.sha256(canonical(policy).encode()).hexdigest(),session_id,mapping['linux']
     def revoke(self):
+        try:self._revoke()
+        except BaseException:self.failed=True;raise
+    def _revoke(self):
         require(self.session is not None and self.thread is not None,'NO_NATIVE_PHASE')
         self.session.revoke();self.server.shutdown();self.thread.join(timeout=10)
         require(not self.thread.is_alive(),'NATIVE_PHASE_DRAIN_UNCERTAIN')

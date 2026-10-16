@@ -100,6 +100,31 @@ class NativeHandles(unittest.TestCase):
                     self.assertEqual(calls,docker.calls)
                 finally:broker.transfers.close();journal.db.close()
 
+    def test_native_inventory_refuses_commands_before_opening_cli(self):
+        from unittest.mock import patch
+        from windows_engine import fixed_engine_query
+        with patch('windows_engine.fixed_cli') as opened:
+            for args in (['run','anything'],['context','create','anything'],['--context','remote bad','info','--format','{{json .}}'],['context','inspect','local','--format','{{json .}}']):
+                with self.assertRaises(Exception):fixed_engine_query(args)
+            opened.assert_not_called()
+    def test_actual_staged_payload_is_pinned_and_wrong_digest_refused(self):
+        import hashlib
+        from native_payload import NativePayload
+        manifest=Path(sys.executable).parent/'manifest.json'
+        if not manifest.exists():self.skipTest('Explicit staged private runtime required')
+        source=self.root/'app';(source/'containers/broker').mkdir(parents=True);file=source/'containers/broker/fixture.py';file.write_text('fixture = True')
+        expected=hashlib.sha256(manifest.read_bytes()).hexdigest()
+        with self.assertRaises(Exception):NativePayload(source,'0'*64)
+        (source/'helper').mkdir()
+        for name in ('containers/worker-runner.py','containers/worker-bridge.py','containers/container-apt.py','helper/apt_adapter.py','helper/core.py'):(source/name).write_text('fixture = True')
+        payload=NativePayload(source,expected)
+        try:
+            self.assertEqual(payload.runtime_digest,expected)
+            with self.assertRaises(OSError):file.write_text('changed')
+            with self.assertRaises(OSError):source.rename(self.root/'renamed')
+        finally:payload.close()
+        file.write_text('released');self.assertEqual(file.read_text(),'released')
+
     def set_acl(self,path,sddl,protected=True):
         n=self.native;descriptor=n.C.c_void_p();size=n.W.DWORD()
         n.ok(n.a.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl,1,n.C.byref(descriptor),n.C.byref(size)),'TEST_ACL_FAILED')
