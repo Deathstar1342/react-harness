@@ -1,3 +1,4 @@
+import {z} from 'zod';
 import type {PackageHelperDecision,PackageHelperRequest,PackageHelperRecord,PackageHelperTarget} from '../shared/types.js';
 import type {InstallHelper} from './installs.js';
 import {WorkerClient,type WorkerTransport} from './worker-client.js';
@@ -16,8 +17,7 @@ export class ContainerInstallClient implements InstallHelper {
   async prepare(request:PackageHelperRequest){return await this.request('install_prepare',{request}) as PackageHelperRecord;}
   async authorize(decision:PackageHelperDecision){return await this.request('install_authorize',{decision}) as PackageHelperRecord;}
   async execute(decision:PackageHelperDecision){
-    const receipt=await this.request('install_execute',{decision}) as {requestId:string;accepted:boolean};
-    if(receipt.requestId!==decision.requestId||receipt.accepted!==true)throw new Error('Invalid install acceptance');
+    z.object({requestId:z.literal(decision.requestId),accepted:z.literal(true)}).strict().parse(await this.request('install_execute',{decision}));
     const deadline=Date.now()+360000;
     for(;;){
       const record=await this.status(decision.requestId);

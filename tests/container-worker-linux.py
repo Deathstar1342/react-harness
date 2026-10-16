@@ -149,6 +149,53 @@ try:
     check('explicit rebuild retains recipes and requires a new approval without replay', reset['recipesRetained'] and reset['reinstallRequiresNewApproval'])
     result, output=command('command -v hello || true')
     check('base reset never silently reinstalls a reviewed recipe', output=='')
+    # A package layer may not replace trusted execution code, even if its own
+    # tools would claim success. Export/hash happens on the trusted host.
+    poisoned=docker.resources.create(['--network','none','--entrypoint','/usr/bin/python3',docker.image,'-I','-c','import time;time.sleep(120)'],docker.image,'maintenance')
+    docker.call(['start',poisoned])
+    try:
+        docker.call(['exec',poisoned,'/usr/bin/python3','-I','-B','-c',"from pathlib import Path;Path('/opt/abyssus-worker/worker-runner.py').write_text('replaced by test package')"])
+        bad_image=docker.call(['commit',poisoned],timeout=120).strip()
+        try:
+            docker.attestor.verify(bad_image)
+            raise AssertionError('changed trusted runner accepted')
+        except Denied as error:
+            check('independent image attestation rejects modified trusted runner',str(error)=='TRUSTED_EXECUTION_BASE_CHANGED')
+    finally:
+        docker.resources.remove(poisoned)
+    # A second real apt transaction with a publication-cleanup fault must retain
+    # uncertainty and its old head, even after successful apt and image export.
+    hello2=broker.dispatch('install_hello',{'project':'other'})
+    request2={'requestId':str(uuid.uuid4()),'targetId':hello2['target']['id'],'manager':'apt','packages':[{'name':'hello'}]}
+    preview2=broker.dispatch('install_prepare',{'project':'other','request':request2})
+    decision2={'requestId':request2['requestId'],'previewDigest':preview2['previewDigest'],'decisionNonce':secrets.token_hex(32),'expiresAt':preview2['expiresAt']}
+    broker.dispatch('install_authorize',{'project':'other','decision':decision2})
+    original_cleanup=broker.packages.cleanup
+    def lost_cleanup(row):
+        if row['id']==request2['requestId'] and row['phase']=='publishing':
+            raise Denied('INJECTED_PUBLICATION_CLEANUP_LOSS')
+        return original_cleanup(row)
+    broker.packages.cleanup=lost_cleanup
+    broker.dispatch('install_execute',{'project':'other','decision':decision2})
+    deadline=time.monotonic()+360
+    while time.monotonic()<deadline:
+        receipt2=broker.dispatch('install_status',{'project':'other','requestId':request2['requestId']})
+        if receipt2['state'] in ('succeeded','failed','uncertain'):break
+        time.sleep(.2)
+    broker.packages.cleanup=original_cleanup
+    retained=broker.packages.get(request2['requestId'],'other')
+    check('publication cleanup failure retains uncertainty and original image generation',receipt2['state']=='uncertain' and retained.get('failureCode')=='INJECTED_PUBLICATION_CLEANUP_LOSS' and broker.packages.target('other')==hello2['target'] and retained.get('resultImageId'))
+    broker.shutdown();journal.db.close();docker.resources.db.close()
+    docker=Docker(str(storage),identity,str(ROOT),'default')
+    journal=Journal(str(storage/'runtime/claims.sqlite'),str(uuid.uuid4()))
+    broker=Broker(journal,docker)
+    recovered2=broker.dispatch('install_status',{'project':'other','requestId':request2['requestId']})
+    check('broker restart retains uncertain package receipt without transaction replay',recovered2['state']=='uncertain' and broker.packages.target('other')==hello2['target'])
+    try:
+        broker.dispatch('install_execute',{'project':'other','decision':decision2})
+        raise AssertionError('uncertain transaction replayed')
+    except Denied:
+        check('uncertain install decision cannot be reused after restart')
     check('original host storage and other project remain untouched', (storage/'config/provider-secret').read_text()=='SYNTHETIC_PROVIDER_SECRET' and (storage/'workspace/other/private').read_text()=='OTHER_PROJECT_SECRET')
 except Exception as error:
     (OUT/'m29-worker-failure.txt').write_text(repr(error))
