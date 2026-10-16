@@ -130,3 +130,11 @@ it('durable export quarantine blocks removal/reset and survives lost release rep
     await runtime.exclusiveRemoval(project.id,async()=>{});
   }finally{f.store.db.exec=original;await runtime.close();await tools.dispose();}
 });
+
+it('preserves device/inode values above 2^53 in receipts and refuses mismatched full-width identities',async()=>{
+  const f=fixture();f.receipt.identity=['9007199254740993','18446744073709551615'];
+  await expect(f.service.import('Full-width identity','6'.repeat(64),new AbortController().signal)).rejects.toThrow('Managed copy identity changed');
+  const record=f.store.db.prepare("SELECT data FROM state WHERE key LIKE 'transfer:%'").get();
+  expect(JSON.parse(String(record!.data)).receipt.identity).toEqual(['9007199254740993','18446744073709551615']);
+  expect(f.store.projects()).toHaveLength(0);
+});
