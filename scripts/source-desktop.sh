@@ -22,7 +22,7 @@ for command in docker git tar realpath stat sha256sum timeout sed sync head; do 
 docker_cli="$(command -v docker)"
 d() { ( ulimit -f 65536; env -i HOME="$HOME" PATH="$PATH" TMPDIR="${runtime:-/tmp}" timeout --foreground 1800 "$docker_cli" "$@" ); }
 q() { local reply; reply="$(d "$@" | head -c 262145)"; (( ${#reply} <= 262144 )) || fail "Engine reply limit"; printf '%s' "$reply"; }
-g() { env -i HOME="$HOME" PATH="$PATH" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null "$@"; }
+g() { env -i HOME="$HOME" PATH="$PATH" git --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null "$@"; }
 context="$(q context show)"
 [[ "$context" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$ ]] || fail 'Invalid local context'
 endpoint="$(q context inspect "$context" --format '{{.Endpoints.docker.Host}}')"
@@ -56,15 +56,17 @@ verify() {
     [[ "$relative" != /* && "$relative" != *\\* && "$relative" != *:* && ! "$relative" =~ [[:cntrl:]] && "/$relative/" != *'/../'* && "/$relative/" != *'/./'* && "$relative" != *'//'* ]] || fail 'Unsafe inventory member'
     (( ++count <= 50000 )) || fail 'Inventory count limit'
   done < "$runtime/payload/SHA256SUMS"
+  cmp -s <(cut -c67- "$runtime/payload/SHA256SUMS" | LC_ALL=C sort) <(cd "$runtime/payload" && find . -type f ! -path './SHA256SUMS' -printf '%P\n' | LC_ALL=C sort) || fail 'Complete runtime member set differs'
   (cd "$runtime/payload" && sha256sum --check --status SHA256SUMS) || fail 'Runtime integrity failed; files preserved'
   for directory in desktop-data logs crashes temp; do private_dir "$runtime/$directory"; done
   for image in controller worker; do
     regular "$runtime/$image.iid"; iid="$(cat "$runtime/$image.iid")"
     [[ "$iid" =~ ^sha256:[a-f0-9]{64}$ && "$(q --context "$context" image inspect "$iid" --format '{{.Id}}')" == "$iid" ]] || fail 'Exact runtime image missing; start never pulls or builds'
   done
+  env -i HOME="$HOME" PATH="$PATH" "$runtime/payload/support-runtime/bin/python3.13" -I -B "$runtime/payload/source-payload-verify.py" "$runtime/payload" "${receipt[1]}" "$(cat "$runtime/controller.iid")" "$(cat "$runtime/worker.iid")" linux || fail 'Payload source/platform/image cross-binding failed'
 }
 if [[ -e "$selection" || -L "$selection" ]]; then
-  private_dir "$ROOT/.container-desktop-source"; regular "$selection"; mapfile -t saved < "$selection"
+  private_dir "$ROOT/.container-desktop-source"; regular "$selection"; (( $(stat -c %s "$selection") <= 4096 )) || fail "Selection size limit"; mapfile -t saved < "$selection"
   [[ ${#saved[@]} == 1 ]] || fail 'Invalid saved source runtime selection'
   runtime="${saved[0]}"; [[ -z "$requested" || "$requested" == "$runtime" ]] || fail 'Existing selection cannot be silently relocated'
   verify
@@ -89,9 +91,9 @@ else
   exec {source_pin}<"$ROOT"
   [[ "$(realpath /proc/$$/fd/$source_pin)" == "$ROOT" ]] || fail 'Source parent changed'
   mkdir -- "/proc/$$/fd/$source_pin/.container-desktop-source"; printf '%s\n' "$runtime" > "$selection"
-  printf '%s\n' "$source" > "$runtime/build-intent"
-  mkdir "$runtime/snapshot" "$runtime/desktop-data" "$runtime/logs" "$runtime/crashes" "$runtime/temp"
-  sync -f "$runtime/build-intent"; sync -f "$selection"; sync -f "$runtime"; sync -f "$ROOT/.container-desktop-source"
+  printf '%s\n' "$source" > "$runtime_io/build-intent"
+  mkdir "$runtime_io/snapshot" "$runtime_io/desktop-data" "$runtime_io/logs" "$runtime_io/crashes" "$runtime_io/temp"
+  sync -f "$runtime_io/build-intent"; sync -f "$selection"; sync -f "$runtime"; sync -f "$ROOT/.container-desktop-source"
   # Preflight exact immutable tree BEFORE extraction: no links/submodules/escaped paths.
   total=0; entries=0
   while IFS= read -r item; do
@@ -102,20 +104,19 @@ else
     (( total <= 268435456 && entries <= 20000 )) || fail 'Source tree size/count limit'
   done < <(g -C "$ROOT" ls-tree -r --long "$source")
   # Exact tracked allowlist. No working-tree/untracked files enter any build context.
-  g -C "$ROOT" archive --format=tar --output="$runtime/source.tar" "$source" .dockerignore package.json package-lock.json tsconfig.json vite.config.ts index.html client server shared desktop containers helper/core.py helper/apt_adapter.py helper/apt.conf scripts/desktop-build.mjs scripts/stage-support-runtime.py scripts/stage-container-runtime.py scripts/source-payload.py
-  tar -xf "$runtime/source.tar" -C "$runtime/snapshot"
-  [[ -z "$(find "$runtime/snapshot" -type l -o ! -type f ! -type d)" ]] || fail 'Source snapshot contains unsupported links/special files'
+  g -C "$ROOT" archive --format=tar --output="$runtime_io/source.tar" "$source" .dockerignore package.json package-lock.json tsconfig.json vite.config.ts index.html client server shared desktop containers helper/core.py helper/apt_adapter.py helper/apt.conf scripts/desktop-build.mjs scripts/stage-support-runtime.py scripts/stage-container-runtime.py scripts/source-payload.py scripts/source-payload-verify.py
+  tar -xf "$runtime_io/source.tar" -C "$runtime_io/snapshot"
+  [[ -z "$(find "$runtime_io/snapshot" -type l -o ! -type f ! -type d)" ]] || fail 'Source snapshot contains unsupported links/special files'
   for image in controller worker; do
     dockerfile=containers/Dockerfile; [[ "$image" != worker ]] || dockerfile=containers/Worker.Dockerfile
-    printf '%s\n' "build-$image" >> "$runtime/build-intent"
-    sync -f "$runtime/build-intent"
-    sync -f "$runtime/build-intent"
-  d --context "$context" buildx build --builder "$context" --load --iidfile "$runtime/$image.iid" -f "$runtime/snapshot/$dockerfile" "$runtime/snapshot" > "$runtime/logs/$image-build.log" 2>&1 || fail "Image build failed; inspect $runtime/logs/$image-build.log. Interrupted setup is retained."
+    printf '%s\n' "build-$image" >> "$runtime_io/build-intent"
+    sync -f "$runtime_io/build-intent"
+    d --context "$context" buildx build --builder "$context" --load --iidfile "$runtime_io/$image.iid" -f "$runtime_io/snapshot/$dockerfile" "$runtime_io/snapshot" > "$runtime_io/logs/$image-build.log" 2>&1 || fail "Image build failed; inspect $runtime_io/logs/$image-build.log. Interrupted setup is retained."
   done
-  printf 'build-export-payload\n' >> "$runtime/build-intent"
-  sync -f "$runtime/build-intent"
-  d --context "$context" buildx build --builder "$context" --build-arg TARGET_OS=linux --build-arg "SOURCE_COMMIT=$source" --build-arg "CONTROLLER_IMAGE=$(cat "$runtime/controller.iid")" --build-arg "WORKER_IMAGE=$(cat "$runtime/worker.iid")" --output "type=local,dest=$runtime/payload" -f "$runtime/snapshot/containers/Source.Dockerfile" "$runtime/snapshot" > "$runtime/logs/payload-build.log" 2>&1 || fail "Payload build failed; inspect $runtime/logs/payload-build.log. Nothing replayed or deleted."
-  printf '%s\n' linux "$source" "$context" "$endpoint" "$engine" "$(sha256sum "$runtime/payload/SHA256SUMS" | cut -d ' ' -f1)" > "$runtime/receipt"
+  printf 'build-export-payload\n' >> "$runtime_io/build-intent"
+  sync -f "$runtime_io/build-intent"
+  d --context "$context" buildx build --builder "$context" --build-arg TARGET_OS=linux --build-arg "SOURCE_COMMIT=$source" --build-arg "CONTROLLER_IMAGE=$(cat "$runtime_io/controller.iid")" --build-arg "WORKER_IMAGE=$(cat "$runtime_io/worker.iid")" --output "type=local,dest=$runtime_io/payload" -f "$runtime_io/snapshot/containers/Source.Dockerfile" "$runtime_io/snapshot" > "$runtime_io/logs/payload-build.log" 2>&1 || fail "Payload build failed; inspect $runtime_io/logs/payload-build.log. Nothing replayed or deleted."
+  printf '%s\n' linux "$source" "$context" "$endpoint" "$engine" "$(sha256sum "$runtime_io/payload/SHA256SUMS" | cut -d ' ' -f1)" > "$runtime_io/receipt"
   verify
 fi
 [[ "$option" != --check && "$option" != --no-start ]] || { printf 'Source runtime inventory and exact engine images verified. App storage/provider setup remains in the native desktop.\n'; exit 0; }

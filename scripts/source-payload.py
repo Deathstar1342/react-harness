@@ -60,6 +60,7 @@ def build(platform,source,controller,worker):
       'supportRuntime':'support-runtime/provenance.json','supportBase':'ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401','targetExecutionVerified':False}
     (root/'provenance.json').write_text(json.dumps(provenance,indent=2)+'\n')
     (root/'SOURCE-NOTICE.txt').write_text('The project source snapshot has no root project license. No new project license is granted by this source build. Upstream runtime and dependency licenses remain in their respective payload directories. Redistribution review remains an explicit packaging gate.\n')
+    shutil.copyfile(checkout/'scripts/source-payload-verify.py',root/'source-payload-verify.py')
     files=[]
     for file in sorted(root.rglob('*')):
         if file.is_symlink():raise ValueError('Source payload links are refused')

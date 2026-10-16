@@ -79,6 +79,8 @@ jobs:
           $env:M32_RUNTIME="$env:RUNNER_TEMP/m32-runtime"
           $env:M32_RECEIPTS="$env:RUNNER_TEMP/m32-receipts"
           foreach ($name in @('desktop-data','logs','crashes','temp')) { New-Item -ItemType Directory -Path "$env:M32_RUNTIME/$name" | Out-Null }
+          & "$env:M32_RUNTIME/payload/support-runtime/python.exe" -I -B "$env:M32_RUNTIME/payload/source-payload-verify.py" "$env:M32_RUNTIME/payload" "${{ github.sha }}" ((Get-Content "$env:M32_RUNTIME/payload/app/container-runtime.json" -Raw | ConvertFrom-Json).controllerImage) ((Get-Content "$env:M32_RUNTIME/payload/app/container-runtime.json" -Raw | ConvertFrom-Json).workerImage) win32
+          if ($LASTEXITCODE -ne 0) { throw 'Complete relocated payload verification failed' }
           node tests/source-desktop-smoke.ts
       - uses: actions/upload-artifact@v4
         if: always()

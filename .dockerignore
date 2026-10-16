@@ -36,3 +36,5 @@
 !scripts/stage-support-runtime.py
 !scripts/stage-container-runtime.py
 !scripts/source-payload.py
+
+!scripts/source-payload-verify.py

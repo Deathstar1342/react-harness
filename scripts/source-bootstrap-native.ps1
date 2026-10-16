@@ -21,7 +21,9 @@ Native-Method FindClose kernel32.dll ([bool]) @([IntPtr])
 $script:SourceNative=$nativeType.CreateType()
 $script:SourcePins=New-Object 'Collections.Generic.List[IntPtr]'
 function Assert-SourcePath([string]$Value) {
-    if ($Value -notmatch '^[A-Za-z]:\\' -or $Value.Length -gt 240 -or $Value.Substring(2) -match '[:/\x00-\x1f<>"|?*]' -or $Value.Substring(3).Split('\') | Where-Object { $_ -in @('','.','..') -or $_ -match '[. ]$|^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])(\.|$)' }) { throw 'Canonical local path without Win32 aliases required.' }
+    if ($Value -notmatch '^[A-Za-z]:\\' -or $Value.Length -gt 240 -or $Value.Substring(2) -match '[:/\x00-\x1f<>"|?*]') { throw 'Canonical local path required.' }
+    $bad=@($Value.Substring(3).Split('\') | Where-Object { $_ -in @('','.','..') -or $_ -match '[. ]$|^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(\.|$)' })
+    if ($bad.Count -gt 0) { throw 'Win32 path alias refused.' }
     $drive=New-Object IO.DriveInfo([IO.Path]::GetPathRoot($Value))
     if ($drive.DriveType -ne 'Fixed' -or $drive.DriveFormat -ne 'NTFS') { throw 'Local fixed NTFS storage required.' }
 }

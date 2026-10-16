@@ -17,9 +17,9 @@ function Run-Tool([string]$Executable,[string[]]$Arguments,[string]$Log='', [int
     $processInfo.EnvironmentVariables.Clear()
     foreach ($name in @('SystemRoot','WINDIR','USERPROFILE','APPDATA','LOCALAPPDATA','PATH','HOME')) { if ([Environment]::GetEnvironmentVariable($name)) { $processInfo.EnvironmentVariables[$name]=[Environment]::GetEnvironmentVariable($name) } }
     if ($taskRuntime) { $processInfo.EnvironmentVariables['TEMP']=(Join-Path $taskRuntime 'temp'); $processInfo.EnvironmentVariables['TMP']=(Join-Path $taskRuntime 'temp') }
-    $process=New-Object Diagnostics.Process; $process.StartInfo=$processInfo
+    $process=New-Object Diagnostics.Process; $process.StartInfo=$processInfo; $started=$false
     try {
-        if (-not $process.Start()) { throw 'Source tool failed to start' }
+        if (-not $process.Start()) { throw 'Source tool failed to start' };$started=$true
         $streams=@($process.StandardOutput.BaseStream,$process.StandardError.BaseStream)
         $buffers=@((New-Object byte[] 8192),(New-Object byte[] 8192)); $pending=@($null,$null);$done=@($false,$false)
         $memory=New-Object IO.MemoryStream; $file=$null; $total=0L; $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -47,7 +47,7 @@ function Run-Tool([string]$Executable,[string[]]$Arguments,[string]$Log='', [int
             if (-not $process.HasExited) { $process.Kill() }
             if ($file) { $file.Flush($true);$file.Dispose() };$memory.Dispose()
         }
-    } finally { $process.Dispose() }
+    } finally { if ($started -and -not $process.HasExited) { $process.Kill() }; $process.Dispose() }
 }
 function No-Links([string]$Value) {
     $item=Get-Item -LiteralPath $Value -Force
@@ -96,7 +96,7 @@ if ($drivers.Count -ne 1 -or $endpoints.Count -ne 1) { throw 'Ambiguous local bu
 $taskBuilder=$drivers[0].Groups[1].Value+'|'+$endpoints[0].Groups[1].Value
 if ($taskBuilder -notin @("docker|$taskContext","docker|$taskEndpoint")) { throw 'Use the local context Docker build driver; remote/custom builders are refused.' }
 Write-Output ('Engine data root inside Docker: '+$taskEngine.Split('|')[3]+'. Actual Windows backing/cache drive is unknown. Selecting D: below does not move Docker storage.')
-if ($Action -eq 'setup' -and $Check) { exit 0 }
+if ($Action -eq 'setup' -and $Check) { Close-SourcePins; exit 0 }
 $taskSelectionDir=Join-Path $taskSource '.container-desktop-source'
 $taskSelection=Join-Path $taskSelectionDir 'selection'
 function Verify-Runtime {
@@ -114,6 +114,7 @@ function Verify-Runtime {
         if ($line -notmatch '^([a-f0-9]{64})  ([^\x00-\x1f\\:]+)$') { throw 'Invalid runtime manifest entry' }
         $hash=$Matches[1]; $relative=$Matches[2]
         if ($relative.StartsWith('/') -or ($relative.Split('/') | Where-Object { $_ -in @('','..','.') -or $_ -match '[. ]$|^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)' }) -or -not $seen.Add($relative)) { throw 'Unsafe/colliding runtime manifest member' }
+        if ($relative -match '^app/.*(\.node$|/node-pty/)') { throw 'Host backend native dependency in desktop payload' }
         $file=Join-Path $payload $relative; $keep=$script:SourcePins.Count; [void](Pin-SourcePath $file -Private); No-AlternateStreams $file
         if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw 'Runtime payload is missing or changed' }
         Close-SourcePins $keep
@@ -123,6 +124,7 @@ function Verify-Runtime {
     foreach ($file in $files) { if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Runtime reparse point refused' } }
     if (@($files | Where-Object { -not $_.PSIsContainer }).Count -ne $seen.Count+1) { throw 'Extra/missing runtime files' }
     foreach ($name in @('desktop-data','logs','crashes','temp')) { No-Links (Join-Path $taskRuntime $name) }
+    foreach($metadata in @('app/container-runtime.json','provenance.json')) { if ((Get-Item -LiteralPath (Join-Path $payload $metadata)).Length -gt 16384) { throw 'Payload metadata size limit' } }
     $payloadMetadata=Get-Content -LiteralPath (Join-Path $payload 'app/container-runtime.json') -Raw | ConvertFrom-Json
     $provenance=Get-Content -LiteralPath (Join-Path $payload 'provenance.json') -Raw | ConvertFrom-Json
     if ($payloadMetadata.source -cne $receipt.source -or $provenance.source -cne $receipt.source -or $provenance.platform -cne 'win32') { throw 'Payload source/platform binding mismatch' }
@@ -165,7 +167,7 @@ if (Test-Path -LiteralPath $taskSelection) {
         if ($totalBytes -gt 268435456 -or $members -gt 20000) { throw 'Source tree size/count limit' }
     }
     $archive=Join-Path $taskRuntime 'source.tar'
-    Run-Tool $taskGit @('-c','core.fsmonitor=false','-c','core.hooksPath=NUL','-c','core.attributesFile=NUL','-C',$taskSource,'archive','--format=tar',"--output=$archive",$sourceCommit,'.dockerignore','package.json','package-lock.json','tsconfig.json','vite.config.ts','index.html','client','server','shared','desktop','containers','helper/core.py','helper/apt_adapter.py','helper/apt.conf','scripts/desktop-build.mjs','scripts/stage-support-runtime.py','scripts/stage-container-runtime.py','scripts/source-payload.py')
+    Run-Tool $taskGit @('-c','core.fsmonitor=false','-c','core.hooksPath=NUL','-c','core.attributesFile=NUL','-C',$taskSource,'archive','--format=tar',"--output=$archive",$sourceCommit,'.dockerignore','package.json','package-lock.json','tsconfig.json','vite.config.ts','index.html','client','server','shared','desktop','containers','helper/core.py','helper/apt_adapter.py','helper/apt.conf','scripts/desktop-build.mjs','scripts/stage-support-runtime.py','scripts/stage-container-runtime.py','scripts/source-payload.py','scripts/source-payload-verify.py')
     Run-Tool (Join-Path $env:SystemRoot 'System32\tar.exe') @('-xf',$archive,'-C',(Join-Path $taskRuntime 'snapshot'))
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $taskRuntime 'snapshot') -Recurse -Force) { if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Source snapshot links refused' } }
     foreach ($name in @('controller','worker')) {
@@ -178,10 +180,11 @@ if (Test-Path -LiteralPath $taskSelection) {
     Run-Tool $taskDocker @('--context',$taskContext,'buildx','build','--builder',$taskContext,'--build-arg','TARGET_OS=win32','--build-arg',"SOURCE_COMMIT=$sourceCommit",'--build-arg',"CONTROLLER_IMAGE=$controller",'--build-arg',"WORKER_IMAGE=$worker",'--output',"type=local,dest=$taskRuntime/payload",'-f',(Join-Path $taskRuntime 'snapshot/containers/Source.Dockerfile'),(Join-Path $taskRuntime 'snapshot')) (Join-Path $taskRuntime 'logs/payload-build.log') 1800
     $inventory=(Get-FileHash -LiteralPath (Join-Path $taskRuntime 'payload/SHA256SUMS') -Algorithm SHA256).Hash.ToLowerInvariant()
     @{platform='win32';source=$sourceCommit;context=$taskContext;endpoint=$taskEndpoint;engine=$taskEngine;inventory=$inventory} | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $taskRuntime 'receipt.json') -Encoding UTF8
+    Flush-SourceFile (Join-Path $taskRuntime 'receipt.json')
     Verify-Runtime
 }
 if ($Check -or $NoStart) { Close-SourcePins; Write-Output 'Source runtime inventory and exact engine images verified. App storage/provider setup remains in the native desktop.'; exit 0 }
 # The verified native desktop owns all container effects and private provider setup.
-Run-Tool (Join-Path $taskRuntime 'payload/electron/electron.exe') @((Join-Path $taskRuntime 'payload/app/desktop/source-entry.cjs')) (Join-Path $taskRuntime 'logs/desktop.log') 86400
+Run-Tool (Join-Path $taskRuntime 'payload/electron/electron.exe') @((Join-Path $taskRuntime 'payload/app/desktop/source-entry.cjs')) (Join-Path $taskRuntime ('logs/desktop-'+[guid]::NewGuid().ToString()+'.log')) 0
 
 Close-SourcePins
