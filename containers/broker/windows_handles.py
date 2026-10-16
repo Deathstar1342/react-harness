@@ -237,6 +237,11 @@ class NativeStorageGuard:
         # granted private ownership merely by being under the selected root.
         count=0
         def visit(directory,depth):
+            if Path(directory)==Path(self.runtime.path)/'operator':
+                if not (Path(directory)/'record.lock').is_file():raise ValueError('OPERATOR_RECORD_LOCK_MISSING')
+                with operator_record_lock(Path(directory)):scan(directory,depth)
+            else:scan(directory,depth)
+        def scan(directory,depth):
             nonlocal count
             if depth>64:raise ValueError('PRIVATE_STORAGE_DEPTH')
             for child in Path(directory).iterdir():
@@ -259,13 +264,14 @@ class Overlapped(C.Structure):
     _fields_=[('internal',C.c_size_t),('internalHigh',C.c_size_t),('offset',W.DWORD),('offsetHigh',W.DWORD),('event',HANDLE)]
 
 @contextlib.contextmanager
-def exclusive_lock(file,wait=False):
+def exclusive_lock(file,wait=False,create=True):
     """One native host lock class; no claim of cross-OS SQLite locking."""
     file=Path(file)
-    try:
-        with PinnedPath(file,write=True,create=True,directory=False,share_write=True):pass
-    except OSError as error:
-        if error.errno not in (80,183):raise
+    if create:
+        try:
+            with PinnedPath(file,write=True,create=True,directory=False,share_write=True):pass
+        except OSError as error:
+            if error.errno not in (80,183):raise
     k.LockFileEx.argtypes=[HANDLE,W.DWORD,W.DWORD,W.DWORD,W.DWORD,C.POINTER(Overlapped)];k.LockFileEx.restype=W.BOOL
     k.UnlockFileEx.argtypes=[HANDLE,W.DWORD,W.DWORD,W.DWORD,C.POINTER(Overlapped)];k.UnlockFileEx.restype=W.BOOL
     with PinnedPath(file,write=True,directory=False,share_write=True) as pin:
@@ -276,3 +282,41 @@ def exclusive_lock(file,wait=False):
             raise OSError(error,'NATIVE_LOCK_FAILED')
         try:yield
         finally:ok(k.UnlockFileEx(pin.handle,0,1,0,C.byref(overlapped)),'NATIVE_UNLOCK_FAILED')
+
+
+_record_local=__import__('threading').local()
+@contextlib.contextmanager
+def operator_record_lock(area,timeout=3):
+    """Bounded, same-thread reentrant native lock; observations never create it."""
+    import time
+    file=Path(area)/'record.lock';key=native_path(file).casefold()
+    held=getattr(_record_local,'held',None)
+    if held is None:held={};_record_local.held=held
+    if key in held:
+        held[key]+=1
+        try:yield
+        finally:held[key]-=1
+        return
+    end=time.monotonic()+timeout
+    while True:
+        lease=exclusive_lock(file,create=False)
+        try:lease.__enter__();break
+        except BlockingIOError:
+            if time.monotonic()>=end:raise TimeoutError('OPERATOR_RECORD_LOCK_TIMEOUT')
+            time.sleep(.01)
+    held[key]=1
+    try:yield
+    finally:del held[key];lease.__exit__(None,None,None)
+
+
+def remove_owned_record(file,expected):
+    """Delete only the exact private record bytes through their held native handle."""
+    from protocol import canonical,require
+    raw=canonical(expected).encode();require(len(raw)<=16384,'PRIVATE_RECORD_LIMIT')
+    with PinnedPath(file,delete=True,directory=False) as pin:
+        pin.private();buffer=C.create_string_buffer(16385);read=W.DWORD()
+        k.ReadFile.argtypes=[HANDLE,C.c_void_p,W.DWORD,C.POINTER(W.DWORD),C.c_void_p];k.ReadFile.restype=W.BOOL
+        ok(k.ReadFile(pin.handle,buffer,len(buffer),C.byref(read),None),'PRIVATE_RECORD_READ_FAILED')
+        require(buffer.raw[:read.value]==raw,'PRIVATE_RECORD_CHANGED');pin.verify()
+        disposition=W.BOOL(True);ok(k.SetFileInformationByHandle(pin.handle,4,C.byref(disposition),C.sizeof(disposition)),'PRIVATE_RECORD_DELETE_FAILED')
+    require(not Path(file).exists(),'PRIVATE_RECORD_DELETE_UNCERTAIN')

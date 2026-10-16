@@ -93,6 +93,16 @@ class Docker:
         return root, masks, {'storageId': self.storage_id, 'projectId': project_id,
                              'imageId': self.images.get(project_id, self.image), 'layout': digest(masks)}
 
+    def prepare_cache(self, project_id):
+        cache = self.storage / 'runtime' / 'dependencies' / project_id
+        for directory in (cache.parent, cache, cache / 'home', cache / 'cache'):
+            directory.mkdir(mode=0o700, exist_ok=True)
+            require(directory.resolve() == directory and directory.stat().st_uid == self.uid, 'UNSAFE_CACHE')
+        return cache
+
+    def process_options(self):
+        return {}
+
     def prepare(self, request):
         root, masks, identity = self.topology(request['project'], request['operation']['kind'] == 'git')
         key = request['contextId']
@@ -102,10 +112,7 @@ class Docker:
             self.verify(existing)
             return identity
         require(len(self.contexts) < 32, 'CONTEXT_LIMIT')
-        cache = self.storage / 'runtime' / 'dependencies' / identity['projectId']
-        for directory in (cache.parent, cache, cache / 'home', cache / 'cache'):
-            directory.mkdir(mode=0o700, exist_ok=True)
-            require(directory.resolve() == directory and directory.stat().st_uid == self.uid, 'UNSAFE_CACHE')
+        cache = self.prepare_cache(identity['projectId'])
         self.attestor.verify(identity['imageId'])
         target = '/workspace/' + request['project']
         args = ['--label', 'abyssus.context=' + key, '--network', 'none', '--init', '--read-only',
@@ -143,7 +150,7 @@ class Docker:
         args = ['exec', '-i', '--user', '0:0', owned['container'], '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin',
                 '/usr/bin/python3', '-I', '/opt/abyssus-worker/worker-runner.py']
         self.storage_barrier()
-        process = subprocess.Popen(self.argv(args), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
+        process = subprocess.Popen(self.argv(args), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env, **self.process_options())
         request = {k: record[k] for k in ('claimId', 'project', 'operation', 'timeoutMs', 'outputLimit')}
         request.update(uid=self.uid, gid=self.gid, proofKey=proof_key)
         return process, (json.dumps(request, separators=(',', ':')) + '\n').encode()

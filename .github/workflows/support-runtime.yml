@@ -37,7 +37,9 @@ jobs:
         run: npx tsx tests/desktop-support-runtime-probe.ts
       - name: Actual native Windows ownership and two-process locks
         if: runner.os == 'Windows'
-        run: '& "$env:M31_SUPPORT_RUNTIME/python.exe" -I -B -m unittest discover -s tests -p "test_desktop_*.py" -v'
+        run: |
+          $env:M31_ELECTRON_EXE=(Resolve-Path 'node_modules/electron/dist/electron.exe').Path
+          & "$env:M31_SUPPORT_RUNTIME/python.exe" -I -B -m unittest discover -s tests -p "test_desktop_*.py" -v
       - name: Linux private-runtime protocol and host proof checks
         if: runner.os == 'Linux'
         run: "$M31_SUPPORT_RUNTIME/bin/python3.13 -I -B -m unittest discover -s tests -p 'test_desktop_*.py' -v"

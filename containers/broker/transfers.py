@@ -23,7 +23,7 @@ MAX_FILE = 256 * 1024**2
 MAX_DEPTH = 32
 MAX_PATH = 240
 CACHE = {"node_modules", ".venv", "venv", "__pycache__", ".cache", ".next", ".nuxt", "dist", "build", "target", "coverage", ".pytest_cache", ".mypy_cache", ".tox"}
-NEVER = {".native-setup.json", "native-bind.json", "desktop-launch.json", "desktop-owner.json", "worker-resources.sqlite", ".config", ".docker", ".kube", "application_default_credentials.json", ".aws", ".azure", ".ssh", ".gnupg", ".codex", ".harness", ".container-source", ".storage-id", "state.sqlite", "state.sqlite-wal", "state.sqlite-shm", "worker-journal.sqlite", "session.json", ".gitmodules"}
+NEVER = {".native-operator-intent.json", "current.json", "native-phase.sqlite", "lifetime.lock", ".native-setup.json", "native-bind.json", "desktop-launch.json", "desktop-owner.json", "worker-resources.sqlite", ".config", ".docker", ".kube", "application_default_credentials.json", ".aws", ".azure", ".ssh", ".gnupg", ".codex", ".harness", ".container-source", ".storage-id", "state.sqlite", "state.sqlite-wal", "state.sqlite-shm", "worker-journal.sqlite", "session.json", ".gitmodules"}
 SENSITIVE = {".env", ".npmrc", ".pypirc", ".netrc", "credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
 GIT_BAD = {"alternates", "http-alternates", "commondir", "gitdir", "modules", "worktrees", "grafts", "replace"}
 GIT_ROOT = {"objects", "refs", "HEAD", "index", "packed-refs", "shallow"}
@@ -65,7 +65,7 @@ def policy(rel, included, history):
     require('.gitmodules' not in lower,'UNSAFE_GIT_METADATA')
     if '.git' in lower:
         require(lower.index('.git')==0 and parts[0]=='.git' and lower.count('.git')==1,'UNSAFE_GIT_METADATA')
-    if any(p in NEVER for p in lower):
+    if any(p in NEVER or p.startswith('.native-operator-') for p in lower):
         return 'Application or credential storage is never included'
     if lower[0] == '.git':
         if not history:

@@ -8,7 +8,8 @@ from pathlib import Path
 import re
 import subprocess
 import uuid
-from protocol import require
+from protocol import require,digest,UUID
+from docker_runtime import Docker,PROTECTED
 from windows_handles import PinnedPath,k,a,ACL,ok,sid_string,security_fingerprint
 
 def program_files():
@@ -44,13 +45,13 @@ def trusted_program_acl(handle,trusted):
             require(not mask&0x500d0156 or sid_string(pointer.value+8) in trusted,'WRITABLE_DOCKER_INSTALL')
     finally:k.LocalFree(descriptor)
 
-class WindowsEngine:
+class WindowsEngine(Docker):
     def __init__(self,storage,storage_id,source,context,engine_id,worker_image):
         require(os.name=='nt','WINDOWS_ENGINE_REQUIRED')
         require(re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',context),'INVALID_ENGINE_CONTEXT')
         require(type(worker_image) is str and re.fullmatch('sha256:[a-f0-9]{64}',worker_image),'INVALID_WORKER_IMAGE')
         self.storage=Path(storage);self.storage_id=storage_id;self.source=Path(source);self.context=context;self.engine_id=engine_id;self.image=worker_image
-        self.guard=None;self.project_mapper=None;self.uid=1000;self.gid=1000 # Linux execution identity, never a native NTFS ownership claim.
+        self.guard=None;self.project_mapper=None;self.authority=None;self.uid=1000;self.gid=1000 # Linux execution identity, never a native NTFS ownership claim.
         binary=program_files()/'Docker/Docker/resources/bin/docker.exe';self.cli=PinnedPath(binary,directory=False)
         try:
             trusted={'S-1-5-18','S-1-5-32-544',trusted_installer_sid()}
@@ -83,6 +84,47 @@ class WindowsEngine:
         require(self.guard is None,'NATIVE_ENGINE_ALREADY_BOUND');guard.verify();self.guard=guard
         from resources import Resources
         self.resources=Resources(self)
+    def activate_workers(self):
+        from attestation import Attestor
+        from socket_egress import SocketEgress
+        self.storage_barrier();self.resources.recover()
+        self.egress=SocketEgress(self);self.egress.recover();self.egress.start()
+        self.attestor=Attestor(self);self.contexts={};self.images={}
+        self.blank=self.storage/'runtime/worker-mask'
+        if not self.blank.exists():
+            with PinnedPath(self.blank,write=True,create=True,directory=False) as pin:pin.private()
+        with PinnedPath(self.blank,directory=False) as pin:
+            pin.private();require(pin.identity['size']==0,'UNSAFE_MASK')
+    def egress_mount(self):return self.egress.worker_mount()
+    def process_options(self):return {'creationflags':subprocess.CREATE_NO_WINDOW,'cwd':str(Path(self.cli.path).parent)}
+    def prepare_cache(self,project_id):
+        require(type(project_id) is str and re.fullmatch('[a-f0-9]{64}',project_id),'INVALID_CACHE_ID')
+        self.storage_barrier();cache=self.storage/'runtime/dependencies'/project_id
+        for directory in (cache.parent,cache,cache/'home',cache/'cache'):
+            directory.mkdir(exist_ok=True)
+            with PinnedPath(directory,directory=True) as pin:pin.private()
+        return cache
+    def topology(self,project,git=False):
+        require(type(project) is str and UUID.fullmatch(project),'INVALID_MANAGED_PROJECT')
+        self.storage_barrier();root=self.storage/'workspace'/project;masks=[];count=0
+        with PinnedPath(root,directory=True) as project_pin:
+            identity=dict(project_pin.identity)
+            def visit(file,depth):
+                nonlocal count
+                count+=1;require(count<=200000 and depth<=128,'TOPOLOGY_LIMIT')
+                with PinnedPath(file) as pin:
+                    directory=pin.identity['directory']
+                    if file!=root and PROTECTED.search(file.name) and not (git and file.name=='.git'):
+                        masks.append({'path':file.relative_to(root).as_posix(),'directory':directory,'inode':pin.identity['volume']+':'+pin.identity['fileId']});return
+                    if directory:
+                        for child in file.iterdir():visit(child,depth+1)
+            visit(root,0)
+            if git:
+                with PinnedPath(root/'.git',directory=True):pass
+                require(not (root/'.git/commondir').exists(),'EXTERNAL_GIT')
+            project_pin.verify();self.storage_barrier()
+        project_id=digest([self.storage_id,project,identity['volume'],identity['fileId']])
+        return root,masks,{'storageId':self.storage_id,'projectId':project_id,'imageId':self.images.get(project_id,self.image),'layout':digest(masks)}
     def bind_project_mapping(self,binding,session,workspace):
         require(self.project_mapper is None,'PROJECT_MAPPING_ALREADY_BOUND')
         from project_identity import ProjectIdentity
@@ -91,5 +133,7 @@ class WindowsEngine:
         require(self.project_mapper is not None,'PROJECT_MAPPING_REQUIRED')
         return self.project_mapper.observe(project)
     def storage_barrier(self):
-        require(self.guard is not None,'NATIVE_STORAGE_NOT_BOUND');self.guard.verify()
-    def close(self):self.cli.close()
+        require(self.guard is not None,'NATIVE_STORAGE_NOT_BOUND')
+        if self.authority:self.authority()
+        else:self.guard.verify()
+    def close_engine(self):self.cli.close()

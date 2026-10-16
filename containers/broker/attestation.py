@@ -111,7 +111,7 @@ class Attestor:
         watchdog = None
         timed_out = threading.Event()
         try:
-            process = subprocess.Popen(self.docker.argv(['export', container]), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self.docker.env)
+            process = subprocess.Popen(self.docker.argv(['export', container]), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self.docker.env, **getattr(self.docker,'process_options',lambda:{})())
             def expire():
                 timed_out.set()
                 process.kill()

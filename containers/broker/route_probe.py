@@ -13,10 +13,12 @@ class LocalServer(socketserver.ThreadingTCPServer):
     allow_reuse_address=False
     def handle_error(self,*_):pass
 
-def prove_server(docker,image,session_id):
+def prove_server(docker,image,session_id,retained=None):
     # All candidates came from read-only native inventory. No wildcard binding,
     # firewall update, host command, or LAN/public adapter can enter this loop.
-    for candidate in candidates(windows_adapters()):
+    if retained:verify_route(retained)
+    choices=[{key:retained.route[key] for key in ('bind','connect','adapterId')}] if retained else candidates(windows_adapters())
+    for candidate in choices:
         nonce=secrets.token_hex(32);observed=threading.Event();issued=int(time.time()*1000)
         class Challenge(socketserver.StreamRequestHandler):
             def handle(self):
@@ -28,7 +30,9 @@ def prove_server(docker,image,session_id):
                     require(type(value['version']) is int and type(value['port']) is int and value==expected and not observed.is_set())
                     self.wfile.write((canonical({**expected,'accepted':True})+'\n').encode());self.wfile.flush();observed.set()
                 except Exception:return
-        try:server=LocalServer((candidate['bind'],0),Challenge)
+        try:
+            server=retained or LocalServer((candidate['bind'],0),Challenge)
+            server.RequestHandlerClass=Challenge
         except OSError:continue
         port=server.server_address[1];thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();container=None;proved=False
         try:
@@ -41,7 +45,8 @@ def prove_server(docker,image,session_id):
             except Exception:
                 # A failed route only permits another candidate after exact owned
                 # probe removal is confirmed. It never dispatches project work.
-                docker.resources.remove(container);container=None;continue
+                docker.resources.remove(container);container=None
+                require(retained is None,'RETAINED_ROUTE_UNPROVEN');continue
             expected={'version':1,'sessionId':session_id,'nonce':nonce,'port':port,'accepted':True}
             require(len(result)<=2048,'PRIVATE_ROUTE_UNPROVEN');reply=json.loads(result);exact(reply,[*expected,'address'])
             address=ipaddress.ip_address(reply['address']);require(address.version==4 and address.is_private and not address.is_unspecified and not address.is_link_local and not address.is_multicast,'PRIVATE_ROUTE_UNPROVEN')
