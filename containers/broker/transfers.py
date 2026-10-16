@@ -12,6 +12,7 @@ from native_io import fs as os, root_handle as native_root_handle
 from pathlib import Path
 import re
 import stat
+import sys
 import time
 import unicodedata
 from protocol import Denied, require, canonical
@@ -48,6 +49,14 @@ def relative(value):
 
 def stamp(info):
     return [str(info.st_dev), str(info.st_ino), info.st_mode, info.st_nlink, info.st_size, str(info.st_mtime_ns), str(info.st_ctime_ns)]
+
+
+def same_stamp(actual,expected,phase):
+    if actual==expected:return True
+    fields=['device','inode','mode','links','size','mtime_ns','ctime_ns']
+    # Bounded failure-only diagnostics: no paths, contents, IDs or capabilities.
+    print(canonical({'event':'transfer-metadata-changed','phase':phase,'fields':[fields[i] for i in range(7) if actual[i]!=expected[i]],'heldHandle':True,'monotonicNs':str(time.monotonic_ns())}),file=sys.stderr,flush=True)
+    return False
 
 
 def policy(rel, included, history):
@@ -175,7 +184,7 @@ def scan(root, included=(), history=False, secrets=(), check=lambda: None):
                     continue
                 if stat.S_ISDIR(info.st_mode):
                     with entry_handle(rootfd, rel, True) as child:
-                        require(stamp(os.fstat(child)) == stamp(info), 'SOURCE_CHANGED')
+                        require(same_stamp(stamp(os.fstat(child)),stamp(info),'directory-open'), 'SOURCE_CHANGED')
                         result['entries'].append({'path': rel, 'kind': 'directory', 'stamp': stamp(info)})
                         walk(child, rel + '/')
                 else:
@@ -183,15 +192,15 @@ def scan(root, included=(), history=False, secrets=(), check=lambda: None):
                     result['bytes'] += info.st_size
                     require(result['bytes'] <= MAX_BYTES, 'BYTE_LIMIT')
                     with entry_handle(rootfd, rel) as file:
-                        require(stamp(os.fstat(file)) == stamp(info), 'SOURCE_CHANGED')
+                        require(same_stamp(stamp(os.fstat(file)),stamp(info),'file-hash-window'), 'SOURCE_CHANGED')
                         digest = hash_stream(file, secrets, check)
-                        require(stamp(os.fstat(file)) == stamp(info), 'SOURCE_CHANGED')
+                        require(same_stamp(stamp(os.fstat(file)),stamp(info),'file-hash-window'), 'SOURCE_CHANGED')
                     result['entries'].append({'path': rel, 'kind': 'file', 'stamp': stamp(info), 'hash': digest})
-            require(stamp(os.fstat(fd)) == before and sorted(os.listdir(fd)) == names, 'SOURCE_CHANGED')
+            require(same_stamp(stamp(os.fstat(fd)),before,'directory-scan') and sorted(os.listdir(fd)) == names, 'SOURCE_CHANGED')
         walk(rootfd)
-        require(stamp(os.fstat(rootfd)) == result['root'], 'SOURCE_CHANGED')
+        require(same_stamp(stamp(os.fstat(rootfd)),result['root'],'root-scan'), 'SOURCE_CHANGED')
     with root_handle(root) as current:
-        require(stamp(os.fstat(current)) == result['root'], 'SOURCE_CHANGED')
+        require(same_stamp(stamp(os.fstat(current)),result['root'],'root-reopen'), 'SOURCE_CHANGED')
     result['digest'] = hashlib.sha256(canonical(result).encode()).hexdigest()
     return result
 

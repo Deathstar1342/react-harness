@@ -12,7 +12,9 @@ jobs:
         run: python3 tests/container-linux.py
       - name: Portable broker protocol and egress checks
         if: ${{ !cancelled() }}
-        run: python3 -m unittest discover -s tests -p 'test_worker_*.py' -v
+        run: |
+          python3 -m unittest discover -s tests -p 'test_worker_*.py' -v
+          python3 -m unittest discover -s tests -p 'test_desktop_*.py' -v
       - name: Real owned worker PTY and container package transactions
         if: ${{ !cancelled() }}
         run: python3 tests/container-worker-linux.py

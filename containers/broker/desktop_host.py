@@ -84,7 +84,7 @@ class DesktopHost:
         require(not config.get('CapAdd') and not config.get('Devices') and not config.get('DeviceRequests') and not config.get('Binds') and not config.get('VolumesFrom') and not config.get('PidMode') and config.get('IpcMode')=='private' and not config.get('UTSMode') and config.get('Tmpfs')=={'/tmp':'size=128m,mode=1777'} and config.get('Init') is True and config.get('PidsLimit')==128 and config.get('Memory')==2147483648 and config.get('NanoCpus')==2000000000 and len(config['SecurityOpt'])==1,'UNSAFE_CONTROLLER_CONFIG')
         require(actual_mounts==expected_mounts,'CONTROLLER_MOUNTS_CHANGED')
         require(not config['Privileged'] and config['ReadonlyRootfs'],'CONTROLLER_PRIVILEGE_CHANGED')
-        require(config['NetworkMode']=='default','CONTROLLER_NETWORK_CHANGED')
+        require(config['NetworkMode']=='bridge','CONTROLLER_NETWORK_CHANGED')
         require(config['CapDrop']==['ALL'],'CONTROLLER_CAPS_CHANGED')
         require('no-new-privileges' in config['SecurityOpt'],'CONTROLLER_SECURITY_CHANGED')
         require(info['Config']['User']==f'{os.getuid()}:{os.getgid()}','CONTROLLER_USER_CHANGED')
@@ -141,7 +141,7 @@ class DesktopHost:
         temporary=file.with_name('desktop-launch-'+secrets.token_hex(16)+'.pending');write_new(temporary,capability);temporary.replace(file)
         token=str(uuid.uuid4())
         self.save({'version':1,'storageId':self.launch['storageId'],'owner':token,'name':'abyssus-desktop-'+token,'image':self.launch['controllerImage'],'launchId':self.launch['launchId'],'id':None,'engineId':self.launch['engineId'],'context':self.launch['context'],'instanceId':None,'profileId':None,'sourceDigest':self.source_digest,'phase':'create-intent'})
-        args=['create','--name',self.owner['name'],'--label','abyssus.desktop='+token,'--label','abyssus.storage='+self.launch['storageId'],'--init','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--user',f'{os.getuid()}:{os.getgid()}','--tmpfs','/tmp:size=128m,mode=1777','-p','127.0.0.1::3000','-e','HARNESS_EXECUTION_MODE=container','-e','HARNESS_DESKTOP=1','-e','HARNESS_STORAGE_ID='+self.launch['storageId']]
+        args=['create','--name',self.owner['name'],'--label','abyssus.desktop='+token,'--label','abyssus.storage='+self.launch['storageId'],'--init','--network','bridge','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--user',f'{os.getuid()}:{os.getgid()}','--tmpfs','/tmp:size=128m,mode=1777','-p','127.0.0.1::3000','-e','HARNESS_EXECUTION_MODE=container','-e','HARNESS_DESKTOP=1','-e','HARNESS_STORAGE_ID='+self.launch['storageId']]
         for source,target,readonly in [('state','/abyssus',False),('config','/abyssus/profile/config',False),('workspace','/workspace',False),('runtime/control','/run/abyssus-broker',True)]:args+=['--mount',f'type=bind,src={self.storage/source},dst={target}'+(',readonly' if readonly else '')]
         container=self.call([*args,self.launch['controllerImage']]).strip()
         require(re.fullmatch('[a-f0-9]{64}',container),'INVALID_CONTAINER_ID');self.save({**self.owner,'id':container,'phase':'created'})

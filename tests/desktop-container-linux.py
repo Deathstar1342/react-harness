@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import selectors
 import subprocess
 import sys
 import tempfile
@@ -23,18 +24,30 @@ def docker(*args):return subprocess.check_output(['docker',*args],env=ENV,text=T
 context=docker('context','show');engine=json.loads(docker('info','--format','{{json .}}'))
 launch={'storage':str(STORAGE),'mode':'initialize','storageId':str(uuid.uuid4()),'context':context,'engineId':engine['ID'],'controllerImage':docker('image','inspect','abyssus-controller:m28','--format','{{.Id}}'),'workerImage':docker('image','inspect','abyssus-worker:m29','--format','{{.Id}}'),'key':secrets.token_hex(32),'token':secrets.token_hex(32),'launchId':str(uuid.uuid4())}
 def check(name,value=True):assert value,name;checks.append(name);print('PASS M31:',name,flush=True)
+def private_line(timeout):
+    # Byte-level deadline covers a peer that sends only part of a JSON frame.
+    end=time.monotonic()+timeout;raw=bytearray()
+    with selectors.DefaultSelector() as selector:
+        selector.register(child.stdout,selectors.EVENT_READ)
+        while not raw.endswith(b'\n'):
+            remaining=end-time.monotonic();assert remaining>0 and selector.select(remaining),'private reply timeout'
+            byte=os.read(child.stdout.fileno(),1);assert byte,'private reply EOF';raw.extend(byte)
+            assert len(raw)<=262144,'private reply limit'
+    return raw.decode()
+
+
 def start():
     global child,ready
     child=subprocess.Popen([sys.executable,'-I','-B',str(ROOT/'containers/broker/support_entry.py')],cwd=BASE,env=ENV,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
     child.stdin.write(json.dumps(launch)+'\n');child.stdin.flush()
-    raw=child.stdout.readline(262145);assert len(raw)<=262144 and raw.endswith('\n'),'bounded ready frame'
+    raw=private_line(240)
     result=json.loads(raw);assert 'ready' in result,('supervisor startup',result)
     ready=result['ready'];return ready
 
 def request(op):
     global sequence
     sequence+=1;child.stdin.write(json.dumps({'id':sequence,'request':op})+'\n');child.stdin.flush()
-    raw=child.stdout.readline(262145);assert len(raw)<=262144 and raw.endswith('\n'),'bounded RPC frame'
+    raw=private_line(400 if op['op']=='drain' else 120)
     result=json.loads(raw);assert result.get('id')==sequence and 'error' not in result,('supervisor RPC',result)
     return result['result']
 

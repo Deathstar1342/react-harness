@@ -3,7 +3,7 @@ import contextlib
 import hashlib
 import re
 import json
-import os
+from native_io import fs as os, private_fd
 from pathlib import Path
 import secrets
 import stat
@@ -24,7 +24,8 @@ def private_json(file, limit=MAX_MANIFEST):
         fd=os.open(file.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         try:
             info=os.fstat(fd)
-            require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.getuid() and info.st_mode & 0o077 == 0 and info.st_size <= limit, 'UNSAFE_TRANSFER_RECORD')
+            require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= limit, 'UNSAFE_TRANSFER_RECORD')
+            private_fd(fd)
             with os.fdopen(os.dup(fd), 'r') as stream:
                 return json.load(stream)
         finally:
@@ -50,7 +51,7 @@ def area(storage):
         directory.mkdir(mode=0o700, exist_ok=True)
         with root_handle(directory) as fd:
             info=os.fstat(fd)
-            require(info.st_uid == os.getuid() and info.st_mode & 0o077 == 0, 'UNSAFE_TRANSFER_STORAGE')
+            private_fd(fd)
     return result
 
 
@@ -66,6 +67,12 @@ MAX_LINEAGE = 1024**2
 def lineage_lock(base, wait=False):
     # Every host process uses this same lock. Broker admission never waits while
     # holding its own lock; the copy thread waits before taking the broker lock.
+    if os.name=='nt':
+        from windows_handles import exclusive_lock
+        try:
+            with exclusive_lock(Path(base)/'origins.lock',wait):yield
+        except BlockingIOError:raise Denied('TRANSFER_LINEAGE_BUSY') from None
+        return
     import fcntl
     with root_handle(base) as parent:
         fd=os.open('origins.lock',os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,0o600,dir_fd=parent)
@@ -92,7 +99,7 @@ def lineage(base, storage_id):
             require(type(item['ticketId']) is str and UUID.fullmatch(item['ticketId']) and item['ticketId'] not in seen,'TRANSFER_LINEAGE_CHANGED');seen.add(item['ticketId'])
             source=item['source']
             require(type(source) is str and len(source.encode())<=4096 and Path(source).is_absolute() and source==os.path.normpath(source) and '\x00' not in source,'TRANSFER_LINEAGE_CHANGED')
-            require(type(item['identity']) is list and len(item['identity'])==2 and all(type(i) is str and re.fullmatch(r'[0-9]{1,30}',i) for i in item['identity']),'TRANSFER_LINEAGE_CHANGED')
+            require(type(item['identity']) is list and len(item['identity'])==2 and all(type(i) is str and re.fullmatch(r'[0-9]{1,39}' if os.name=='nt' else r'[0-9]{1,30}',i) for i in item['identity']),'TRANSFER_LINEAGE_CHANGED')
         return index
     except Denied: raise
     except Exception: raise Denied('TRANSFER_LINEAGE_CHANGED') from None
@@ -108,6 +115,10 @@ def save_lineage(base,index):
 
 
 def independent_mount(path):
+    if os.name=='nt':
+        # Full ancestor traversal rejects junctions and volume mount reparses.
+        with root_handle(path):pass
+        return
     # Only the most-specific containing mount matters: ordinary '/'-rooted
     # filesystems remain supported. A subtree bind/subvolume has another root.
     # Full-filesystem aliases are handled by ancestor device/inode comparison.
@@ -128,7 +139,7 @@ def protect_originals(index,destination):
     independent_mount(destination.parent)
     identities=set()
     for ancestor in (destination.parent,*destination.parent.parents):
-        if ancestor==Path('/'): continue
+        if ancestor==Path(ancestor.anchor): continue
         with root_handle(ancestor) as fd:identities.add(tuple(stamp(os.fstat(fd))[:2]))
     for origin in index['roots']:
         source=Path(origin['source'])

@@ -59,7 +59,15 @@ if os.name=='nt':
         def stat(self,value,*,dir_fd=None,follow_symlinks=True):
             name=self.path_for(value,dir_fd)
             with PinnedPath(name) as pin:
-                result=os.stat(name,follow_symlinks=False)
+                # Python 3.13 Windows path stat uses creation time for ctime,
+                # while fstat uses change time. Always measure the held handle;
+                # never discard ctime or substitute birth time for change checks.
+                duplicate=W.HANDLE()
+                if not k.DuplicateHandle(k.GetCurrentProcess(),pin.handle,k.GetCurrentProcess(),C.byref(duplicate),0,False,2):raise OSError(C.get_last_error(),'HANDLE_DUPLICATION_FAILED')
+                try:fd=msvcrt.open_osfhandle(duplicate.value,os.O_BINARY|os.O_RDONLY)
+                except BaseException:k.CloseHandle(duplicate);raise
+                try:result=os.fstat(fd)
+                finally:os.close(fd)
                 if str(result.st_dev)!=pin.identity['volume'] or result.st_ino!=int.from_bytes(bytes.fromhex(pin.identity['fileId']),'little'):raise ValueError('NATIVE_STAT_IDENTITY_CHANGED')
                 return result
         def fstat(self,fd):return os.fstat(fd)
