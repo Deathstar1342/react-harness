@@ -13,7 +13,8 @@ TREES = ('usr/lib/python3.11', 'usr/lib/python3/dist-packages', 'usr/local/lib/p
          'usr/lib/x86_64-linux-gnu', 'usr/lib/git-core', 'usr/share/git-core',
          'usr/local/lib/node_modules', 'opt/abyssus-worker', 'opt/abyssus-packages',
          'etc/ld.so.conf.d')
-FILES = {'usr/bin/python3', 'usr/bin/python3.11', 'usr/bin/git', 'usr/local/bin/node',
+FILES = {'usr/bin/env', 'usr/lib/python311.zip', 'usr/local/lib/python311.zip',
+         'usr/lib64/ld-linux-x86-64.so.2', 'usr/bin/python3', 'usr/bin/python3.11', 'usr/bin/git', 'usr/local/bin/node',
          'etc/ld.so.cache', 'etc/ld.so.conf', 'etc/ld.so.preload', 'lib', 'lib64', 'bin', 'sbin',
          'usr/lib/abyssus-helper/apt.conf', 'usr/lib/abyssus-helper/empty-apt-config'}
 PARENTS = {str(parent) for item in (*TREES, *FILES) for parent in PurePosixPath(item).parents if str(parent) != '.'}

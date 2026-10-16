@@ -28,6 +28,9 @@ class Attestation(unittest.TestCase):
         added=a.manifest(archive([('usr/lib/python3.11/sitecustomize.py',b'evil')]))
         self.assertNotEqual(baseline,added)
         self.assertIn('usr/lib/python3.11/sitecustomize.py',added)
+        for path in ('usr/bin/env','usr/lib/python311.zip','usr/local/lib/python311.zip','usr/lib64/ld-linux-x86-64.so.2'):
+            with self.subTest(path=path):
+                self.assertNotEqual(baseline,a.manifest(archive([(path,b'injected bootstrap')])) )
     def test_duplicate_traversal_and_byte_limit_reject_without_extraction(self):
         for extras in [[('usr/bin/git',b'replaced')],[('../outside',b'x')],[('/absolute',b'x')],[('./usr/bin/python',b'x')]]:
             with self.subTest(extras=extras),self.assertRaises(Denied):a.manifest(archive(extras))
