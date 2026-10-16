@@ -24,7 +24,7 @@ it('timeout/late reply and worker exit never acknowledge a following operation',
 },10000);
 it('Store units share one entry check and final COMMIT veto rolls back without events',async()=>{
  const t=await peer(),root=mkdtempSync(path.join(tmpdir(),'native-state-')),filename=path.join(root,'state.sqlite');
- const authority=await import('../server/native-storage.js');const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},verifyRoots:()=>{},permits:(file:string)=>file===root||file.startsWith(root+path.sep)} as unknown as NativeBindPolicy;
+ const authority=await import('../server/native-storage.js');const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state:root,config:path.join(root,'config'),control:path.join(root,'control'),workspace:path.join(root,'workspace')},verifyRoots:()=>{},permits:(file:string)=>file===root||file.startsWith(root+path.sep)} as unknown as NativeBindPolicy;
  authority.installNativeStorage(policy,async()=>{throw new Error('workspace authority intentionally unavailable');},t.descriptor);
  const {Store}=await import('../server/store.js');const store=new Store(filename);const project=store.createProject('Fixture',root),chat=store.createChat(project.id,'Fixture','balanced');let events=0;store.changes.on('event',()=>events++);
  try{
@@ -38,7 +38,7 @@ it('Store units share one entry check and final COMMIT veto rolls back without e
 
 it('async gate expiry poisons the private-state worker without a renewed database observation',async()=>{
  const t=await peer(),root=mkdtempSync(path.join(tmpdir(),'native-poison-')),filename=path.join(root,'state.sqlite');let clock=Date.now();const date=vi.spyOn(Date,'now').mockImplementation(()=>clock);
- const authority=await import('../server/native-storage.js');const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
+ const authority=await import('../server/native-storage.js');const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state:root,config:path.join(root,'config'),control:path.join(root,'control'),workspace:path.join(root,'workspace')},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
  authority.installNativeStorage(policy,async()=>({...policy.record,gateId:'c'.repeat(64),issuedAt:clock,expiresAt:clock+1000}),t.descriptor);
  const {Store}=await import('../server/store.js');const store=new Store(filename),before=Atomics.load(t.words,0);
  try{await authority.runNativeOperation(()=>{clock+=1001;expect(()=>authority.assertNativePath('/abyssus')).toThrow(/freshness/);});expect(()=>store.setState('forbidden',true)).toThrow(/recovery/);expect(Atomics.load(t.words,0)).toBe(before);}finally{store.close();date.mockRestore();}
@@ -46,7 +46,7 @@ it('async gate expiry poisons the private-state worker without a renewed databas
 
 it('streaming private-state callbacks after eleven seconds use new bounded units without workspace authority',async()=>{
  const t=await peer(),root=mkdtempSync(path.join(tmpdir(),'native-long-')),filename=path.join(root,'state.sqlite');
- const authority=await import('../server/native-storage.js');const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
+ const authority=await import('../server/native-storage.js');const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state:root,config:path.join(root,'config'),control:path.join(root,'control'),workspace:path.join(root,'workspace')},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
  authority.installNativeStorage(policy,async()=>{throw new Error('No workspace scope granted');},t.descriptor);
  const {Store}=await import('../server/store.js'),{nativeOutputBuffer}=await import('../server/native-output-buffer.js');const store=new Store(filename),project=store.createProject('Long stream',root),chat=store.createChat(project.id,'Long stream','balanced');
  try{
@@ -62,7 +62,7 @@ it('streaming private-state callbacks after eleven seconds use new bounded units
 it.each([false,true])('completed import after eleven seconds starts one exact redemption phase; lost reply=%s is not replayed',async lost=>{
  const t=await peer(),root=mkdtempSync(path.join(tmpdir(),'native-copy-')),workspace=path.join(root,'workspace'),projectId=randomUUID();mkdirSync(workspace);const folder=path.join(workspace,projectId);mkdirSync(folder);
  let clock=Date.now();const date=vi.spyOn(Date,'now').mockImplementation(()=>clock),hostDirname=path.dirname.bind(path),dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(hostDirname):undefined,absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockReturnValue(true):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;
- const authority=await import('../server/native-storage.js'),policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{workspace},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
+ const authority=await import('../server/native-storage.js'),policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state:root,config:path.join(root,'config'),control:path.join(root,'control'),workspace:path.join(root,'workspace')},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
  const check=vi.fn(async()=>({...policy.record,gateId:'e'.repeat(64),issuedAt:clock,expiresAt:clock+10000}));authority.installNativeStorage(policy,check,t.descriptor);
  const {Store}=await import('../server/store.js'),{ProjectTransfers}=await import('../server/project-transfers.js'),store=new Store(path.join(root,'state.sqlite'));const identity=lstatSync(folder,{bigint:true}),ops:string[]=[];
  const receipt={id:randomUUID(),kind:'import',project:projectId,phase:'succeeded',code:'COMPLETE',residue:false,manifestDigest:'a'.repeat(64),files:1,bytes:4,excludedCount:0,excluded:[],history:false,storageId:t.descriptor.storageId,sessionId:t.descriptor.sessionId,identity:[identity.dev.toString(),identity.ino.toString()]};
@@ -74,4 +74,22 @@ it.each([false,true])('completed import after eleven seconds starts one exact re
   expect(check).toHaveBeenCalledTimes(2);expect(ops).toEqual(['transfer_begin','transfer_receipt']);
   await expect(service.import('Retry',code,new AbortController().signal)).rejects.toThrow('already consumed');expect(ops).toHaveLength(2);
  }finally{store.close();date.mockRestore();absolute?.mockRestore();normalize?.mockRestore();dirname?.mockRestore();}
+});
+
+it('target grants bind exact Unicode targets and refuse root-only or changed digest replies',async()=>{
+ for(const mode of [0,1,2]){
+  const t=await peer(),check=new NativeStateCheck(t.descriptor,()=>{});observers.push(check);Atomics.store(t.words,3,mode);
+  const targets=[{root:'state' as const,relative:'profile/café.sqlite',kind:'sqlite' as const,mode:'existing' as const}];
+  if(mode===0){check.check(targets);expect(check.checks).toBe(1);}else{expect(()=>check.check(targets)).toThrow(/recovery/);expect(()=>check.check()).toThrow(/recovery/);}
+ }
+});
+it('invalid private selectors never reach the host and an unmapped private Store poisons authority',async()=>{
+ const t=await peer(),check=new NativeStateCheck(t.descriptor,()=>{});observers.push(check);
+ for(const relative of ['../escape','CONIN$','COM¹.txt','a:stream','a/../b','a\\b'])expect(()=>check.check([{root:'state',relative,kind:'file',mode:'existing'}])).toThrow();
+ expect(Atomics.load(t.words,0)).toBe(0);
+ const authority=await import('../server/native-storage.js'),root=mkdtempSync(path.join(tmpdir(),'native-unmapped-'));
+ const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state:root,config:root+'/config',control:root+'/control',workspace:root+'/workspace'},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
+ authority.installNativeStorage(policy,async()=>{},t.descriptor);
+ expect(()=>authority.nativePrivateUnit(()=>authority.nativePrivatePath(path.join(tmpdir(),'outside.sqlite'),true))).toThrow(/outside/);
+ expect(()=>authority.nativePrivateUnit(()=>{})).toThrow(/recovery/);expect(Atomics.load(t.words,0)).toBe(0);
 });

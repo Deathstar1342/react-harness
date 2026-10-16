@@ -16,6 +16,7 @@ try{
  await runNativeOperation(async()=>{
   for(const root of ['/initialize/state','/initialize/config','/initialize/workspace']){
    assertNativePath(root,false);
+   assertNativePath(root+'/.storage-id',false);
    const entries=readdirSync(root);if(entries.length!==1||entries[0]!=='.storage-id'||readFileSync(root+'/.storage-id','utf8')!==policy.record.storageId+'\n')throw new Error('Empty native scaffold changed');
   }
   const profile=await prepareProfile({env:{HARNESS_HOME:'/initialize/state',HARNESS_INIT:'1'},cwd:'/app',checkpoint:()=>assertNativePath('/initialize/state')});

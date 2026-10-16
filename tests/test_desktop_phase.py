@@ -14,10 +14,11 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'containers/broker'))
 @unittest.skipUnless(os.name=='nt','Native phase files and actual Windows private DACLs')
 class Phase(unittest.TestCase):
     def setUp(self):
-        from windows_handles import privatize_empty,NativeStorageGuard
+        from windows_handles import privatize_empty,NativeStorageGuard,PinnedPath
         from native_phase import NativePhase
         self.root=Path(tempfile.mkdtemp(prefix='m31-phase-',dir=os.environ.get('M31_TEST_ROOT'))).resolve();privatize_empty(self.root)
         for name in ('state','config','workspace','runtime','runtime/control'):(self.root/name).mkdir()
+        with PinnedPath(self.root/'runtime/native-phase.sqlite',write=True,create=True,directory=False) as pin:pin.private()
         self.guard=NativeStorageGuard(self.root);self.calls=[]
         self.launch={'storageId':str(uuid.uuid4()),'launchId':str(uuid.uuid4()),'context':'desktop-linux','engineId':'fixture-engine','controllerImage':'sha256:'+'a'*64}
         class Docker:
@@ -71,6 +72,21 @@ class Phase(unittest.TestCase):
             with peer.makefile('rb') as stream:reply=decode(stream.readline(16385))
         self.assertFalse(reply['ok']);self.assertEqual(self.calls,[])
         self.assertTrue(self.call(current,'redeem_storage',{'proofId':policy['proofId']})['ok']);self.assertTrue(self.call(current,'hello',{})['ok']);self.assertEqual(self.calls,['hello'])
+    def test_exact_target_wire_rejects_unredeemed_and_binds_phase_session(self):
+        from storage_targets import target_digest
+        self.phase.activate('initialize');control=self.root/'runtime/control'
+        descriptor=json.loads((control/'session.json').read_text());policy=json.loads((control/'native-bind.json').read_text())
+        targets=[{'root':'state','relative':'fixture.sqlite','kind':'sqlite','mode':'create'}]
+        self.assertFalse(self.call(descriptor,'storage_targets',{'targets':targets})['ok'])
+        self.assertTrue(self.call(descriptor,'redeem_storage',{'proofId':policy['proofId']})['ok'])
+        result=self.call(descriptor,'storage_targets',{'targets':targets});self.assertTrue(result['ok'],result)
+        self.assertEqual(result['result']['targetsDigest'],target_digest(targets,self.phase.binding,descriptor['sessionId'],'initialize'))
+        self.assertNotIn('targetsDigest',self.call(descriptor,'storage_check',{})['result'])
+        (self.root/'state/fixture.sqlite').write_bytes(b'');targets[0]['mode']='existing'
+        self.assertTrue(self.call(descriptor,'storage_targets',{'targets':targets})['ok'])
+        (self.root/'state/fixture.sqlite').unlink();targets[0]['mode']='create'
+        self.assertFalse(self.call(descriptor,'storage_targets',{'targets':targets})['ok'])
+        self.assertFalse(self.call(descriptor,'storage_check',{})['ok'])
     def test_lost_route_proof_never_retries_activation(self):
         with patch('native_phase.prove_server',side_effect=TimeoutError()) as observed:
             with self.assertRaises(TimeoutError):self.phase.activate('initialize')

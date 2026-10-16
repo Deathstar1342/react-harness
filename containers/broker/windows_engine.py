@@ -71,6 +71,7 @@ def fixed_engine_query(args):
 
 
 class WindowsEngine(Docker):
+    native_journals=True
     def __init__(self,storage,storage_id,source,context,engine_id,worker_image):
         require(os.name=='nt','WINDOWS_ENGINE_REQUIRED')
         require(re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',context),'INVALID_ENGINE_CONTEXT')
@@ -153,5 +154,5 @@ class WindowsEngine(Docker):
     def storage_barrier(self):
         require(self.guard is not None,'NATIVE_STORAGE_NOT_BOUND')
         if self.authority:self.authority()
-        else:self.guard.verify()
+        else:self.guard.verify_roots()
     def close_engine(self):self.cli.close()

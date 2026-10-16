@@ -38,10 +38,15 @@ class WindowsSupervisor:
             if launch['mode']=='initialize':
                 self.scaffold=WindowsScaffold(self.storage,launch['storageId'],launch['launchId']);self.guard=self.scaffold.begin()
             else:
-                verify_committed_scaffold(self.storage,launch['storageId']);self.guard=NativeStorageGuard(self.storage);self.guard.verify()
+                verify_committed_scaffold(self.storage,launch['storageId']);self.guard=NativeStorageGuard(self.storage);self.guard.verify_roots()
             binding={key:launch[key] for key in ('storageId','engineId','context','controllerImage','workerImage','runtimeDigest','launchId')};binding['sourceDigest']=self.payload.source_digest
             # Lease and durable inactive operator intent precede any Docker effect.
             self.operator=NativeOperator(self.storage,binding,self.guard,self.dispatch)
+            # Fresh scaffold is the sole authority to create fixed host journals.
+            with PinnedPath(self.storage/'runtime',directory=True) as parent:
+                parent.private()
+                for name in ('worker-resources.sqlite','native-phase.sqlite','worker-journal.sqlite'):
+                    with PinnedPath(self.storage/'runtime'/name,write=launch['mode']=='initialize',create=launch['mode']=='initialize',directory=False,share_write=True) as pin:pin.private()
             self.docker=WindowsEngine(self.storage,launch['storageId'],self.source,launch['context'],launch['engineId'],launch['workerImage']);self.docker.attach(self.guard)
             require(self.docker.source_digest==self.payload.source_digest,'NATIVE_SOURCE_CHANGED')
             require(self.docker.call(['image','inspect',launch['controllerImage'],'--format','{{.Id}}']).strip()==launch['controllerImage'],'CONTROLLER_IMAGE_CHANGED')
@@ -93,9 +98,7 @@ class WindowsSupervisor:
             self.docker.resources.remove(container);self.phase.revoke();self.scaffold.finish()
         # Image export/egress setup precedes short-lived controller route proofs.
         self.docker.activate_workers();session_id=str(uuid.uuid4());database=self.storage/'runtime/worker-journal.sqlite'
-        if not database.exists():
-            with PinnedPath(database,write=True,create=True,directory=False) as pin:pin.private()
-        self.journal=Journal(str(database),session_id);self.broker=Broker(self.journal,self.docker);area(self.storage);self.broker.transfers.verify_journal()
+        self.journal=Journal(str(database),session_id,persistent=True);self.broker=Broker(self.journal,self.docker);area(self.storage);self.broker.transfers.verify_journal()
         self.phase.publish('desktop-launch.json',{'version':1,**{key:self.launch[key] for key in ('storageId','launchId','key','token')}})
         digest,session_id,slots=self.phase.activate('controller',self.worker_dispatch,session_id)
         self.docker.bind_project_mapping(self.phase.binding,session_id,slots['workspace']);self.docker.authority=self.phase.session.fresh
@@ -104,7 +107,7 @@ class WindowsSupervisor:
         self.owned(container);self.save_owner({**self.owner,'phase':'start-intent'});self.docker.call(['start',container]);self.save_owner({**self.owner,'phase':'running'})
         end=time.monotonic()+45
         while True:
-            self.guard.verify();info=self.owned(container);require(info['State']['Running'],'NATIVE_CONTROLLER_EXITED')
+            self.guard.verify_roots();info=self.owned(container);require(info['State']['Running'],'NATIVE_CONTROLLER_EXITED')
             try:
                 value=private_json(self.storage/'state/backend.json',4096)
                 if value.get('key')==self.launch['key'] and value.get('identity',{}).get('state')=='ready':break

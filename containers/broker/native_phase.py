@@ -6,6 +6,7 @@ import threading
 import uuid
 from protocol import Journal,PROTOCOL,canonical,require,UUID
 from native_session import NativeSession
+from storage_targets import PrivateTargets
 from storage_proof import StorageProofs
 from storage_probe import FixedStorageProbe
 from route_probe import prove_server,verify_route
@@ -30,12 +31,10 @@ class NativePhase:
         # Re-prove the same bound socket with the new phase session and nonce.
         self.server=prove_server(self.docker,self.launch['controllerImage'],session_id,self.server)
         database=self.docker.storage/'runtime/native-phase.sqlite'
-        if not database.exists():
-            with PinnedPath(database,write=True,create=True,directory=False) as pin:pin.private()
-        self.journal=Journal(str(database),session_id)
+        self.journal=Journal(str(database),session_id,persistent=True)
         proofs=StorageProofs(self.binding,secrets.token_hex(32),self.guard,FixedStorageProbe(self.docker,self.launch['controllerImage'],self.docker.uid,self.docker.gid))
         proof_id=proofs.issue();mapping=proofs.pending[proof_id][0]
-        self.session=NativeSession(self.journal,phase,self.binding,key,proofs,proof_id,lambda:verify_route(self.server),self.docker.verify_engine,dispatch)
+        self.session=NativeSession(self.journal,phase,self.binding,key,proofs,proof_id,lambda:verify_route(self.server),self.docker.verify_engine,dispatch,targets=PrivateTargets(self.guard))
         route=self.server.route
         policy={'version':1,'revision':1,'platform':'win32','storageClass':'native-ntfs','phase':phase,**self.binding,'proofId':proof_id,'probeRevision':1,'issuedAt':mapping['issuedAt'],'expiresAt':mapping['expiresAt'],'slots':mapping['linux'],'broker':{'sessionId':session_id,'host':route['connectIP'],'port':route['port'],'route':route['proof']}}
         descriptor={'protocol':PROTOCOL,'sessionId':session_id,'key':key,'storageId':self.launch['storageId'],'launchId':self.launch['launchId'],'phase':phase,'transport':'tcp','host':route['connectIP'],'port':route['port']}

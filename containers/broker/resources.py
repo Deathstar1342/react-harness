@@ -4,15 +4,13 @@ import re
 import sqlite3
 import threading
 import uuid
-from protocol import canonical, require
+from protocol import canonical, require, open_database
 
 class Resources:
     def __init__(self, docker):
         self.docker = docker
         self.lock = threading.RLock()
-        self.db = sqlite3.connect(str(docker.storage / 'runtime/worker-resources.sqlite'), check_same_thread=False)
-        self.db.execute('PRAGMA journal_mode=DELETE')
-        self.db.execute('PRAGMA synchronous=FULL')
+        self.db = open_database(docker.storage / 'runtime/worker-resources.sqlite',getattr(docker,'native_journals',False))
         self.db.execute('CREATE TABLE IF NOT EXISTS resources(token TEXT PRIMARY KEY,data TEXT NOT NULL)')
 
     def save(self, row):

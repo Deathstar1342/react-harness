@@ -89,6 +89,7 @@ export class ProviderSettingsFile {
       try { writeFileSync(fd,text); fsyncSync(fd); temporaryIdentity=fstatSync(fd); } finally { closeSync(fd); }
       const latest = this.read();
       if (latest.text !== current.text || Boolean(latest.stat) !== Boolean(current.stat) || latest.stat && current.stat && !same(latest.stat,current.stat)) throw fail('Backend .env changed before saving');
+      assertNativePath(temporary);
       const candidate=lstatSync(temporary);
       if (!candidate.isFile() || candidate.isSymbolicLink() || candidate.nlink!==1 || !same(candidate,temporaryIdentity)) throw fail('Temporary configuration file changed before saving');
       assertNativePath(this.filename,true,true);

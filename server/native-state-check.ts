@@ -1,3 +1,4 @@
+import {nativeTargetsSchema,type NativeTarget} from './native-private-targets.js';
 import { Worker } from 'node:worker_threads';
 export interface NativeObservation {protocol:'abyssus-worker-v1';sessionId:string;key:string;storageId:string;launchId:string;phase:'initialize'|'controller';transport:'tcp';host:string;port:number}
 export class NativeStateCheck {
@@ -15,9 +16,10 @@ export class NativeStateCheck {
  poison(){if(this.failed)return;this.failed=true;Atomics.store(this.words,3,1);this.onPoison();}
  private refuse():never{this.poison();throw new Error('Native private-state observation failed; explicit recovery required');}
  assertHealthy(){if(this.failed||this.closed||Atomics.load(this.words,3))this.refuse();}
- check(){
+ check(targets?:NativeTarget[]){
+  if(targets)nativeTargetsSchema.parse(targets);
   this.assertHealthy();if(this.generation>=0x7ffffffe)this.refuse();const generation=++this.generation,started=performance.now();this.checks++;
-  Atomics.store(this.words,0,generation);Atomics.store(this.words,2,0);this.worker.postMessage({generation});
+  Atomics.store(this.words,0,generation);Atomics.store(this.words,2,0);this.worker.postMessage(targets?{generation,targets}:{generation});
   const deadline=started+3000;
   while(Atomics.load(this.words,1)!==generation&&!Atomics.load(this.words,3)){
    const observed=Atomics.load(this.words,1);if(observed===generation)break;const remaining=deadline-performance.now();if(remaining<=0)this.refuse();Atomics.wait(this.words,1,observed,remaining);

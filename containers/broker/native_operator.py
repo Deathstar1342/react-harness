@@ -15,7 +15,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from protocol import require,exact,decode,canonical,mac,digest,HEX,UUID,Denied,now
+from protocol import open_database,require,exact,decode,canonical,mac,digest,HEX,UUID,Denied,now
 from transfer_service import private_json,write_new
 from storage_proof import validate_native
 
@@ -82,7 +82,7 @@ def read_record(area):
 class NativeOperator:
     def __init__(self,storage,binding,guard,dispatch):
         from windows_handles import PinnedPath,exclusive_lock
-        validate_binding(binding);self.guard=guard;native=guard.verify();self.binding=dict(binding);self.dispatch=dispatch
+        validate_binding(binding);self.guard=guard;native=guard.verify_roots();self.binding=dict(binding);self.dispatch=dispatch
         self.stack=contextlib.ExitStack();self.lock=threading.RLock();self.server=None;self.db=None;self.closed=False;self.failure=None
         self.area=Path(storage)/'runtime/operator';self.area.mkdir(exist_ok=True)
         self.file=self.area/'current.json'
@@ -96,6 +96,8 @@ class NativeOperator:
             else:
                 require(set(p.name for p in self.area.iterdir())=={'lifetime.lock'},'OPERATOR_PARTIAL_JOURNAL')
                 with exclusive_lock(self.area/'record.lock'):pass
+            # Full scan only after the previous owner is drained and its lease is held.
+            self.guard.verify()
             require(not any(Path(storage).glob('.native-operator-*.pending')) and not (Path(storage)/'.native-operator-intent.json').exists(),'OPERATOR_PARTIAL_PUBLICATION')
             self.record={'version':1,'binding':self.binding,'native':native,'instanceId':str(uuid.uuid4()),'sessionId':str(uuid.uuid4()),'key':secrets.token_hex(32),'host':'127.0.0.1','port':None,'phase':'intent'}
             self.save()
@@ -104,7 +106,7 @@ class NativeOperator:
             with PinnedPath(database,write=True,create=True,directory=False) as pin:pin.private()
             from windows_handles import operator_record_lock
             with operator_record_lock(self.area):
-                self.db=sqlite3.connect(str(database),check_same_thread=False);self.db.execute('PRAGMA synchronous=FULL');self.db.execute('CREATE TABLE requests(nonce TEXT PRIMARY KEY,state TEXT NOT NULL)');self.db.commit()
+                self.db=open_database(database,True);self.db.execute('CREATE TABLE requests(nonce TEXT PRIMARY KEY,state TEXT NOT NULL)');self.db.commit()
             self.server=LocalServer(('127.0.0.1',0),self.handler())
         except BaseException:
             if self.server:self.server.server_close()
@@ -117,7 +119,7 @@ class NativeOperator:
     def save(self):
         from windows_handles import rename_handle,operator_record_lock,remove_owned_record,PinnedPath
         import copy
-        self.guard.verify()
+        self.guard.verify_roots()
         # Intent and staging are private root children, outside every mount and
         # the descendant iterator; interruption prevents another start.
         root=self.area.parent.parent;temporary=root/('.native-operator-'+str(uuid.uuid4())+'.pending');intent=root/'.native-operator-intent.json'
@@ -132,14 +134,14 @@ class NativeOperator:
     def fresh(self):
         require(not self.closed and not self.failure and self.record['phase']=='active','OPERATOR_REVOKED')
         try:
-            require(self.guard.verify()==self.record['native'],'OPERATOR_STORAGE_CHANGED')
+            require(self.guard.verify_roots()==self.record['native'],'OPERATOR_STORAGE_CHANGED')
             require(read_record(self.area)==self.record,'OPERATOR_OWNER_CHANGED')
         except BaseException:
             self.failure=True
             # Never overwrite a changed owner's record or write through lost ACL
             # authority. In-memory revocation is unconditional and monotonic.
             try:
-                if self.guard.verify()==self.record['native'] and read_record(self.area)==self.record:
+                if self.guard.verify_roots()==self.record['native'] and read_record(self.area)==self.record:
                     self.record['phase']='uncertain';self.save()
             except Exception:pass
             raise
@@ -162,7 +164,7 @@ class NativeOperator:
                 result=self.dispatch(request)
                 if request['op']=='drain':require(result=={'stopped':True},'OPERATOR_DRAIN_UNVERIFIED')
                 require(len(canonical(result).encode())<=LIMIT//2,'OPERATOR_REPLY_LIMIT')
-                self.guard.verify()
+                self.guard.verify_roots()
                 with operator_record_lock(self.area),self.db:self.db.execute('UPDATE requests SET state=? WHERE nonce=?',('complete',nonce))
                 return result
             except BaseException:
@@ -201,7 +203,7 @@ class NativeOperator:
 
 def descriptor(storage,binding,guard):
     validate_binding(binding);record=read_record(Path(storage)/'runtime/operator');validate_record(record)
-    require(record['binding']==binding and record['native']==guard.verify() and record['phase']=='active','OPERATOR_OWNER_CHANGED')
+    require(record['binding']==binding and record['native']==guard.verify_roots() and record['phase']=='active','OPERATOR_OWNER_CHANGED')
     return record
 
 
@@ -224,7 +226,7 @@ def wait_drained(storage,record,guard,timeout=20):
     from windows_handles import exclusive_lock
     validate_record(record);area=Path(storage)/'runtime/operator';end=time.monotonic()+timeout
     while True:
-        require(guard.verify()==record['native'],'OPERATOR_STORAGE_CHANGED')
+        require(guard.verify_roots()==record['native'],'OPERATOR_STORAGE_CHANGED')
         current=read_record(area);validate_record(current)
         require(all(current[key]==value for key,value in record.items() if key!='phase'),'OPERATOR_OWNER_CHANGED')
         require(current['phase'] in ('draining','drained'),'OPERATOR_DRAIN_UNCERTAIN')
@@ -234,7 +236,9 @@ def wait_drained(storage,record,guard,timeout=20):
                     require(read_record(area)==current,'OPERATOR_OWNER_CHANGED')
                     try:
                         with socket.create_connection((record['host'],record['port']),timeout=3):pass
-                    except ConnectionRefusedError:return {'stopped':True}
+                    except ConnectionRefusedError:
+                        guard.verify() # Exact drain and released lease precede this full recovery scan.
+                        return {'stopped':True}
                     raise Denied('OPERATOR_ENDPOINT_RETAINED')
             except BlockingIOError:pass
         require(time.monotonic()<end,'OPERATOR_DRAIN_UNCERTAIN');time.sleep(.05)

@@ -218,6 +218,8 @@ class NativeStorageGuard:
             if len({(v['volume'],v['fileId']) for v in self.evidence.values()})!=4:raise ValueError('STORAGE_SLOT_ALIAS')
         except BaseException:self.stack.close();raise
     def verify(self):
+        result=self.verify_roots();self.private_descendants();return result
+    def verify_roots(self):
         if self.root.private(protected_root=True)!=self.root_proof:raise ValueError('NATIVE_STORAGE_CHANGED')
         for handle,identity,security in self.ancestors:
             current=object_identity(handle);security_changed=security_fingerprint(handle)!=security
@@ -230,7 +232,6 @@ class NativeStorageGuard:
         for name,pin in self.pins.items():
             pin.verify()
             if pin.private()!=self.evidence[name]:raise ValueError('NATIVE_SLOT_CHANGED')
-        self.private_descendants()
         return {'root':self.root_proof,'slots':self.evidence}
     def private_descendants(self):
         # State/config/control are private classes; workspace contents are not

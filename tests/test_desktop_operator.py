@@ -111,8 +111,10 @@ class OperatorProcess(unittest.TestCase):
         from windows_handles import current_sid,NativeStorageGuard
         from test_desktop_windows import NativeHandles
         import windows_handles as native
-        file=self.root/'config/fixture-sensitive.json';file.write_text('{}')
         child,result=self.start();self.assertEqual(result,{'ready':True});self.record=self.load()
+        # Active status reads this exact private record; unrelated configuration
+        # now receives its own target proof when the controller accesses it.
+        file=self.root/'runtime/operator/current.json'
         helper=NativeHandles();helper.native=native;user=current_sid()
         helper.set_acl(file,f'O:{user}D:P(A;;FA;;;{user})(A;;FA;;;WD)')
         with self.assertRaises(Exception):request(self.record,{'op':'status'})

@@ -14,6 +14,7 @@ class Sessions(unittest.TestCase):
   outer=self
   class Guard:
    def verify(self):return dict(outer.native)
+   def verify_roots(self):return self.verify()
   class Proofs:
    guard=Guard()
    def consume(self,token,binding):

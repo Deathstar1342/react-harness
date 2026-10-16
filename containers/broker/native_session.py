@@ -9,10 +9,11 @@ import threading
 from protocol import PROTOCOL,MAX_WIRE,HEX,Denied,require,exact,decode,canonical,mac,now
 
 class NativeSession:
-    def __init__(self,journal,phase,binding,key,proofs,proof_id,verify_route,verify_engine,dispatch=None,clock=now):
+    def __init__(self,journal,phase,binding,key,proofs,proof_id,verify_route,verify_engine,dispatch=None,clock=now,targets=None):
         require(phase in ('initialize','controller'),'INVALID_NATIVE_PHASE')
         require(phase!='initialize' or dispatch is None,'INITIALIZER_DISPATCH_REFUSED')
         require(type(key) is str and HEX.fullmatch(key),'INVALID_NATIVE_KEY')
+        self.targets=targets
         self.journal=journal;self.phase=phase;self.binding=dict(binding);self.key=key
         self.proofs=proofs;self.proof_id=proof_id;self.mapping=None;self.verify_route=verify_route;self.verify_engine=verify_engine
         self.dispatch=dispatch;self.clock=clock;self.last_clock=clock();self.lock=threading.RLock();self.failed=False;self.revoked=False
@@ -40,13 +41,13 @@ class NativeSession:
             current=self.clock();require(current>=self.last_clock,'NATIVE_CLOCK_CHANGED');self.last_clock=current
             row=self.journal.db.execute('SELECT launch,phase,state FROM native_sessions WHERE session=?',(self.journal.session,)).fetchone()
             require(row==(self.binding['launchId'],self.phase,'active'),'NATIVE_SESSION_CHANGED')
-            self.verify_route();self.verify_engine();native=self.proofs.guard.verify()
+            self.verify_route();self.verify_engine();native=self.proofs.guard.verify_roots()
             if self.mapping:require(native==self.mapping['native'],'NATIVE_STORAGE_CHANGED')
         except BaseException:self.failed=True;raise
     def handle(self,envelope):
         with self.lock:
             self.fresh();op,body=self.journal.authenticate(envelope,self.key)
-            if self.phase=='initialize':require(op in ('redeem_storage','storage_check'),'INITIALIZER_OPERATION_REFUSED')
+            if self.phase=='initialize':require(op in ('redeem_storage','storage_check','storage_targets'),'INITIALIZER_OPERATION_REFUSED')
             if op=='redeem_storage':
                 exact(body,['proofId']);require(self.mapping is None and body['proofId']==self.proof_id,'PROOF_CONSUMED_OR_UNKNOWN')
                 try:self.mapping=self.proofs.consume(body['proofId'],self.binding)
@@ -56,6 +57,14 @@ class NativeSession:
             if op=='storage_check':
                 exact(body,[]);issued=self.clock()
                 return {'storageId':self.binding['storageId'],'launchId':self.binding['launchId'],'gateId':secrets.token_hex(32),'issuedAt':issued,'expiresAt':issued+10000}
+            if op=='storage_targets':
+                exact(body,['targets']);require(self.targets is not None,'PRIVATE_TARGETS_UNAVAILABLE')
+                from storage_targets import target_digest
+                bound=target_digest(body['targets'],self.binding,self.journal.session,self.phase)
+                try:self.targets.observe(body['targets'])
+                except BaseException:self.failed=True;raise
+                issued=self.clock()
+                return {'storageId':self.binding['storageId'],'launchId':self.binding['launchId'],'gateId':secrets.token_hex(32),'issuedAt':issued,'expiresAt':issued+10000,'targetsDigest':bound}
             require(self.phase=='controller' and self.dispatch is not None,'NATIVE_OPERATION_REFUSED')
             dispatch=self.dispatch
         # Do not hold phase/observation authority while a serialized broker
