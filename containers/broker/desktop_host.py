@@ -48,7 +48,16 @@ class DesktopHost:
 
     def call(self,args,timeout=30):
         p=subprocess.run(['docker','--context',self.launch['context'],*args],env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
-        require(p.returncode==0 and len(p.stdout)<=2*1024*1024, 'ENGINE_OPERATION_FAILED')
+        require(len(p.stdout)<=2*1024*1024, 'ENGINE_REPLY_LIMIT')
+        if p.returncode!=0:
+            # Fixed failure categories only: never include argv, engine stderr or storage/config text.
+            codes={'context':'ENGINE_CONTEXT_FAILED','info':'ENGINE_INFO_FAILED','image':'ENGINE_IMAGE_FAILED','run':'ENGINE_INITIALIZE_FAILED','create':'ENGINE_CREATE_FAILED','start':'ENGINE_START_FAILED'}
+            code=codes.get(args[0],'ENGINE_OPERATION_FAILED')
+            if args[0]=='run':
+                stderr=p.stderr[:262144]
+                for marker,category in ((b'ERR_MODULE_NOT_FOUND','ENGINE_INITIALIZE_MODULE_MISSING'),(b'Initialization refused or interrupted.','ENGINE_INITIALIZE_PROFILE_REFUSED'),(b'invalid mount config','ENGINE_INITIALIZE_MOUNT_REFUSED'),(b'permission denied','ENGINE_INITIALIZE_PERMISSION_REFUSED')):
+                    if marker in stderr:code=category;break
+            raise Denied(code)
         return p.stdout.decode('utf8')
 
     def engine(self):

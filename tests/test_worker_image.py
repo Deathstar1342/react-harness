@@ -1,5 +1,6 @@
 """Trusted desktop immutable image binding before resource recovery; engine replies doubled."""
 import json
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 import tempfile
@@ -16,6 +17,13 @@ class SelectedImage(unittest.TestCase):
             for value in ('latest','abyssus-worker:m29','sha256:'+'g'*64,42,'sha256:'+'a'*64+'\n'):
                 with self.assertRaises(Denied):Docker('unused','unused','unused','default',value)
             call.assert_not_called()
+
+    def test_failure_categories_are_fixed_and_never_replay(self):
+        host=object.__new__(DesktopHost);host.launch={'context':'fixture'};host.env={}
+        for args,stderr,expected in ((['image','inspect','unused'],b'PRIVATE_ACCOUNT_TEXT','ENGINE_IMAGE_FAILED'),(['run'],b'PRIVATE_ACCOUNT_TEXT ERR_MODULE_NOT_FOUND','ENGINE_INITIALIZE_MODULE_MISSING'),(['run'],b'Initialization refused or interrupted. PRIVATE_ACCOUNT_TEXT','ENGINE_INITIALIZE_PROFILE_REFUSED'),(['run'],b'PRIVATE_ACCOUNT_TEXT','ENGINE_INITIALIZE_FAILED')):
+            with patch('desktop_host.subprocess.run',return_value=SimpleNamespace(returncode=1,stdout=b'',stderr=stderr)) as run:
+                with self.assertRaisesRegex(Denied,'^'+expected+'$'):host.call(args)
+                run.assert_called_once()
 
     def test_desktop_missing_or_malformed_image_never_falls_back(self):
         launch={'storage':'/unused','mode':'existing','storageId':'a'*8+'-aaaa-aaaa-aaaa-'+'a'*12,'context':'default','engineId':'fixture','controllerImage':'sha256:'+'a'*64,'key':'a'*64,'token':'b'*64,'launchId':'b'*8+'-bbbb-bbbb-bbbb-'+'b'*12}
