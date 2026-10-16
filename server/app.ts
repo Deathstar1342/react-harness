@@ -26,6 +26,7 @@ import { LinuxSandbox } from './tools/sandbox.js';
 import type { BackendLifecycle } from './lifecycle.js';
 import { InstallService, type InstallHelper } from './installs.js';
 import type { TransportAuth } from './transport-auth.js';
+import { containerExecutionUnavailable } from './container-contract.js';
 
 const approvalMode = z.enum(['autonomous','balanced','review']);
 export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
@@ -33,16 +34,18 @@ export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
   const sandbox=new LinuxSandbox();
-  const sandboxPolicy={home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
+  const sandboxPolicy={executionMode:config.executionMode,home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
   sandbox.configure(sandboxPolicy);tools.configureSandbox?.(sandboxPolicy);
+  // Reject stale or tampered registrations before recovery/watchers/runtime can access them.
+  if(config.executionMode==='container')for(const project of store.projects())sandbox.validateRoot(project.path);
   store.initializeModels(config.models);
   store.recover();
   const managedComplete=hooks.complete ?? createManagedHooks(provider,store,config).complete!;
-  const installs=new InstallService(store,config.models.critic,managedComplete,options.packageHelper);
+  const installs=new InstallService(store,config.models.critic,managedComplete,config.executionMode==='container'?async()=>{throw new Error(containerExecutionUnavailable);}:options.packageHelper);
   const runtime = new Runtime(store,provider,tools,config,hooks,installs);
   const skillWrites=new SkillWrites(runtime);
   const changes = new Changes(store,tools,runtime);
-  const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root));
+  const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root),config.executionMode==='container');
   const settings = new Settings(store,config.approvalMode);
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
@@ -209,6 +212,7 @@ export async function createApp(options: AppOptions) {
   app.get('/api/directories',async request=>{const query=z.object({path:z.string().min(1).max(4096).optional()}).strict().parse(request.query);return locations.browse(query.path);});
   app.post('/api/projects',async(request,reply)=> {
     const body = z.object({name:z.string().trim().min(1).max(100),path:z.string().trim().min(1).max(4096).optional(),mode:z.enum(['create','import'])}).strict().parse(request.body);
+    if(config.executionMode==='container' && body.mode==='import')throw new Error('Container import is unavailable until managed copy support is installed');
     if (body.mode==='import' && !body.path) throw new Error('Select the existing project folder to import');
     if (body.path && (!path.isAbsolute(body.path) || body.path.includes('\0'))) throw new Error('Use an absolute project folder path');
     let root = body.path ? path.resolve(body.path) : await locations.allocate(body.name);

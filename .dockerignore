@@ -1,0 +1,26 @@
+# Explicit source allowlist: local configuration, Git, projects and state never enter builds.
+**
+!package.json
+!package-lock.json
+!index.html
+!tsconfig.json
+!vite.config.ts
+!server/
+!server/**
+!shared/
+!shared/**
+!client/
+!client/**
+!public/
+!public/**
+!containers/
+!containers/**
+!LICENSE
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.db
+**/*.key
+**/*.pem
+**/node_modules
+**/.git

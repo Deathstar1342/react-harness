@@ -1,0 +1,21 @@
+name: Container foundation
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  linux-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Real Linux controller build and storage boundary checks
+        run: python3 tests/container-linux.py
+      - name: Actual source launcher and private terminal setup
+        run: python3 tests/container-source-linux.py
+      - name: Preserve container receipts including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-foundation-${{ github.sha }}
+          path: test-results/container/
+          if-no-files-found: error

@@ -29,6 +29,7 @@ export class PackageHelperClient {
   private constructor(descriptor:z.infer<typeof descriptorSchema>){this.#descriptor=descriptor;}
   installationId(){return this.#descriptor.installationId;}
   static async connect():Promise<PackageHelperClient> {
+    if(process.env.HARNESS_EXECUTION_MODE==='container')throw new PackageHelperError('CONTAINER_EXECUTION_UNAVAILABLE');
     if(process.platform!=='linux'||!process.getuid?.())throw new PackageHelperError('HELPER_UNSUPPORTED_CLIENT');
     const file='/etc/abyssus-helper/client.json';
     for(const path of ['/','/etc','/etc/abyssus-helper',file]) {

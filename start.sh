@@ -5,6 +5,7 @@ unset STARK_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY
 unset STARK_BASE_URL ARCHITECT_MODEL CODER_MODEL CRITIC_MODEL
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd -- "$ROOT"
+if [[ "${1:-}" == --container ]]; then shift; exec bash "$ROOT/scripts/container-source.sh" start "$@"; fi
 source "$ROOT/scripts/source-common.sh"
 source_platform
 source_select_node || source_fail 'Linux Node 24+/npm is unavailable. Run bash setup.sh.'
