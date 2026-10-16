@@ -2,9 +2,9 @@
 
 ## Container deployment transition — approved 2026-10-16
 
-The user approved [M28–M32](milestones.md) and the [container backend plan](../CONTAINERIZATION.md). The target is native GUI + persistent container backend, with one-time project copies and no synchronization/write-back. M28 will add an explicit container setup path; M32 will make guided container setup the supported default and provide Windows PowerShell source launchers. It will need a supported local container engine, not host Bubblewrap/Node/npm or manual app-backend WSL provisioning. These changes are **not delivered yet**; the existing source instructions below still describe Linux/Bubblewrap. Ubuntu 22.04's standard older Bubblewrap lacks the required --disable-userns flag; rerunning the current setup does not fix that capability. Do not remove the flag or change host kernel policies to bypass it. No container-runtime/OS/global changes are installed automatically. M21 customer installers remain paused.
+The user approved [M28–M32](milestones.md) and the [container backend plan](../CONTAINERIZATION.md). M28 adds the [explicit container source foundation](#explicit-container-source-foundation-m28): authenticated controller and persistent storage, with command execution and managed imports still unavailable. M32 will make guided container setup the supported default and provide Windows PowerShell entrypoints. Native GUI integration and the later milestone features are not implied by this source foundation. The historical direct-source instructions below still describe Linux/Bubblewrap. Ubuntu 22.04's older Bubblewrap lacks the required --disable-userns flag; do not remove it or change host policies to bypass that boundary. No container-runtime/OS/global changes are installed automatically. M21 customer installers remain paused.
 
-## Guided source setup
+## Guided source setup (historical direct mode)
 
 For the current source prototype, clone this repository inside your Ubuntu/WSL Linux home and run:
 
@@ -336,4 +336,3 @@ Containers may be replaced without deleting this storage. Image layers and Docke
 The host publishes only `127.0.0.1:3000`; occupied ports fail. The launcher verifies a fresh HMAC readiness proof from that exact host endpoint and the selected profile, while Docker health checks independently verify the internal listener. Browser pairing uses an expiring, single-use code deliberately displayed to the operator; reusable transport/lifecycle keys remain private and are never printed. Provider keys enter the private config through a hidden terminal prompt, not build arguments, environment variables, URLs or image layers.
 
 M28 is a service/storage foundation: command/PTY/Python/test/Git execution and package installs are explicitly unavailable until M29; import and host directory browsing wait for managed transfers in M30. New empty projects use the existing file-only Git layout and `/workspace` confinement. Native Electron integration comes later. This is source setup evidence, not an installer release, Windows acceptance or live-provider validation. M21 remains paused.
-
