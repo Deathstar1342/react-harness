@@ -207,7 +207,7 @@ export class InstallService {
         if(current.updatedAt!==item.updatedAt || current.state!==item.state || current.previewDigest!==item.previewDigest || helperCanonical(current.settings.target)!==helperCanonical(item.settings.target) || !this.container&&helperCanonical(this.settings().target)!==helperCanonical(target) || helperCanonical(current.recommendation)!==helperCanonical(item.recommendation))throw conflict('Install recovery binding changed before persistence');
         this.acceptOutcome(item,record,reconcile);
         const event=this.store.event(item.chatId,'install_reconciliation',{installId:id,method:reconcile?'reconcile':'status',state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true});
-        const receipt:InstallRecoveryReceipt={installId:id,chatId:item.chatId,targetKey:helperCanonical(target),previewDigest:record.previewDigest,method:reconcile?'reconcile':'status',eventId:event.id,state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true};
+        const receipt:InstallRecoveryReceipt={...(record.containerReceipt?{containerReceipt:record.containerReceipt}:{}),installId:id,chatId:item.chatId,targetKey:helperCanonical(target),previewDigest:record.previewDigest,method:reconcile?'reconcile':'status',eventId:event.id,state:record.state,healthy:record.reconciliation?.healthy===true,matches:record.reconciliation?.matches===true};
         this.store.setState(`install-reconciliation:${id}`,receipt);
       });
       return this.store.install(id);

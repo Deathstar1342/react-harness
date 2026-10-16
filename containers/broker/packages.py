@@ -87,7 +87,7 @@ class Packages:
         args = ['exec', '-i', '--user', '0:0', row['container'], '/usr/bin/env', '-i', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
                 'APT_CONFIG=/usr/lib/abyssus-helper/apt.conf', 'DEBIAN_FRONTEND=noninteractive',
                 'http_proxy=http://127.0.0.1:3128', 'https_proxy=http://127.0.0.1:3128',
-                '/usr/bin/python3', '-I', '/opt/abyssus-packages/container-apt.py']
+                '/usr/bin/python3', '-I', '-B', '/opt/abyssus-packages/container-apt.py']
         value = self.docker.call(args, timeout=300, input=canonical({'target': row['target'], 'action': action, 'body': body}) + '\n')
         from protocol import decode
         return decode(value.encode())

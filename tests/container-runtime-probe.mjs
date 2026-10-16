@@ -28,7 +28,7 @@ for(const kind of ['success','approval','lease','steering','goal','guidance','sk
   try{
     if(kind==='skill'){
       const dir=root+'/.abyssus/skills/check';await mkdir(dir,{recursive:true});
-      await writeFile(dir+'/SKILL.md','---\nname: "check"\ndescription: "Callback fixture"\n---\nInspect actual evidence.\n');
+      await writeFile(dir+'/SKILL.md','---\nname: "check"\ndescription: "Callback fixture"\nreferences: []\n---\nInspect actual evidence.\n');
       const doc=await runtime.skills.files(chat.id).load('project','check');
       await runtime.selectSkill(chat.id,{scope:'project',name:'check',revision:doc.revision,selectionRevision:runtime.skills.selection(chat.id).revision});
     }

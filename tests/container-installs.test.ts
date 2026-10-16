@@ -1,5 +1,7 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {createHash,randomUUID} from 'node:crypto';
+import {installResolutions} from '../server/goals.js';
+import type {Goal} from '../shared/types.js';
 import {Store} from '../server/store.js';
 import {InstallService} from '../server/installs.js';
 import {helperCanonical,helperProtocol} from '../server/package-helper.js';
@@ -64,4 +66,16 @@ it.each(['imageId','generation','manifestDigest'] as const)('rejects replacement
   await expect(f.service.recover(a.id,false)).rejects.toThrow(/original recovery gate/);
   expect(f.store.install(a.id)).toEqual(before);
   expect(f.helpers.get(f.a.id)!.helper.execute).toHaveBeenCalledTimes(1);
+});
+
+it('resolves container goal uncertainty from original target and retained final image lineage without a global target',async()=>{
+  const f=fixture(),a=f.create(f.chatA.id);await f.advance(a.id);f.service.decide(a.id,'approve',()=>true);await f.advance(a.id);
+  const item=f.store.install(a.id),event=f.store.event(f.chatA.id,'goal_uncertainty',{installId:a.id});
+  f.store.setState(`goal-install-links:${f.chatA.id}`,[{eventId:event.id,installId:a.id,targetKey:helperCanonical(item.settings.target),previewDigest:item.previewDigest}]);
+  const goal={uncertainEventIds:[event.id]} as Goal;
+  expect(installResolutions(f.store,f.chatA.id,goal)).toEqual([]);
+  await f.service.recover(a.id,false);
+  expect(f.service.settings().target).toBeUndefined();expect(installResolutions(f.store,f.chatA.id,goal)).toHaveLength(1);
+  const changed=f.store.install(a.id);changed.containerReceipt!.imageId='sha256:'+'f'.repeat(64);f.store.saveInstall(changed);
+  expect(installResolutions(f.store,f.chatA.id,goal)).toEqual([]);
 });

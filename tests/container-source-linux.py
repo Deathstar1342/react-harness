@@ -115,6 +115,8 @@ try:
     runtime=subprocess.run(['docker','exec','-i',controller,'node','--import','tsx','--input-type=module'],input=(ROOT/'tests/container-runtime-probe.mjs').read_text(),capture_output=True,text=True,timeout=240)
     (OUT/'m29-runtime-sqlite.log').write_text(runtime.stdout+runtime.stderr)
     print(runtime.stdout,flush=True)
+    if runtime.returncode:
+        print(runtime.stderr.replace(KEY,'[hidden synthetic key]'),flush=True)
     check('actual Runtime disk-SQLite freshness and COMMIT matrix',runtime.returncode==0)
     launch('--stop')
     launch()
