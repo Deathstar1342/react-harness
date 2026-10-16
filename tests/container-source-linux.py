@@ -32,7 +32,7 @@ def terminal(answers):
     pid,fd=pty.fork()
     if pid==0:
         os.chdir(ROOT)
-        os.execvpe('bash',['bash','setup.sh','--container','--no-start'],ENV)
+        os.execvpe('bash',['bash','scripts/container-source.sh','setup','--no-start'],ENV)
     output=bytearray()
     offset=0
     try:
@@ -72,7 +72,7 @@ def terminal(answers):
             os.waitpid(pid,0)
 
 def launch(*args,ok=True):
-    result=subprocess.run(['bash','start.sh','--container',*args],cwd=ROOT,env=ENV,capture_output=True,text=True,timeout=120)
+    result=subprocess.run(['bash','scripts/container-source.sh','start',*args],cwd=ROOT,env=ENV,capture_output=True,text=True,timeout=120)
     output=result.stdout+result.stderr
     assert KEY not in output
     transcripts.append(re.sub(r'Browser pairing code \(single use, 5 minutes\): [a-f0-9]{48}','Browser pairing code: [single-use redacted]',output))

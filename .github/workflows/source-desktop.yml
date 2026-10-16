@@ -1,0 +1,87 @@
+name: Guided container source desktop
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  linux-source:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disposable native GUI prerequisites only
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgbm1
+          if test -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
+      - name: Clean production setup with explicit external runtime
+        run: bash setup.sh --no-start --runtime-root "$RUNNER_TEMP/m32-runtime"
+      - name: Production rerun and start validation preserve selection
+        run: |
+          sha256sum "$RUNNER_TEMP/m32-runtime/receipt" > "$RUNNER_TEMP/receipt-before"
+          bash setup.sh --no-start
+          bash start.sh --check
+          sha256sum --check "$RUNNER_TEMP/receipt-before"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Actual exported native desktop and private runtime
+        run: M32_RUNTIME="$RUNNER_TEMP/m32-runtime" M32_RECEIPTS="$RUNNER_TEMP/m32-receipts" xvfb-run -a node tests/source-desktop-smoke.ts
+      - name: Cross-build complete Windows source payload in disposable engine
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          docker buildx build --builder default --build-arg TARGET_OS=win32 --build-arg SOURCE_COMMIT="$GITHUB_SHA" --build-arg CONTROLLER_IMAGE="$(cat "$RUNNER_TEMP/m32-runtime/controller.iid")" --build-arg WORKER_IMAGE="$(cat "$RUNNER_TEMP/m32-runtime/worker.iid")" --output "type=local,dest=$RUNNER_TEMP/m32-windows/payload" -f containers/Source.Dockerfile "$RUNNER_TEMP/m32-runtime/snapshot"
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        with:
+          name: source-windows-${{ github.sha }}
+          path: ${{ runner.temp }}/m32-windows/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-evidence-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/m32-runtime/logs/
+            ${{ runner.temp }}/m32-runtime/build-intent
+            ${{ runner.temp }}/m32-runtime/receipt
+            ${{ runner.temp }}/m32-runtime/payload/provenance.json
+            ${{ runner.temp }}/m32-runtime/payload/support-runtime/provenance.json
+            ${{ runner.temp }}/m32-runtime/payload/support-build-packages.txt
+            ${{ runner.temp }}/m32-receipts/
+  windows-payload:
+    needs: linux-source
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-windows-${{ github.sha }}
+          path: ${{ runner.temp }}/m32-runtime
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Source PowerShell parser and read-only entrypoints
+        run: |
+          $errors=$null
+          [Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/source-desktop.ps1",[ref]$null,[ref]$errors) | Out-Null
+          if ($errors) { throw 'PowerShell parse failed' }
+          ./setup.ps1 -Help
+          ./start.ps1 -Help
+      - name: Actual relocated cross-staged Windows payload without build-tree junction
+        run: |
+          $env:M32_RUNTIME="$env:RUNNER_TEMP/m32-runtime"
+          $env:M32_RECEIPTS="$env:RUNNER_TEMP/m32-receipts"
+          foreach ($name in @('desktop-data','logs','crashes','temp')) { New-Item -ItemType Directory -Path "$env:M32_RUNTIME/$name" | Out-Null }
+          node tests/source-desktop-smoke.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-evidence-windows-${{ github.sha }}
+          path: ${{ runner.temp }}/m32-receipts/

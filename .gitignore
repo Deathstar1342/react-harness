@@ -38,3 +38,5 @@ playwright-report/
 __pycache__/
 .pytest_cache/
 .venv/
+
+.container-desktop-source/
