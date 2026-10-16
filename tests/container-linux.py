@@ -130,6 +130,8 @@ try:
     host = container['HostConfig']
     check('controller is non-root, read-only, capability-dropped and loopback-published', container['Config']['User'] == f'{os.getuid()}:{os.getgid()}' and host['ReadonlyRootfs'] and 'ALL' in host['CapDrop'] and host['PortBindings']['3000/tcp'][0]['HostIp'] == '127.0.0.1')
     check('only selected private/controller/workspace mounts, no Docker control', {m['Destination'] for m in container['Mounts']} == {'/abyssus', '/abyssus/profile/config', '/workspace'})
+    exec_node("import {createRequire} from 'node:module';const require=createRequire(import.meta.url);require('node:sqlite');const pty=require('node-pty');await new Promise((resolve,reject)=>{const p=pty.spawn('/bin/sh',['-c','printf native-pty-ok'],{cwd:'/tmp',env:{PATH:'/usr/bin:/bin'}});let output='';p.onData(data=>output+=data);p.onExit(({exitCode})=>exitCode===0&&output==='native-pty-ok'?resolve():reject(new Error('PTY ABI failed')));setTimeout(()=>reject(new Error('PTY timeout')),5000).unref();});")
+    check('runtime Linux SQLite and actual native PTY ABI verified by trusted fixture')
     check('provider key absent from container environment and logs', synthetic not in json.dumps(container['Config']) + c('logs', 'controller').stdout)
     api('GET', '/api/health', expected=401)
     api('POST', '/api/backend/readiness', {'instanceId': str(uuid.uuid4()), 'nonce': 'a'*64, 'expiresAt': int(time.time()*1000)+10000, 'mac': 'b'*64}, expected=403)

@@ -10,6 +10,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Real Linux controller build and storage boundary checks
         run: python3 tests/container-linux.py
+      - name: Actual source launcher and private terminal setup
+        run: python3 tests/container-source-linux.py
       - name: Preserve container receipts including failures
         if: always()
         uses: actions/upload-artifact@v4
