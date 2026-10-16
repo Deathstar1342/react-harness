@@ -64,4 +64,97 @@ class TransferCopy(unittest.TestCase):
         self.assertTrue((self.root/'stage').exists())
         self.assertEqual((self.source/'file.txt').read_bytes(),b'dirty working bytes')
 
+
+@unittest.skipUnless(os.name == 'posix', 'Linux host transfer implementation')
+class TransferFaults(unittest.TestCase):
+    def setUp(self):
+        import uuid
+        from protocol import Journal
+        from server import Broker
+        self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name)
+        self.storage=self.base/'storage';self.storage.mkdir(mode=0o700)
+        for name in ('runtime','runtime/control','workspace'): (self.storage/name).mkdir(mode=0o700)
+        self.sid=str(uuid.uuid4());(self.storage/'.storage-id').write_text(self.sid+'\n')
+        self.journal=Journal(str(self.storage/'runtime/journal.sqlite'),str(uuid.uuid4()))
+        class Docker:
+            contexts={};images={}
+            def __init__(self,storage,sid):self.storage=storage;self.storage_id=sid
+        self.broker=Broker(self.journal,Docker(self.storage,self.sid))
+        from transfer_service import area,write_new
+        area(self.storage)
+        write_new(self.storage/'runtime/control/session.json',{'storageId':self.sid,'sessionId':self.journal.session})
+        self.source=self.base/'original';self.source.mkdir();(self.source/'file').write_text('original')
+        self.install=self.base/'install';self.install.mkdir()
+    def tearDown(self):
+        self.broker.transfers.close();self.journal.db.close();self.tmp.cleanup()
+    def ticket(self,kind='import',destination=None,project=None):
+        from transfer_service import select,authorize
+        token,ticket=select(str(self.storage),self.sid,str(self.install),kind,str(destination or self.source),project)
+        authorize(self.storage,token,ticket);return token,ticket
+    def wait(self,token):
+        import time
+        for _ in range(300):
+            result=self.broker.dispatch('transfer_observe',{'code':token})
+            if result['phase'] not in ('copying','publishing'):return result
+            time.sleep(.01)
+        self.fail('transfer did not finish')
+    def test_published_identity_one_use_receipt_and_no_replay(self):
+        token,ticket=self.ticket()
+        self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+        result=self.wait(token);self.assertEqual(result['phase'],'succeeded',result)
+        self.assertEqual((Path(ticket['destination'])/'file').read_text(),'original')
+        self.assertEqual(self.broker.dispatch('transfer_receipt',{'code':token}),result)
+        with self.assertRaises(Exception):self.broker.dispatch('transfer_receipt',{'code':token})
+        with self.assertRaises(Exception):self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+    def test_sensitive_selected_roots_and_links_refused(self):
+        from transfer_service import select
+        credential=self.base/'.aws';credential.mkdir();(credential/'credentials').write_text('private')
+        with self.assertRaises(Exception):select(str(self.storage),self.sid,str(self.install),'import',str(credential))
+        link=self.base/'link';link.symlink_to(self.source)
+        with self.assertRaises(Exception):select(str(self.storage),self.sid,str(self.install),'import',str(link))
+        with self.assertRaises(Exception):select(str(self.storage),self.sid,str(self.install),'import',str(self.storage/'runtime'))
+    def test_stage_and_parent_replacement_refused(self):
+        from transfers import verify_stage,stamp
+        manifest=scan(self.source);stage=self.base/'stage';copy(self.source,stage,manifest)
+        identity=verify_stage(stage,manifest)
+        (stage/'file').write_text('tampered')
+        with self.assertRaises(Exception):verify_stage(stage,manifest)
+        renamed=self.base/'renamed';stage.rename(renamed);stage.mkdir()
+        with self.assertRaises(Exception):publish(stage,self.base/'destination',identity,stamp(self.base.stat())[:2])
+        self.assertFalse((self.base/'destination').exists())
+        stage.rmdir();renamed.rename(stage)
+        with self.assertRaises(Exception):publish(stage,self.base/'destination',identity,[0,0])
+    def test_changed_source_cannot_publish_or_replay(self):
+        token,ticket=self.ticket();(self.source/'file').write_text('new bytes')
+        self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+        result=self.wait(token);self.assertEqual(result['phase'],'failed');self.assertTrue(result['residue'])
+        self.assertFalse(Path(ticket['destination']).exists());self.assertEqual((self.source/'file').read_text(),'new bytes')
+    def test_cancel_drain_and_export_host_gate(self):
+        import threading
+        from unittest.mock import patch
+        from transfer_service import copy as real_copy
+        gate=threading.Event();entered=threading.Event()
+        def delayed(*args,**kwargs):
+            entered.set();gate.wait(5);return real_copy(*args,**kwargs)
+        # Publish a managed import first.
+        token,ticket=self.ticket();self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None});self.assertEqual(self.wait(token)['phase'],'succeeded')
+        code,export=self.ticket('export',self.base/'export',ticket['project'])
+        with patch('transfer_service.copy',delayed):
+            self.broker.dispatch('transfer_begin',{'code':code,'kind':'export','project':ticket['project']});self.assertTrue(entered.wait(2))
+            for op in ('install_prepare','reset'):
+                with self.assertRaises(Exception):self.broker.dispatch(op,{'project':ticket['project']})
+            self.assertTrue(self.broker.transfers.busy(ticket['project']))
+            self.broker.dispatch('transfer_cancel',{'code':code});self.assertTrue(self.broker.transfers.busy(ticket['project']))
+            gate.set();self.assertEqual(self.wait(code)['phase'],'cancelled')
+        self.assertFalse(Path(export['destination']).exists());self.assertTrue(self.source.exists())
+    def test_restart_marks_claim_uncertain_without_copying(self):
+        from transfer_service import Transfers
+        token,ticket=self.ticket()
+        row={**ticket,'phase':'copying','code':'COPYING','residue':True,'manifestDigest':ticket['manifest']['digest'],'files':1,'bytes':8,'excludedCount':0,'excluded':[],'history':False,'identity':None}
+        self.broker.transfers.save(row)
+        self.broker.transfers=Transfers(self.broker)
+        self.assertEqual(self.broker.dispatch('transfer_observe',{'code':token})['phase'],'uncertain')
+        self.assertFalse(Path(ticket['destination']).exists())
+        with self.assertRaises(Exception):self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+
 if __name__ == '__main__': unittest.main()

@@ -202,7 +202,7 @@ class Transfers:
         except Exception as error:
             with self.broker.lock:
                 # A publication or commit failure may have left a complete destination.
-                row.update(phase='uncertain' if row['phase']=='publishing' else 'cancelled' if row['id'] in self.cancelled else 'failed',code='TRANSFER_INCOMPLETE',residue=True)
+                row.update(phase='failed' if isinstance(error,FileExistsError) else 'uncertain' if row['phase']=='publishing' else 'cancelled' if row['id'] in self.cancelled else 'failed',code='TRANSFER_INCOMPLETE',residue=True)
                 self.save(row)
 
     def close(self):

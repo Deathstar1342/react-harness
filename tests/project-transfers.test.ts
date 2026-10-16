@@ -45,9 +45,10 @@ it('lost receipt and registration COMMIT failure leave a complete unregistered c
   const f=fixture();f.client.request=async op=>{if(op==='transfer_receipt')throw Error('lost receipt');return f.receipt;};
   await expect(f.service.import('Copy','d'.repeat(64),new AbortController().signal)).rejects.toThrow('lost receipt');
   expect(f.store.projects()).toHaveLength(0);expect(lstatSync(path.join(f.workspace,f.receipt.project)).isDirectory()).toBe(true);
-  const g=fixture();g.store.transaction=()=>{throw Error('COMMIT failed');};
+  const g=fixture();const original=g.store.db.exec.bind(g.store.db);let commitFailed=false;
+  g.store.db.exec=(sql:string)=>{if(sql==='COMMIT'){commitFailed=true;throw Error('COMMIT failed');}return original(sql);};
   await expect(g.service.import('Copy','e'.repeat(64),new AbortController().signal)).rejects.toThrow('COMMIT failed');
-  expect(g.store.projects()).toHaveLength(0);
+  expect(commitFailed).toBe(true);expect(g.store.projects()).toHaveLength(0);
 });
 it('holds both export reservations and retains quarantine on transport uncertainty',async()=>{
   const f=fixture();const project=f.store.createProject('Export',path.join(f.workspace,f.receipt.project));
@@ -58,4 +59,17 @@ it('holds both export reservations and retains quarantine on transport uncertain
   const service=new ProjectTransfers(f.store,runtime,tools,async()=>f.client,f.workspace);
   await expect(service.export(project.id,'f'.repeat(64),new AbortController().signal)).rejects.toThrow('lost begin');
   expect(f.store.project(project.id).removalError).toContain('uncertain');
+});
+
+it('concurrent same-code imports cannot create duplicate registrations',async()=>{
+  const f=fixture(),code='1'.repeat(64);
+  const results=await Promise.allSettled([f.service.import('First',code,new AbortController().signal),f.service.import('Second',code,new AbortController().signal)]);
+  expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);expect(f.store.projects()).toHaveLength(1);
+  expect(f.calls.filter(op=>op==='transfer_receipt')).toHaveLength(1);
+});
+it('changed immutable observations or final receipts cannot redirect registration',async()=>{
+  for(const field of ['id','manifestDigest','kind','phase','project']){
+    const f=fixture();f.client.request=async op=>op==='transfer_receipt'?{...f.receipt,[field]:field==='kind'?'export':field==='phase'?'failed':field==='manifestDigest'?'0'.repeat(64):randomUUID()}:f.receipt;
+    await expect(f.service.import('Copy','2'.repeat(64),new AbortController().signal)).rejects.toThrow();expect(f.store.projects()).toHaveLength(0);
+  }
 });

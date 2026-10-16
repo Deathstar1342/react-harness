@@ -118,8 +118,13 @@ try:
     if runtime.returncode:
         print(runtime.stderr.replace(KEY,'[hidden synthetic key]'),flush=True)
     check('actual Runtime disk-SQLite freshness and COMMIT matrix',runtime.returncode==0)
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('m30_transfer',ROOT/'tests/container-transfer-linux.py');m30=importlib.util.module_from_spec(spec);spec.loader.exec_module(m30)
+    m30_state=m30.run(ROOT,STORAGE,controller,started.stdout)
     launch('--stop')
-    launch()
+    reopened=launch()
+    m30.reopen(reopened.stdout,m30_state)
+    (OUT/'m30-transfer-checks.json').write_text(json.dumps({'sha':subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,capture_output=True,text=True,check=True).stdout.strip(),'platform':'actual Linux controller/broker/worker + source PTY','checks':m30.CHECKS},indent=2))
     check('production stop/start retains original native profile and key',before_profile==(STORAGE/'state/profile/profile.json').read_bytes() and before_config==config.read_bytes())
     launch('--stop')
     for name in ['config','state','workspace']:
