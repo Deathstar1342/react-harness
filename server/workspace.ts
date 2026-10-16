@@ -14,7 +14,7 @@ const validPath = (value: string) => {
 export class WorkspaceLocations {
   constructor(private store: Store, private defaultRoot: string, private validateProject?:(root:string)=>unknown,private managed=false) {}
   settings(): WorkspaceSettings {
-    if(this.managed)return {workspaceRoot:'/workspace',defaultWorkspaceRoot:'/workspace'};
+    if(this.managed)return {workspaceRoot:'/workspace',defaultWorkspaceRoot:'/workspace',transferMode:'source-code'};
     return {workspaceRoot:this.store.getState<string>(stateKey,this.defaultRoot),defaultWorkspaceRoot:this.defaultRoot};
   }
   async update(input: string): Promise<WorkspaceSettings> {

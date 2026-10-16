@@ -1,3 +1,4 @@
+import {ProjectTransfers,transferCode} from './project-transfers.js';
 import Fastify from 'fastify';
 import staticFiles from '@fastify/static';
 import { z } from 'zod';
@@ -161,7 +162,7 @@ export async function createApp(options: AppOptions) {
     else if (route.startsWith('/api/approvals/:id')) projectId=store.chat(store.getApproval(params.id).chatId).projectId;
     if (projectId) {
       if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
-      if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
+      if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
       requests.set(request.id,projectId);
     }
   });
@@ -208,13 +209,38 @@ export async function createApp(options: AppOptions) {
     const catalog=provider.catalog?await provider.catalog(): (await provider.models()).map(id=>({id,metadata:{},capabilities:{ordinary:'unknown',native:'unknown',streaming:'unknown'}}));
     return {models:catalog.map(entry=>entry.id),catalog};
   });
+  const transfers=new ProjectTransfers(store,runtime,tools);
+  const transferSignal=(request:any,reply:any)=>{
+    const abort=new AbortController();
+    const cancel=()=>{if(!reply.raw.writableEnded)abort.abort();};
+    request.raw.once('aborted',cancel);reply.raw.once('close',cancel);
+    return {signal:abort.signal,done:()=>{request.raw.off('aborted',cancel);reply.raw.off('close',cancel);}};
+  };
+  app.post('/api/project-transfers/import',async(request,reply)=>{
+    if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');
+    const input=z.object({name:z.string().trim().min(1).max(100),code:transferCode}).strict().parse(request.body);
+    const pending=transferSignal(request,reply);
+    try {const result=await transfers.import(input.name,input.code,pending.signal);watchProject(result.project.id);return reply.code(201).send(result);}
+    finally {pending.done();}
+  });
+  app.post('/api/projects/:id/transfer-release',async request=>{
+    if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');
+    const {code}=z.object({code:transferCode}).strict().parse(request.body);return transfers.release(paramId(request.params),code);
+  });
+  app.post('/api/projects/:id/export',async(request,reply)=>{
+    if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');
+    const input=z.object({code:transferCode}).strict().parse(request.body),id=paramId(request.params);
+    assertNoRequests(id,request.id);
+    const pending=transferSignal(request,reply);
+    try {return await transfers.export(id,input.code,pending.signal);} finally {pending.done();}
+  });
   app.get('/api/projects',async()=>store.projects());
   app.get('/api/workspace',async()=>locations.settings());
   app.patch('/api/workspace',async request=>{const body=z.object({workspaceRoot:z.string().min(1).max(4096)}).strict().parse(request.body);return locations.update(body.workspaceRoot);});
   app.get('/api/directories',async request=>{const query=z.object({path:z.string().min(1).max(4096).optional()}).strict().parse(request.query);return locations.browse(query.path);});
   app.post('/api/projects',async(request,reply)=> {
     const body = z.object({name:z.string().trim().min(1).max(100),path:z.string().trim().min(1).max(4096).optional(),mode:z.enum(['create','import'])}).strict().parse(request.body);
-    if(config.executionMode==='container' && body.mode==='import')throw new Error('Container import is unavailable until managed copy support is installed');
+    if(config.executionMode==='container' && body.mode==='import')throw new Error('Use the trusted host transfer flow to import a managed copy');
     if (body.mode==='import' && !body.path) throw new Error('Select the existing project folder to import');
     if (body.path && (!path.isAbsolute(body.path) || body.path.includes('\0'))) throw new Error('Use an absolute project folder path');
     let root = body.path ? path.resolve(body.path) : await locations.allocate(body.name);

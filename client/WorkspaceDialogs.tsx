@@ -1,3 +1,4 @@
+import { TransferDialog } from './TransferDialog';
 import { useEffect, useState } from "react";
 import { Folder, FolderOpen } from "lucide-react";
 import type { Preferences, Project, WorkspaceSettings, PublicSettings } from "../shared/types";
@@ -30,6 +31,7 @@ export function ProjectDialog({ onCreated, onClose }: { onCreated: (project: Pro
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const workspace = useWorkspaceSettings();
+  if(mode==='import'&&workspace.settings?.transferMode==='source-code')return <TransferDialog onClose={onClose} onImported={onCreated}/>;
   const ready = name.trim() && (mode === "create" ? workspace.settings : path);
   return <Modal title="Add project" titleId="project-dialog-title" onClose={onClose} busy={busy}>
     <form onSubmit={(event) => {
@@ -40,7 +42,7 @@ export function ProjectDialog({ onCreated, onClose }: { onCreated: (project: Pro
     }}>
       <div className="mode-selector" aria-label="Project source">
         <button type="button" aria-pressed={mode === "create"} disabled={busy} onClick={() => { setMode("create"); setError(""); }}>New project</button>
-        <button type="button" aria-pressed={mode === "import"} disabled={busy} onClick={() => { setMode("import"); setError(""); setBrowse(true); }}>Import existing</button>
+        <button type="button" aria-pressed={mode === "import"} disabled={busy || !workspace.settings} onClick={() => { setMode("import"); setError(""); if(!workspace.settings?.transferMode)setBrowse(true); }}>Import existing</button>
       </div>
       <label>Project name<input autoFocus required maxLength={100} value={name} disabled={busy}
         onChange={(event) => setName(event.target.value)} placeholder="My project" /></label>

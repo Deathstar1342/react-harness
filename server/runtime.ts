@@ -78,6 +78,7 @@ export class Runtime {
   }
 
   async exclusiveRemoval<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+    if(this.store.getState(`transfer:reservation:${projectId}`,null))throw Object.assign(new Error('An export reservation is pending or uncertain. Explicitly verify it has stopped before changing or removing the project.'),{statusCode:409});
     this.store.assertSkillRemovalSafe(projectId);
     this.installs?.expire();
     this.store.assertInstallRemovalSafe(projectId);
