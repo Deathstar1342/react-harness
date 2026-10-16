@@ -153,6 +153,7 @@ export class WorkspaceTools implements ToolService {
         const result = await this.files.save(root, args.path, change.after.content, args.baseHash, context.agentId, () => {fileMutationStarted = true;}, action.name === 'delete_file');
         return {ok: true, output: `${action.name === 'delete_file' ? 'Removed' : 'Saved'} ${result.path}`, data: {...result, snapshots: [result]}};
       }
+      if(['run_shell','execute_python','run_tests','git_status','git_diff'].includes(action.name))this.sandbox.assertExecutionAvailable();
       switch (action.name) {
         case 'read_file_range': { const data = await this.files.range(root,args.path,args.startLine,args.count); return {ok: data.hash !== null, output: data.content, data}; }
         case 'search_page': { const data = await this.files.searchPage(root,args.query,args.path,args.offset,args.limit,args.revision); return {ok: true, output: JSON.stringify(data), data}; }

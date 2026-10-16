@@ -1,0 +1,42 @@
+name: abyssus-${ABYSSUS_STORAGE_ID:?Explicit storage selection required}
+services:
+  controller:
+    image: abyssus-controller:m28
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile
+    user: "${ABYSSUS_UID:?}:${ABYSSUS_GID:?}"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2
+    stop_grace_period: 30s
+    environment:
+      HARNESS_EXECUTION_MODE: container
+      HARNESS_STORAGE_ID: "${ABYSSUS_STORAGE_ID:?}"
+    ports:
+      - "127.0.0.1:3000:3000"
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    volumes:
+      - type: bind
+        source: "${ABYSSUS_STORAGE_ROOT:?}/state"
+        target: /abyssus
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${ABYSSUS_STORAGE_ROOT:?}/config"
+        target: /abyssus/profile/config
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${ABYSSUS_STORAGE_ROOT:?}/workspace"
+        target: /workspace
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, node, --import, tsx, containers/health.ts]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

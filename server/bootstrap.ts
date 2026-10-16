@@ -10,9 +10,14 @@ import { loadPromptExtensions } from './prompts.js';
 import { prepareProfile, lockResources, durableWrite, privateDirectory, regularFile, type ProfileOptions } from './profile.js';
 import { BackendLifecycle } from './lifecycle.js';
 import { TransportAuth } from './transport-auth.js';
+import { verifyContainerStorage } from './container-storage.js';
 
 export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean}={}) {
   const env={...(options.env ?? process.env)};
+  if(env.HARNESS_EXECUTION_MODE==='container') {
+    verifyContainerStorage(env.HARNESS_STORAGE_ID ?? '');
+    if(env.HARNESS_HOME!=='/abyssus'||env.HARNESS_WORKSPACE_ROOT!=='/workspace'||env.HARNESS_INIT||env.HARNESS_DATA_DIR||env.HARNESS_LEGACY_ROOT||env.HARNESS_SELECT_DATA||env.HARNESS_MIGRATION_RETRY)throw new Error('Container storage overrides are not supported');
+  }
   for(const name of ['HARNESS_DATA_DIR','HARNESS_WORKSPACE_ROOT','ARCHITECT_PROMPT_FILE','CODER_PROMPT_FILE','CRITIC_PROMPT_FILE']) {
     if(env[name] || name==='HARNESS_DATA_DIR' && env[name]!==undefined)env[name]=path.resolve(options.cwd ?? process.cwd(),env[name]!);
   }
@@ -38,6 +43,7 @@ export async function startBackend(options:ProfileOptions & {transportToken?:str
     if(!existsSync(profile.paths.configFile))throw new Error('Selected configuration is missing; restore profile/config/.env before startup');
     const {config,file}=loadBackendConfig({...env,HARNESS_HOME:profile.paths.home},profile.paths.configFile);
     config.appHome=profile.paths.home;
+    if(env.HARNESS_EXECUTION_MODE==='container' && (config.executionMode!=='container'||config.dataDir!=='/abyssus/profile/state'||config.workspaceRoot!=='/workspace'||Object.keys(config.promptFiles).length))throw new Error('Container profile path overrides are unsupported');
     if(options.desktop){config.host='127.0.0.1';config.port=0;}
     if(config.port>65535)throw new Error('PORT must be at most 65535');
     // Home is already held. Preserve explicit overrides pointing exactly at it.

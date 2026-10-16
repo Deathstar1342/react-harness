@@ -5,19 +5,24 @@ import { applicationHome, installationRoot, profilePaths } from '../locations.js
 import { hash, key, ToolError, isProtected } from './paths.js';
 import { startRegistryProxy } from './registry-proxy.js';
 import { helperProtectedPaths } from '../helper-paths.js';
+import { containerExecutionUnavailable } from '../container-contract.js';
 
 const inside=(parent:string,child:string)=>key(parent)===key(child) || key(child).startsWith(key(parent).replace(/[\\/]$/,'')+path.sep);
 const overlap=(a:string,b:string)=>inside(a,b)||inside(b,a);
 function canonical(input:string):string {
   try{return realpathSync(input);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;const parent=path.dirname(input);if(parent===input)throw error;return path.join(canonical(parent),path.basename(input));}
 }
-export interface SandboxPolicy { home:string; protectedPaths:string[]; projects:()=>string[] }
+export interface SandboxPolicy { home:string; protectedPaths:string[]; projects:()=>string[]; executionMode?:'direct'|'container' }
 export interface SandboxLaunch {file:string;args:string[];env:Record<string,string>;close:()=>Promise<void>}
 export class LinuxSandbox {
   private policy:SandboxPolicy={home:applicationHome(),protectedPaths:[],projects:()=>[]};
   configure(policy:SandboxPolicy){this.policy=policy;}
+  assertExecutionAvailable() {
+    if(this.policy.executionMode==='container'||process.env.HARNESS_EXECUTION_MODE==='container')throw new ToolError(containerExecutionUnavailable,'CONTAINER_EXECUTION_UNAVAILABLE');
+  }
   validateRoot(input:string):string {
     const root=canonical(path.resolve(input));
+    if(this.policy.executionMode==='container' && (root==='/workspace'||!inside('/workspace',root)))throw new ToolError('Container projects must be inside the managed workspace.','SANDBOX_UNSAFE_PROJECT');
     if(root.split(path.sep).some(isProtected))throw new ToolError('Credential and Git metadata directories cannot be selected as project roots.','SANDBOX_UNSAFE_PROJECT');
     const protectedPaths=[this.policy.home,installationRoot,path.dirname(path.dirname(realpathSync(process.execPath))),...this.policy.protectedPaths,...(process.platform==='linux'?helperProtectedPaths:[])].map(p=>canonical(path.resolve(p)));
     if([path.parse(root).root,canonical(homedir())].some(p=>inside(root,p)) || protectedPaths.some(p=>overlap(root,p)))throw new ToolError('Project overlaps application, configuration, home or state paths. Select a separate project folder.','SANDBOX_UNSAFE_PROJECT');
@@ -29,6 +34,7 @@ export class LinuxSandbox {
    * Concurrent trusted host writes introducing secrets/links require stopping
    * execution. This is not a defense against a hostile same-user host process. */
   layout(input:string,git=false):{root:string;masks:{path:string;directory:boolean;identity:string}[];stamp:string} {
+    this.assertExecutionAvailable();
     const root=this.validateRoot(input),masks:{path:string;directory:boolean;identity:string}[]=[];
     if(!lstatSync(root).isDirectory() || canonical(root)!==root)throw new ToolError('Project root is not a canonical directory.');
     if(process.platform==='linux') {
@@ -66,6 +72,7 @@ export class LinuxSandbox {
     return base;
   }
   reset(root:string):void {
+    this.assertExecutionAvailable();
     const canonicalRoot=this.validateRoot(root),base=path.join(profilePaths(this.policy.home).cacheDir,hash(canonicalRoot));
     if(existsSync(base)) {
       if(canonical(base)!==path.resolve(base) || overlap(base,canonicalRoot))throw new ToolError('Unsafe sandbox reset path.');
@@ -73,6 +80,7 @@ export class LinuxSandbox {
     }
   }
   async launch(root:string,command:string[],network=false,git=false):Promise<SandboxLaunch> {
+    this.assertExecutionAvailable();
     if(process.platform!=='linux' || process.getuid?.()===0)throw new ToolError('Sandbox execution requires a non-root Linux/WSL backend with Bubblewrap, user namespaces, socat, bash and Python venv. Host execution is disabled.','SANDBOX_UNAVAILABLE');
     const layout=this.layout(root,git);
     const distro=['/usr/bin','/usr/lib','/usr/lib64','/usr/share/nodejs','/usr/share/git-core','/usr/share/zoneinfo','/usr/share/python-wheels','/usr/share/python3','/etc/ssl/certs'].filter(existsSync);

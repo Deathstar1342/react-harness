@@ -12,11 +12,13 @@ const validPath = (value: string) => {
 
 /** Human-facing directory selection. Model file tools remain project-confined. */
 export class WorkspaceLocations {
-  constructor(private store: Store, private defaultRoot: string, private validateProject?:(root:string)=>unknown) {}
+  constructor(private store: Store, private defaultRoot: string, private validateProject?:(root:string)=>unknown,private managed=false) {}
   settings(): WorkspaceSettings {
+    if(this.managed)return {workspaceRoot:'/workspace',defaultWorkspaceRoot:'/workspace'};
     return {workspaceRoot:this.store.getState<string>(stateKey,this.defaultRoot),defaultWorkspaceRoot:this.defaultRoot};
   }
   async update(input: string): Promise<WorkspaceSettings> {
+    if(this.managed)throw new Error('Container workspace location is selected by the trusted host supervisor');
     let root = validPath(input);
     if (root === path.parse(root).root) throw new Error('Choose a workspace folder, not an entire drive or filesystem');
     try {
@@ -43,6 +45,7 @@ export class WorkspaceLocations {
     throw new Error('Too many projects with that name; choose a different name');
   }
   async browse(input?: string): Promise<DirectoryListing> {
+    if(this.managed)throw new Error('Host folder browsing/import is unavailable until managed transfer support is installed');
     const directory = await realpath(validPath(input ?? homedir()));
     if (!(await stat(directory)).isDirectory()) throw new Error('Select a folder');
     const shortcuts = [{name:'Home',path:homedir()},{name:'Workspace',path:this.settings().workspaceRoot}];
