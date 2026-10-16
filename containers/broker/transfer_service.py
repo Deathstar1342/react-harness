@@ -8,8 +8,8 @@ import stat
 import threading
 import time
 import uuid
-from protocol import require, exact, canonical, now, HEX, UUID
-from transfers import scan, copy, publish, verify_stage, root_handle, stamp, fsync_dir, component, NEVER
+from protocol import Denied, require, exact, canonical, now, HEX, UUID
+from transfers import scan, copy, publish, verify_stage, verify_source_metadata, root_handle, stamp, fsync_dir, component, NEVER
 
 MAX_TICKETS = 128
 MAX_RECORDS = 512
@@ -69,6 +69,7 @@ def select(storage, storage_id, source_install, kind, selected, project=None, in
     descriptor=private_json(storage/'runtime/control/session.json',2048)
     require(descriptor['storageId']==storage_id, 'STORAGE_CHANGED')
     base=area(storage)
+    journal_id=private_json(base/'identity',2048)['journalId']
     require(sum(1 for _ in (base/'tickets').iterdir()) < MAX_TICKETS, 'TRANSFER_TICKET_CAPACITY')
     if kind=='import':
         root=selected
@@ -87,7 +88,7 @@ def select(storage, storage_id, source_install, kind, selected, project=None, in
     with root_handle(destination.parent) as parent:
         destination_parent=stamp(os.fstat(parent))[:2]
     token=secrets.token_hex(32)
-    ticket={'id':str(uuid.uuid4()),'kind':kind,'storageId':storage_id,'sessionId':descriptor['sessionId'],
+    ticket={'journalId':journal_id,'id':str(uuid.uuid4()),'kind':kind,'storageId':storage_id,'sessionId':descriptor['sessionId'],
             'storageStamp':storage_stamp,'source':str(root),'destination':str(destination),'destinationParent':destination_parent,
             'project':project,'manifest':manifest,'expiresAt':now()+15*60*1000,'tokenHash':hashlib.sha256(token.encode()).hexdigest()}
     # Caller must explicitly confirm the already prepared manifest before writing.
@@ -103,12 +104,28 @@ class Transfers:
     def __init__(self,broker):
         self.broker=broker; self.db=broker.journal.db; self.root=Path(broker.docker.storage)/'runtime/transfers'
         self.threads={}; self.cancelled=set(); self.heartbeats={}
+        self.db.execute('CREATE TABLE IF NOT EXISTS transfer_identity(id TEXT NOT NULL)')
+        found=self.db.execute('SELECT id FROM transfer_identity').fetchall()
+        require(len(found)<=1,'TRANSFER_JOURNAL_CHANGED')
+        self.new_journal=not found
+        self.journal_id=found[0][0] if found else str(uuid.uuid4())
+        if not found:
+            with self.db:self.db.execute('INSERT INTO transfer_identity VALUES (?)',(self.journal_id,))
         self.db.execute('CREATE TABLE IF NOT EXISTS transfers(id TEXT PRIMARY KEY,data TEXT NOT NULL)')
         for (raw,) in self.db.execute('SELECT data FROM transfers').fetchall():
             row=json.loads(raw)
             if row['phase'] not in TERMINAL:
                 row.update(phase='uncertain',code='BROKER_RESTARTED',residue=True)
                 self.save(row)
+
+    def verify_journal(self):
+        marker=self.root/'identity'
+        if marker.exists():
+            require(not self.new_journal and private_json(marker,2048)=={'journalId':self.journal_id},'TRANSFER_JOURNAL_CHANGED')
+        else:
+            require(not self.rows() and not any((self.root/'tickets').iterdir()),'TRANSFER_JOURNAL_CHANGED')
+            write_new(marker,{'journalId':self.journal_id})
+        self.new_journal=False
 
     def save(self,row):
         with self.db:
@@ -137,7 +154,7 @@ class Transfers:
         raise ValueError('Unknown transfer')
 
     def dispatch(self,op,body):
-        exact(body,['code','kind','project'] if op=='transfer_begin' else ['code'])
+        exact(body,['code','kind','project'] if op=='transfer_begin' else ['code','project','sessionId','transferId','manifestDigest'] if op=='transfer_release' else ['code'])
         token=body['code']
         require(type(token) is str and HEX.fullmatch(token), 'INVALID_TRANSFER_CODE')
         if op=='transfer_begin':
@@ -145,7 +162,7 @@ class Transfers:
             require(not any(row['tokenHash']==digest for row in self.rows()), 'TRANSFER_ALREADY_CONSUMED')
             require(len(self.rows())<MAX_RECORDS, 'TRANSFER_RECORD_CAPACITY')
             ticket=private_json(self.root/'tickets'/digest)
-            require(ticket['tokenHash']==digest and ticket['storageId']==self.broker.docker.storage_id and ticket['sessionId']==self.broker.journal.session and ticket['expiresAt']>now(), 'TRANSFER_TICKET_EXPIRED')
+            require(ticket['journalId']==self.journal_id and ticket['tokenHash']==digest and ticket['storageId']==self.broker.docker.storage_id and ticket['sessionId']==self.broker.journal.session and ticket['expiresAt']>now(), 'TRANSFER_TICKET_EXPIRED')
             require(body['kind']==ticket['kind'] and (body['project'] is None if ticket['kind']=='import' else body['project']==ticket['project']), 'TRANSFER_TARGET_MISMATCH')
             if ticket['kind']=='export':
                 require(not self.busy(ticket['project']), 'TRANSFER_BUSY')
@@ -159,6 +176,23 @@ class Transfers:
             thread=threading.Thread(target=self.run,args=(row,),daemon=True)
             self.threads[row['id']]=thread;thread.start()
             return self.public(row)
+        if op=='transfer_release':
+            digest=hashlib.sha256(token.encode()).hexdigest()
+            rows=[row for row in self.rows() if row['tokenHash']==digest]
+            ticket=rows[0] if rows else private_json(self.root/'tickets'/digest)
+            require(ticket['journalId']==self.journal_id and ticket['kind']=='export' and ticket['project']==body['project'] and ticket['storageId']==self.broker.docker.storage_id and ticket['sessionId']==body['sessionId'],'TRANSFER_TARGET_MISMATCH')
+            require(body['transferId'] is None or body['transferId']==ticket['id'],'TRANSFER_TARGET_MISMATCH')
+            require(body['manifestDigest'] is None or body['manifestDigest']==ticket['manifest']['digest'],'TRANSFER_TARGET_MISMATCH')
+            with root_handle(self.broker.docker.storage) as storage:
+                require(stamp(os.fstat(storage))[:2]==ticket['storageStamp'],'STORAGE_CHANGED')
+            if rows:
+                thread=self.threads.get(ticket['id'])
+                require(ticket['phase'] in TERMINAL and (thread is None or not thread.is_alive()),'TRANSFER_STILL_ACTIVE')
+            else:
+                # Consume even an unused ticket: explicit release cannot leave a reusable copy grant.
+                row={**ticket,'phase':'cancelled','code':'NOT_STARTED','residue':False,'manifestDigest':ticket['manifest']['digest'],'files':0,'bytes':0,'excludedCount':0,'excluded':[],'history':ticket['manifest']['history'],'identity':None}
+                require(len(self.rows())<MAX_RECORDS,'TRANSFER_RECORD_CAPACITY');self.save(row)
+            return {'released':True,'receipt':self.public(ticket) if rows and ticket['code']!='NOT_STARTED' else None}
         row=self.get(token)
         if op=='transfer_observe':
             self.heartbeats[row['id']]=time.monotonic()
@@ -189,6 +223,7 @@ class Transfers:
             stage=self.root/'stages'/row['id'] if row['kind']=='import' else Path(row['destination']).parent/('.abyssus-transfer-'+row['id'])
             copy(row['source'],stage,row['manifest'],check=check,parent_identity=row['destinationParent'] if row['kind']=='export' else None)
             stage_identity=verify_stage(stage,row['manifest'],check)
+            verify_source_metadata(row['source'],row['manifest'],check)
             with self.broker.lock:
                 check()
                 with root_handle(Path(row['destination']).parent) as parent:
@@ -202,7 +237,7 @@ class Transfers:
         except Exception as error:
             with self.broker.lock:
                 # A publication or commit failure may have left a complete destination.
-                row.update(phase='failed' if isinstance(error,FileExistsError) else 'uncertain' if row['phase']=='publishing' else 'cancelled' if row['id'] in self.cancelled else 'failed',code='TRANSFER_INCOMPLETE',residue=True)
+                row.update(phase='failed' if isinstance(error,FileExistsError) else 'uncertain' if row['phase']=='publishing' else 'cancelled' if row['id'] in self.cancelled else 'failed',code=str(error) if isinstance(error,Denied) else 'DESTINATION_EXISTS' if isinstance(error,FileExistsError) else 'TRANSFER_INCOMPLETE',residue=True)
                 self.save(row)
 
     def close(self):

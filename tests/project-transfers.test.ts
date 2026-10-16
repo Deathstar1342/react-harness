@@ -73,3 +73,60 @@ it('changed immutable observations or final receipts cannot redirect registratio
     await expect(f.service.import('Copy','2'.repeat(64),new AbortController().signal)).rejects.toThrow();expect(f.store.projects()).toHaveLength(0);
   }
 });
+
+it('real Runtime and WorkspaceTools hold dirty-editor and mutation barriers throughout export',async()=>{
+  const {Runtime}=await import('../server/runtime.js');
+  const {WorkspaceTools}=await import('../server/tools/index.js');
+  const {readConfig}=await import('../server/config.js');
+  const {roleInstructions}=await import('../server/prompts.js');
+  const f=fixture(),root=path.join(f.workspace,f.receipt.project),home=path.join(f.root,'home');mkdirSync(home);
+  const project=f.store.createProject('Actual reservations',root),chat=f.store.createChat(project.id,'Paused work','balanced');
+  const tools=new WorkspaceTools();tools.configureSandbox({home,protectedPaths:[],projects:()=>[root]});
+  const config=readConfig({HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'data')});
+  const runtime=new Runtime(f.store,{models:async()=>[],complete:async()=>{throw Error('provider must not run');}},tools,config,{instructions:roleInstructions});
+  const service=new ProjectTransfers(f.store,runtime,tools,async()=>f.client,f.workspace);
+  const receipt={...f.receipt,kind:'export',phase:'copying'};
+  let started!:()=>void;const admitted=new Promise<void>(resolve=>{started=resolve;});
+  let finish!:()=>void;const gate=new Promise<void>(resolve=>{finish=resolve;});
+  f.client.request=async op=>{if(op==='transfer_begin'){started();return receipt;}await gate;return {...receipt,phase:'succeeded'};};
+  try {
+    tools.setDirty(root,'file.txt','editor',true);
+    await expect(service.export(project.id,'3'.repeat(64),new AbortController().signal)).rejects.toThrow(/edit|buffer|dirty/i);
+    tools.setDirty(root,'file.txt','editor',false);
+    const exporting=service.export(project.id,'3'.repeat(64),new AbortController().signal);
+    await admitted;
+    await expect(tools.save(root,'blocked.txt','no write',null,'another-editor')).rejects.toThrow(/pending|mutation/i);
+    expect(()=>tools.setDirty(root,'file.txt','new-editor',true)).toThrow(/pending/i);
+    await expect(runtime.submit(chat.id,'Start work')).rejects.toThrow(/pending|uncertain|recovery|progress/i);
+    finish();expect((await exporting).phase).toBe('succeeded');
+    expect(f.store.project(project.id).removalError).toBe('');
+    await tools.save(root,'after.txt','released only after terminal receipt',null,'editor');
+  }finally{finish?.();await runtime.close();await tools.dispose();}
+});
+
+it('durable export quarantine blocks removal/reset and survives lost release reply and COMMIT',async()=>{
+  const {Runtime}=await import('../server/runtime.js'),{WorkspaceTools}=await import('../server/tools/index.js'),{readConfig}=await import('../server/config.js'),{roleInstructions}=await import('../server/prompts.js');
+  const f=fixture(),root=path.join(f.workspace,f.receipt.project),home=path.join(f.root,'home');mkdirSync(home);
+  const project=f.store.createProject('Quarantined',root),tools=new WorkspaceTools();tools.configureSandbox({home,protectedPaths:[],projects:()=>[root]});
+  const runtime=new Runtime(f.store,{models:async()=>[],complete:async()=>{throw Error('no provider');}},tools,readConfig({HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'data')}),{instructions:roleInstructions});
+  const service=new ProjectTransfers(f.store,runtime,tools,async()=>f.client,f.workspace),code='4'.repeat(64);
+  f.client.request=async()=>{throw Error('lost begin');};
+  const original=f.store.db.exec.bind(f.store.db);
+  try {
+    await expect(service.export(project.id,code,new AbortController().signal)).rejects.toThrow('lost begin');
+    await expect(runtime.exclusiveRemoval(project.id,async()=>{})).rejects.toThrow('export reservation');
+    await expect(service.export(project.id,'5'.repeat(64),new AbortController().signal)).rejects.toThrow('export reservation');
+    await expect(service.release(project.id,'5'.repeat(64))).rejects.toThrow('does not own');
+    await expect(service.release(project.id,code)).rejects.toThrow('lost begin');
+    expect(f.store.getState(`transfer:reservation:${project.id}`,null)).not.toBeNull();
+    let calls=0;
+    f.client.request=async(op,body)=>{calls++;expect(op).toBe('transfer_release');expect(body).toMatchObject({sessionId:f.client.sessionId,project:f.receipt.project,transferId:null,manifestDigest:null});return {released:true,receipt:null};};
+    f.store.db.exec=(sql:string)=>{if(sql==='COMMIT')throw Error('release COMMIT failed');return original(sql);};
+    await expect(service.release(project.id,code)).rejects.toThrow('release COMMIT failed');
+    expect(f.store.getState(`transfer:reservation:${project.id}`,null)).not.toBeNull();
+    f.store.db.exec=original;
+    expect(await service.release(project.id,code)).toEqual({released:true,receipt:null});expect(calls).toBe(2);
+    expect(f.store.getState(`transfer:reservation:${project.id}`,null)).toBeNull();
+    await runtime.exclusiveRemoval(project.id,async()=>{});
+  }finally{f.store.db.exec=original;await runtime.close();await tools.dispose();}
+});

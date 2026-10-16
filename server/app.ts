@@ -162,7 +162,7 @@ export async function createApp(options: AppOptions) {
     else if (route.startsWith('/api/approvals/:id')) projectId=store.chat(store.getApproval(params.id).chatId).projectId;
     if (projectId) {
       if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
-      if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
+      if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
       requests.set(request.id,projectId);
     }
   });
@@ -222,6 +222,10 @@ export async function createApp(options: AppOptions) {
     const pending=transferSignal(request,reply);
     try {const result=await transfers.import(input.name,input.code,pending.signal);watchProject(result.project.id);return reply.code(201).send(result);}
     finally {pending.done();}
+  });
+  app.post('/api/projects/:id/transfer-release',async request=>{
+    if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');
+    const {code}=z.object({code:transferCode}).strict().parse(request.body);return transfers.release(paramId(request.params),code);
   });
   app.post('/api/projects/:id/export',async(request,reply)=>{
     if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');

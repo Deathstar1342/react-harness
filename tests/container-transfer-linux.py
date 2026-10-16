@@ -22,7 +22,8 @@ def check(name,condition=True):
     CHECKS.append(name);print('PASS M30:',name,flush=True)
 
 def api_session(start_output):
-    match=re.search(r'Browser pairing code \(single use, 5 minutes\): ([a-f0-9]{48})',start_output)
+    matches=re.findall(r'Browser pairing code \(single use, 5 minutes\): ([a-f0-9]{48})',start_output)
+    match=matches[-1] if matches else None
     assert match,'pairing code missing'
     opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     def api(route,body=None,method=None,fail=False):
@@ -34,7 +35,7 @@ def api_session(start_output):
         except urllib.error.HTTPError as error:
             if not fail: raise AssertionError(str(error)+': '+error.read().decode()) from None
             return error.code
-    api('/auth/pair',{'code':match[1]})
+    api('/auth/pair',{'code':match})
     return api
 
 def terminal_code(root,source):

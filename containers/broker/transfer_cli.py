@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from transfer_service import select, authorize, private_json
 from transfers import root_handle
-from protocol import require
+from protocol import require,Denied
 
 
 def main():
@@ -42,5 +42,6 @@ def main():
 if __name__=='__main__':
     try: main()
     except Exception as error:
-        print('Transfer was not authorized: '+type(error).__name__+'. Existing projects and sources are preserved.',file=sys.stderr)
+        reason=str(error) if isinstance(error,Denied) else 'SOURCE_OR_DESTINATION_UNAVAILABLE'
+        print('Transfer was not authorized: '+reason+'. Existing projects and sources are preserved.',file=sys.stderr)
         sys.exit(1)

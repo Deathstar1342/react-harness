@@ -266,6 +266,7 @@ def copy(root, stage, manifest, secrets=(), check=lambda: None, parent_identity=
                 try:
                     os.write(fd, GIT_CONFIG)
                     os.fsync(fd)
+                    os.fsync(git)
                 finally:
                     os.close(fd)
         for item in reversed(manifest['entries']):
@@ -353,6 +354,7 @@ def validate_git(root, check=lambda: None):
                                 require(header[:4] in (b'PACK',b'\xfftOc'),'INVALID_GIT_PACK')
                             else:
                                 require(bool(re.fullmatch(r'\.git/objects/[a-f0-9]{2}/[a-f0-9]{38}',rel)),'INVALID_GIT_OBJECT')
+                            verify_git_bytes(file,rel,item.st_size)
         with entry_handle(base,'.git',True) as git: walk(git,'.git')
 
 
@@ -381,3 +383,37 @@ def verify_stage(stage, manifest, check=lambda:None):
                         with entry_handle(root,rel) as file:require(hash_stream(file,(),check)==expected[rel]['hash'],'STAGE_CHANGED')
         walk(root);require(seen==set(expected),'STAGE_CHANGED')
         return identity
+
+def verify_source_metadata(root,manifest,check=lambda:None):
+    with root_handle(root) as source:
+        require(stamp(os.fstat(source))==manifest['root'],'SOURCE_CHANGED')
+        for entry in manifest['entries']:
+            check()
+            with entry_handle(source,entry['path'],entry['kind']=='directory') as fd:
+                require(stamp(os.fstat(fd))==entry['stamp'],'SOURCE_CHANGED')
+
+
+def verify_git_bytes(fd,rel,size):
+    """Bounded integrity checks; no checkout or interpretation of tree paths."""
+    os.lseek(fd,0,os.SEEK_SET)
+    if re.fullmatch(r'\.git/objects/[a-f0-9]{2}/[a-f0-9]{38}',rel):
+        import zlib
+        inflater=zlib.decompressobj();digest=hashlib.sha1();count=0;header=b'';body_start=None
+        while block:=os.read(fd,1024**2):
+            raw=inflater.decompress(block,MAX_FILE-count+1);count+=len(raw)
+            require(count<=MAX_FILE and not inflater.unconsumed_tail,'GIT_EXPANSION_LIMIT')
+            digest.update(raw)
+            if body_start is None:
+                header+=raw[:128]
+                if b'\0' in header:
+                    value=header.split(b'\0',1)[0];body_start=len(value)+1
+                    require(re.fullmatch(rb'(blob|tree|commit|tag) [0-9]{1,10}',value),'INVALID_GIT_OBJECT')
+                    declared=int(value.split(b' ')[1])
+                else:require(len(header)<128,'INVALID_GIT_OBJECT')
+        require(inflater.eof and not inflater.unused_data and body_start is not None and count-body_start==declared and digest.hexdigest()==rel.split('/')[-2]+rel.split('/')[-1],'INVALID_GIT_OBJECT')
+    elif rel=='.git/index' or re.fullmatch(r'\.git/objects/pack/pack-[a-f0-9]{40}\.(pack|idx)',rel):
+        require(size>=32,'INVALID_GIT_METADATA')
+        digest=hashlib.sha1();remaining=size-20
+        while remaining:
+            block=os.read(fd,min(1024**2,remaining));require(bool(block),'SOURCE_CHANGED');remaining-=len(block);digest.update(block)
+        require(os.read(fd,20)==digest.digest(),'INVALID_GIT_CHECKSUM')

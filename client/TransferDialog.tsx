@@ -25,6 +25,9 @@ export function TransferDialog({project,onClose,onImported}:{project?:Project;on
     {error&&<p role="alert">{error}</p>}
     {receipt&&<div role="status"><p>Copy completed: {receipt.files} files, {receipt.bytes.toLocaleString()} bytes. {receipt.excludedCount} excluded entries. {receipt.history?'Selected Git history retained; hooks/config/logs omitted.':'Fresh local Git repository created.'}</p>
       {receipt.excluded.length>0&&<details><summary>Excluded files and folders</summary><ul>{receipt.excluded.map(e=><li key={e.path}><code>{e.path}</code>: {e.reason}</li>)}</ul>{receipt.excludedCount>receipt.excluded.length&&<p>First 100 shown. Full manifest is retained privately on the host.</p>}</details>}</div>}
+    {project&&!receipt&&<button className="text-button" disabled={busy||!/^[a-f0-9]{64}$/.test(code)} onClick={()=>{
+      setBusy(true);setError('');void request(`/projects/${project.id}/transfer-release`,{method:'POST',body:JSON.stringify({code})}).then(()=>setError('Host confirmed the export is stopped. Reservation released; retained output was not retried or deleted.')).catch(e=>setError(errorText(e))).finally(()=>setBusy(false));
+    }}>Verify stopped export and release reservation</button>}
     <div className="dialog-actions">{busy?<button className="button" onClick={()=>controller.current?.abort()}>Cancel copy</button>:<button className="button" onClick={onClose}>Close</button>}
       {imported?<button className="button primary" onClick={()=>onImported?.(imported)}>Open project</button>:!receipt&&<button className="button primary" disabled={busy||!/^[a-f0-9]{64}$/.test(code)||!project&&!name.trim()} onClick={()=>void run()}>{project?'Export copy':'Import copy'}</button>}
     </div>

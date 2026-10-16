@@ -82,6 +82,7 @@ class TransferFaults(unittest.TestCase):
         self.broker=Broker(self.journal,Docker(self.storage,self.sid))
         from transfer_service import area,write_new
         area(self.storage)
+        self.broker.transfers.verify_journal()
         write_new(self.storage/'runtime/control/session.json',{'storageId':self.sid,'sessionId':self.journal.session})
         self.source=self.base/'original';self.source.mkdir();(self.source/'file').write_text('original')
         self.install=self.base/'install';self.install.mkdir()
@@ -156,5 +157,36 @@ class TransferFaults(unittest.TestCase):
         self.assertEqual(self.broker.dispatch('transfer_observe',{'code':token})['phase'],'uncertain')
         self.assertFalse(Path(ticket['destination']).exists())
         with self.assertRaises(Exception):self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+
+
+
+    def test_release_tombstones_delayed_begin_and_refuses_wrong_session(self):
+        token,ticket=self.ticket();self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None});self.assertEqual(self.wait(token)['phase'],'succeeded')
+        code,export=self.ticket('export',self.base/'released-export',ticket['project'])
+        body={'code':code,'project':ticket['project'],'sessionId':export['sessionId'],'transferId':None,'manifestDigest':None}
+        with self.assertRaises(Exception):self.broker.dispatch('transfer_release',{**body,'sessionId':'wrong'})
+        with self.assertRaises(Exception):self.broker.dispatch('transfer_release',{**body,'project':'wrong'})
+        result=self.broker.dispatch('transfer_release',body);self.assertEqual(result,{'released':True,'receipt':None})
+        with self.assertRaises(Exception):self.broker.dispatch('transfer_begin',{'code':code,'kind':'export','project':ticket['project']})
+        self.assertEqual(self.broker.dispatch('transfer_release',body),result)
+        self.assertFalse(Path(export['destination']).exists())
+    def test_journal_continuity_and_active_thread_release(self):
+        from transfer_service import Transfers
+        from unittest.mock import Mock
+        token,ticket=self.ticket();self.broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None});self.assertEqual(self.wait(token)['phase'],'succeeded')
+        code,export=self.ticket('export',self.base/'thread-export',ticket['project'])
+        self.broker.dispatch('transfer_begin',{'code':code,'kind':'export','project':ticket['project']});self.assertEqual(self.wait(code)['phase'],'succeeded')
+        thread=self.broker.transfers.threads[export['id']];thread.join(2)
+        self.broker.transfers.threads[export['id']]=Mock(is_alive=lambda:True)
+        body={'code':code,'project':ticket['project'],'sessionId':export['sessionId'],'transferId':export['id'],'manifestDigest':export['manifest']['digest']}
+        with self.assertRaises(Exception):self.broker.dispatch('transfer_release',body)
+        self.broker.transfers.threads[export['id']]=thread
+        result=self.broker.dispatch('transfer_release',body);self.assertTrue(result['released'])
+        self.broker.transfers=Transfers(self.broker);self.broker.transfers.verify_journal()
+        self.assertEqual(self.broker.dispatch('transfer_release',body),result)
+        self.journal.db.execute('DELETE FROM transfer_identity');self.journal.db.commit()
+        replaced=Transfers(self.broker)
+        with self.assertRaises(Exception):replaced.verify_journal()
+        with self.assertRaises(Exception):replaced.dispatch('transfer_release',body)
 
 if __name__ == '__main__': unittest.main()

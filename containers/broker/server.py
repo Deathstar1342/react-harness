@@ -31,7 +31,7 @@ class Broker:
 
     def dispatch(self, op, body):
         with self.lock:
-            require(not self.closing or op in ('observe','install_status'), 'BROKER_CLOSING')
+            require(not self.closing or op in ('observe','install_status','transfer_observe','transfer_cancel','transfer_release'), 'BROKER_CLOSING')
             if op.startswith('transfer_'):
                 return self.transfers.dispatch(op, body)
             if op.startswith('install_') or op == 'reset':
@@ -276,6 +276,7 @@ def serve(storage, storage_id, source, context):
     from transfer_service import area
     area(storage)
     broker = Broker(journal, docker)
+    broker.transfers.verify_journal()
     proxy_env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
     proxy = subprocess.Popen(['/usr/bin/python3', '-I', str(Path(source) / 'containers/broker/egress.py'), str(runtime / 'egress/proxy.sock')], env=proxy_env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     class Handler(socketserver.StreamRequestHandler):

@@ -66,20 +66,47 @@ export class ProjectTransfers {
       throw error;
     }
   }
+  async release(projectId:string,code:string) {
+    transferCode.parse(code);
+    const project=this.store.project(projectId);
+    if(!this.tools.removeScope)throw new Error('Tool reservation unavailable');
+    return this.runtime.exclusiveProjectEdit(projectId,async()=>await this.tools.removeScope!(project.path,undefined,async()=>{
+      const reservation=this.store.getState<{claim:string;sessionId:string;storageId:string;identity:[number,number]}|null>(`transfer:reservation:${projectId}`,null);
+      if(!reservation||reservation.claim!==key(code))throw new Error('This code does not own the pending export reservation');
+      const info=lstatSync(project.path);
+      if(!info.isDirectory()||info.isSymbolicLink()||info.dev!==reservation.identity[0]||info.ino!==reservation.identity[1])throw new Error('Reserved managed project identity changed');
+      const client=await this.connect();
+      if(client.storageId!==reservation.storageId)throw new Error('Export storage identity changed');
+      const prior=this.store.getState<{receipt?:ProjectTransferReceipt}>(key(code),{}).receipt;
+      const result=z.object({released:z.literal(true),receipt:statusSchema.nullable()}).strict().parse(await client.request('transfer_release',{code,project:path.basename(project.path),sessionId:reservation.sessionId,transferId:prior?.id??null,manifestDigest:prior?.manifestDigest??null}));
+      if(result.receipt&&(result.receipt.kind!=='export'||result.receipt.project!==path.basename(project.path)||result.receipt.storageId!==reservation.storageId||result.receipt.sessionId!==reservation.sessionId||['copying','publishing'].includes(result.receipt.phase)||prior&&(result.receipt.id!==prior.id||result.receipt.manifestDigest!==prior.manifestDigest)))throw new Error('Export is not confirmed stopped');
+      if(prior&&!result.receipt)throw new Error('Previously observed transfer claim disappeared');
+      return this.store.transaction(()=>{
+        const current=lstatSync(project.path);
+        if(current.dev!==reservation.identity[0]||current.ino!==reservation.identity[1]||this.store.getState<{claim:string}|null>(`transfer:reservation:${projectId}`,null)?.claim!==key(code))throw new Error('Export reservation changed');
+        this.store.setState(key(code),{...this.store.getState<Record<string,unknown>>(key(code),{}),released:true,receipt:result.receipt});
+        this.store.setState(`transfer:reservation:${projectId}`,null);this.store.removalError(projectId,'');
+        return {released:true as const,receipt:result.receipt};
+      });
+    }),true);
+  }
   async export(projectId:string,code:string,signal:AbortSignal):Promise<ProjectTransferReceipt> {
     const project=this.store.project(projectId);
     if(path.dirname(project.path)!==this.workspace||!this.tools.removeScope)throw new Error('Only managed project copies can be exported');
     return this.runtime.exclusiveRemoval(projectId,async()=>await this.tools.removeScope!(project.path,undefined,async()=>{
+      const client=await this.connect();
       this.claim(code);
       // Persist before yielding: restart cannot silently clear a still-live export.
+      const identity=lstatSync(project.path);
+      this.store.setState(`transfer:reservation:${projectId}`,{claim:key(code),sessionId:client.sessionId,storageId:client.storageId,identity:[identity.dev,identity.ino]});
       this.store.removalError(projectId,'Export is pending or uncertain. Wait for its confirmed receipt before editing this managed copy.');
       try {
-        const result=await this.copy(await this.connect(),code,'export',path.basename(project.path),signal);
-        this.store.removalError(projectId,'');
+        const result=await this.copy(client,code,'export',path.basename(project.path),signal);
+        this.store.transaction(()=>{this.store.setState(`transfer:reservation:${projectId}`,null);this.store.removalError(projectId,'');});
         return result;
       } catch(error) {
         const claim=this.store.getState<{phase?:string}>(key(code),{});
-        if(['failed','cancelled'].includes(claim.phase??''))this.store.removalError(projectId,'');
+        if(['failed','cancelled'].includes(claim.phase??''))this.store.transaction(()=>{this.store.setState(`transfer:reservation:${projectId}`,null);this.store.removalError(projectId,'');});
         throw error;
       }
     }));
