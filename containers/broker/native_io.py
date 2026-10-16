@@ -73,7 +73,11 @@ if os.name=='nt':
         def fstat(self,fd):return os.fstat(fd)
         def scandir(self,fd):return os.scandir(self.path_for(fd))
         def listdir(self,fd):return os.listdir(self.path_for(fd))
-        def mkdir(self,name,mode=0o700,*,dir_fd=None):os.mkdir(self.path_for(name,dir_fd),mode)
+        def mkdir(self,name,mode=0o700,*,dir_fd=None):
+            # Inherit the already checked native parent DACL. CPython's special
+            # 0700 Windows ACL uses OWNER RIGHTS, outside our explicit SID set.
+            # Private callers still verify the resulting actual DACL.
+            os.mkdir(self.path_for(name,dir_fd))
         def unlink(self,name,*,dir_fd=None):os.unlink(self.path_for(name,dir_fd))
         def replace(self,source,destination,*,src_dir_fd=None,dst_dir_fd=None):
             from windows_handles import rename_handle

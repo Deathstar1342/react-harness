@@ -1,6 +1,7 @@
 """Fixed-image read-only slot probe, exact owned creation and no replay."""
 from pathlib import Path
 import json
+import os
 import secrets
 from protocol import require,canonical
 from storage_proof import validate_probe,SLOTS
@@ -10,7 +11,7 @@ class FixedStorageProbe:
         self.docker=docker;self.image=image;self.uid=uid;self.gid=gid
     def __call__(self,challenge):
         storage=self.docker.storage
-        area=storage/'runtime/probes'/challenge['probeId'];area.mkdir(parents=True,mode=0o700)
+        area=storage/'runtime/probes'/challenge['probeId'];area.mkdir(parents=True,mode=0o777 if os.name=='nt' else 0o700)
         mounts=[(storage/('runtime/control' if slot=='control' else slot),'/probe/'+slot,True) for slot in SLOTS]
         mounts.append((area,'/probe/write',False))
         args=['--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','32','--memory','256m','--cpus','1','--user',f'{self.uid}:{self.gid}','--tmpfs','/tmp:size=16m,mode=1777','--entrypoint','/usr/local/bin/node','-i']

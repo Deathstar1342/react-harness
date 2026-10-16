@@ -67,7 +67,7 @@ class Packages:
     def companion(self):
         args = ['--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                 '--pids-limit', '64', '--memory', '128m', '--cpus', '1', '--user', f'{self.docker.uid}:{self.docker.gid}',
-                '--mount', f'type=bind,src={self.docker.storage / "runtime/egress"},dst=/run/egress,readonly',
+                '--mount', self.docker.egress_mount(),
                 '--entrypoint', '/usr/bin/python3', self.docker.image, '-I', '/opt/abyssus-worker/worker-bridge.py']
         container = self.docker.resources.create(args, self.docker.image, 'companion')
         self.docker.call(['start',container])
@@ -88,6 +88,8 @@ class Packages:
                 'APT_CONFIG=/usr/lib/abyssus-helper/apt.conf', 'DEBIAN_FRONTEND=noninteractive',
                 'http_proxy=http://127.0.0.1:3128', 'https_proxy=http://127.0.0.1:3128',
                 '/usr/bin/python3', '-I', '-B', '/opt/abyssus-packages/container-apt.py']
+        barrier=getattr(self.docker,'storage_barrier',None)
+        if barrier:barrier()
         value = self.docker.call(args, timeout=300, input=canonical({'target': row['target'], 'action': action, 'body': body}) + '\n')
         from protocol import decode
         return decode(value.encode())
@@ -232,6 +234,8 @@ class Packages:
                     if owned['project'] == row['project']:
                         self.docker.close(context)
                 self.cleanup(row)
+                barrier=getattr(self.docker,'storage_barrier',None)
+                if barrier:barrier()
                 head = {'imageId': image, 'generation': str(uuid.uuid4())}
                 row.update(phase='succeeded', attestation=attestation, resultGeneration=head['generation'], recipe=row['record']['preview']['packages'])
                 with self.db:

@@ -77,7 +77,9 @@ try:
     from resources import Resources
     from storage_probe import FixedStorageProbe
     class ProbeDocker:
-        storage=STORAGE;storage_id=launch['storageId']
+        storage=STORAGE;storage_id=launch['storageId'];uid=os.getuid();gid=os.getgid()
+        def verify_engine(self):assert json.loads(docker('info','--format','{{json .}}'))['ID']==engine['ID']
+        def storage_barrier(self):assert (STORAGE/'.storage-id').read_text()==launch['storageId']+'\n'
         def call(self,args,timeout=30,input=None):
             result=subprocess.run(['docker','--context',context,*args],input=input,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=ENV,timeout=timeout)
             assert result.returncode==0,'fixed probe engine operation failed';return result.stdout
@@ -110,7 +112,6 @@ print('SOCKET_EGRESS_PROVED')
     check('real socket companion allows public TLS connection and denies private metadata/direct networking','SOCKET_EGRESS_PROVED' in socket_output)
     probe_docker.resources.remove(socket_worker);egress.terminate();egress.wait()
     check('exact companion and ephemeral socket volume cleanup verified',not egress.present(egress.row))
-    probe_docker.resources.db.close()
     api('/health',token=False,expected=401);api('/auth/pair',{'code':'0'*48},expected=403,token=False)
     check('controller requires bearer and disables browser pairing')
     project=api('/projects',{'name':'Desktop persistence','mode':'create'},201)
@@ -119,6 +120,13 @@ print('SOCKET_EGRESS_PROVED')
     authorized=request({'op':'transfer-authorize','handle':selected['handle']})
     imported=api('/project-transfers/import',{'name':'Native import','code':authorized['code']},201)
     check('native host handoff imports through real M30 copy and registration',imported['receipt']['phase']=='succeeded' and (source/'hello.txt').read_text()=='native picker handoff fixture')
+    from project_identity import ProjectIdentity
+    binding={key:launch[key] for key in ('storageId','launchId','engineId','context','controllerImage')};binding['probeImage']=launch['controllerImage']
+    session=json.loads((STORAGE/'runtime/control/session.json').read_text())['sessionId']
+    mapper=ProjectIdentity(probe_docker,binding,session,measured['slots']['workspace'])
+    mapped=mapper.observe(imported['receipt']['project']);remapped=mapper.observe(imported['receipt']['project'])
+    check('fixed readonly whole-workspace probe matches actual registered Linux project identity',mapped==remapped and mapped['identity']==imported['receipt']['identity'])
+    probe_docker.resources.db.close()
     old_instance=ready['identity']['instanceId']
     # Kill only our exact disposable supervisor child. Controller/broker ownership persists.
     child.kill();child.wait(timeout=10);launch.update(mode='existing',key=secrets.token_hex(32),token=secrets.token_hex(32),launchId=str(uuid.uuid4()))

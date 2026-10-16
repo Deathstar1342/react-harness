@@ -123,6 +123,8 @@ class Broker:
                     raise Denied('CANCELLED_AFTER_ACCEPTANCE')
                 record.update(state='running', code='RUNNING')
                 self.journal.save(record)
+                barrier=getattr(self.docker,'storage_barrier',None)
+                if barrier:barrier()
                 process, payload = self.docker.launch(record, proof_key)
             watchdog = threading.Timer(original['timeoutMs'] / 1000 + 45, process.kill)
             watchdog.daemon = True

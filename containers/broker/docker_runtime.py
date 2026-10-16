@@ -44,6 +44,12 @@ class Docker:
             self.blank.chmod(0o600)
         require(self.blank.is_file() and not self.blank.is_symlink() and self.blank.stat().st_size == 0, 'UNSAFE_MASK')
 
+    def storage_barrier(self):
+        require(os.name!='nt','NATIVE_ADAPTER_REQUIRED')
+
+    def egress_mount(self):
+        return f'type=bind,src={self.storage / "runtime" / "egress"},dst=/run/egress,readonly'
+
     def argv(self, args):
         return ['docker', '--context', self.context, *args]
 
@@ -109,7 +115,7 @@ class Docker:
                 '--mount', f'type=bind,src={root},dst={target}',
                 '--mount', f'type=bind,src={cache / "home"},dst=/home/worker',
                 '--mount', f'type=bind,src={cache / "cache"},dst=/cache',
-                '--mount', f'type=bind,src={self.storage / "runtime" / "egress"},dst=/run/egress,readonly']
+                '--mount', self.egress_mount()]
         for mask in masks:
             destination = target + '/' + mask['path']
             if mask['directory']:
@@ -136,6 +142,7 @@ class Docker:
         self.verify(owned)
         args = ['exec', '-i', '--user', '0:0', owned['container'], '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin',
                 '/usr/bin/python3', '-I', '/opt/abyssus-worker/worker-runner.py']
+        self.storage_barrier()
         process = subprocess.Popen(self.argv(args), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
         request = {k: record[k] for k in ('claimId', 'project', 'operation', 'timeoutMs', 'outputLimit')}
         request.update(uid=self.uid, gid=self.gid, proofKey=proof_key)

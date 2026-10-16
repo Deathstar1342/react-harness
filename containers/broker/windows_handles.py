@@ -212,6 +212,7 @@ class NativeStorageGuard:
             self.root=self.stack.enter_context(PinnedPath(root,directory=True))
             self.root_proof=self.root.private(protected_root=True)
             self.ancestors=[(h,object_identity(h),security_fingerprint(h)) for h in self.root.handles]
+            self.runtime=self.stack.enter_context(PinnedPath(Path(root)/'runtime',directory=True));self.runtime_proof=self.runtime.private()
             self.pins={name:self.stack.enter_context(PinnedPath(Path(root)/relative,directory=True)) for name,relative in self.slots.items()}
             self.evidence={name:pin.private() for name,pin in self.pins.items()}
             if len({(v['volume'],v['fileId']) for v in self.evidence.values()})!=4:raise ValueError('STORAGE_SLOT_ALIAS')
@@ -224,6 +225,8 @@ class NativeStorageGuard:
                 import sys,json
                 print(json.dumps({'event':'native-ancestor-changed','fields':[key for key in identity if current[key]!=identity[key]],'securityChanged':security_changed}),file=sys.stderr,flush=True)
                 raise ValueError('NATIVE_ANCESTOR_CHANGED')
+        self.runtime.verify()
+        if self.runtime.private()!=self.runtime_proof:raise ValueError('NATIVE_RUNTIME_CHANGED')
         for name,pin in self.pins.items():
             pin.verify()
             if pin.private()!=self.evidence[name]:raise ValueError('NATIVE_SLOT_CHANGED')
@@ -237,6 +240,7 @@ class NativeStorageGuard:
             nonlocal count
             if depth>64:raise ValueError('PRIVATE_STORAGE_DEPTH')
             for child in Path(directory).iterdir():
+                if Path(directory)==Path(self.runtime.path) and child.name=='dependencies':continue # worker-owned cache class, checked separately at dispatch
                 count+=1
                 if count>100000:raise ValueError('PRIVATE_STORAGE_LIMIT')
                 # SQLite may hold a write transaction; this is ACL/identity
@@ -244,7 +248,8 @@ class NativeStorageGuard:
                 with PinnedPath(child,share_write=True) as pin:
                     pin.private()
                     if pin.identity['directory']:visit(child,depth+1)
-        for name in ('state','config','control'):visit(self.pins[name].path,0)
+        for name in ('state','config'):visit(self.pins[name].path,0)
+        visit(self.runtime.path,0)
     def close(self):self.stack.close()
     def __enter__(self):return self
     def __exit__(self,*_):self.close()

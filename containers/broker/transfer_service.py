@@ -48,7 +48,7 @@ def write_new(file, value):
 def area(storage):
     result=Path(storage)/'runtime/transfers'
     for directory in (result, result/'tickets', result/'stages'):
-        directory.mkdir(mode=0o700, exist_ok=True)
+        directory.mkdir(mode=0o777 if os.name=='nt' else 0o700, exist_ok=True)
         with root_handle(directory) as fd:
             info=os.fstat(fd)
             private_fd(fd)
@@ -329,10 +329,20 @@ class Transfers:
         if op=='transfer_receipt':
             require(row['phase']=='succeeded' and row['kind']=='import', 'TRANSFER_NOT_COMPLETE')
             require(not row.get('redeemed'), 'TRANSFER_RECEIPT_CONSUMED')
-            with root_handle(row['destination']) as fd:
-                require(stamp(os.fstat(fd))[:2]==row['identity'], 'TRANSFER_IDENTITY_CHANGED')
-            require(verify_stage(row['destination'],row['manifest'])==row['identity'],'TRANSFER_IDENTITY_CHANGED')
-            row['redeemed']=True;self.save(row)
+            try:
+                with root_handle(row['destination']) as fd:
+                    native=row.get('nativeIdentity',row['identity'])
+                    require(stamp(os.fstat(fd))[:2]==native, 'TRANSFER_IDENTITY_CHANGED')
+                    require(verify_stage(row['destination'],row['manifest'])==native,'TRANSFER_IDENTITY_CHANGED')
+                    if os.name=='nt':
+                        require(row.get('linuxMapping') is not None,'PROJECT_MAPPING_REQUIRED')
+                        require(self.broker.docker.project_identity(row['project'])==row['linuxMapping'],'PROJECT_MAPPING_CHANGED')
+                        require(verify_stage(row['destination'],row['manifest'])==native,'TRANSFER_IDENTITY_CHANGED')
+                    row['redeemed']=True;self.save(row)
+            except Exception:
+                if os.name=='nt':
+                    row.update(phase='uncertain',code='PROJECT_MAPPING_UNCERTAIN',residue=True);self.save(row)
+                raise
             return self.public(row)
         raise ValueError('Unknown transfer operation')
 
@@ -367,6 +377,8 @@ class Transfers:
     def run_locked(self,row):
         def check():
             with self.broker.lock:
+                barrier=getattr(self.broker.docker,'storage_barrier',None)
+                if barrier:barrier()
                 require(row['id'] not in self.cancelled and not self.broker.closing, 'TRANSFER_CANCELLED')
                 require(now()<row['expiresAt'] and time.monotonic()-self.heartbeats[row['id']]<15, 'TRANSFER_HEARTBEAT_LOST')
                 if row['kind']=='export': self.idle(row['project'])
@@ -386,7 +398,15 @@ class Transfers:
                 row.update(phase='publishing',code='PUBLISHING');self.save(row)
                 publish(stage,Path(row['destination']),stage_identity,row['destinationParent'])
                 with root_handle(row['destination']) as fd:
-                    row['identity']=stamp(os.fstat(fd))[:2]
+                    published_identity=stamp(os.fstat(fd))[:2]
+                    row['identity']=None if os.name=='nt' else published_identity
+                    if os.name=='nt' and row['kind']=='import':
+                        row['nativeIdentity']=published_identity
+                        require(verify_stage(row['destination'],row['manifest'])==row['nativeIdentity'],'TRANSFER_IDENTITY_CHANGED')
+                        row['linuxMapping']=self.broker.docker.project_identity(row['project'])
+                        require(verify_stage(row['destination'],row['manifest'])==row['nativeIdentity'],'TRANSFER_IDENTITY_CHANGED')
+                        row['identity']=row['linuxMapping']['identity']
+                check()
                 row.update(phase='succeeded',code='COMPLETE_WITH_EXCLUSIONS' if row['excludedCount'] else 'COMPLETE',residue=False)
                 self.save(row)
         except Exception as error:

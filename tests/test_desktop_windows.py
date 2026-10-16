@@ -45,6 +45,61 @@ class NativeHandles(unittest.TestCase):
         publish(stage,self.root/'destination',identity)
         self.assertEqual((self.root/'destination/hello.txt').read_text(),'edited bytes');self.assertEqual((source/'hello.txt').read_text(),'edited bytes')
 
+    def test_native_transfer_maps_linux_identity_and_retains_published_uncertainty(self):
+        import time,uuid
+        from protocol import Journal
+        from server import Broker
+        from transfer_service import area,write_new,select,authorize
+        for failure in ('none','lost-publication-probe','changed-redemption'):
+            with self.subTest(failure=failure):
+                base=self.root/failure;base.mkdir();storage=base/'storage';storage.mkdir();self.native.privatize_empty(storage)
+                for name in ('runtime','runtime/control','workspace'):(storage/name).mkdir()
+                storage_id=str(uuid.uuid4());(storage/'.storage-id').write_text(storage_id+'\n')
+                journal=Journal(str(storage/'runtime/journal.sqlite'),str(uuid.uuid4()))
+                class Docker:
+                    contexts={};images={};calls=0
+                    def storage_barrier(self):pass
+                    def project_identity(self,project):
+                        self.calls+=1
+                        if failure=='lost-publication-probe':raise TimeoutError()
+                        return {'project':project,'sessionId':journal.session,'identity':['55','99' if failure=='changed-redemption' and self.calls>1 else '66']}
+                docker=Docker();docker.storage=storage;docker.storage_id=storage_id;broker=Broker(journal,docker)
+                area(storage);broker.transfers.verify_journal();write_new(storage/'runtime/control/session.json',{'storageId':storage_id,'sessionId':journal.session})
+                source=base/'original';source.mkdir();(source/'file').write_text('original');install=base/'install';install.mkdir()
+                try:
+                    # Local mandated D fixtures live beneath .codex. Limit this fixture-only
+                    # ancestor policy substitution to selection; production policy stays strict.
+                    from unittest.mock import patch
+                    from transfer_service import NEVER
+                    with patch('transfer_service.NEVER',NEVER-{'.codex'}):token,ticket=select(storage,storage_id,install,'import',source)
+                    authorize(storage,token,ticket)
+                    broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+                    end=time.monotonic()+10
+                    while True:
+                        result=broker.dispatch('transfer_observe',{'code':token})
+                        if result['phase'] not in ('copying','publishing'):break
+                        self.assertLess(time.monotonic(),end);time.sleep(.01)
+                    self.assertEqual((Path(ticket['destination'])/'file').read_text(),'original')
+                    self.assertEqual((source/'file').read_text(),'original')
+                    self.assertNotIn('nativeIdentity',result);self.assertNotIn('linuxMapping',result)
+                    if failure=='lost-publication-probe':
+                        self.assertEqual(result['phase'],'uncertain',result);self.assertTrue(result['residue']);self.assertIsNone(result['identity'])
+                        with self.assertRaises(Exception):broker.dispatch('transfer_receipt',{'code':token})
+                    else:
+                        self.assertEqual(result['phase'],'succeeded',result);self.assertEqual(result['identity'],['55','66'])
+                        if failure=='changed-redemption':
+                            with self.assertRaisesRegex(Exception,'MAPPING_CHANGED'):broker.dispatch('transfer_receipt',{'code':token})
+                            calls=docker.calls
+                            with self.assertRaisesRegex(Exception,'NOT_COMPLETE'):broker.dispatch('transfer_receipt',{'code':token})
+                            self.assertEqual(calls,docker.calls)
+                        else:
+                            self.assertEqual(broker.dispatch('transfer_receipt',{'code':token}),result)
+                            with self.assertRaises(Exception):broker.dispatch('transfer_receipt',{'code':token})
+                    calls=docker.calls
+                    with self.assertRaises(Exception):broker.dispatch('transfer_begin',{'code':token,'kind':'import','project':None})
+                    self.assertEqual(calls,docker.calls)
+                finally:broker.transfers.close();journal.db.close()
+
     def set_acl(self,path,sddl,protected=True):
         n=self.native;descriptor=n.C.c_void_p();size=n.W.DWORD()
         n.ok(n.a.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl,1,n.C.byref(descriptor),n.C.byref(size)),'TEST_ACL_FAILED')
@@ -192,6 +247,15 @@ class NativeHandles(unittest.TestCase):
                 return result
             with patch.object(self.native,'private_acl',changed):
                 with self.assertRaisesRegex(ValueError,'NATIVE_SLOT_CHANGED'):guard.verify()
+
+    def test_engine_known_folder_lookup_and_write_acl_refusal_are_native_read_only(self):
+        from windows_engine import program_files,trusted_installer_sid,trusted_program_acl
+        self.assertTrue(program_files().is_dir());self.assertRegex(trusted_installer_sid(),r'^S-1-5-80-')
+        self.native.privatize_empty(self.root);user=self.native.current_sid();trusted={user,'S-1-5-18','S-1-5-32-544'}
+        with self.native.PinnedPath(self.root,directory=True) as pin:trusted_program_acl(pin.handle,trusted)
+        self.set_acl(self.root,f'O:{user}D:P(A;OICI;FA;;;{user})(A;OICI;FW;;;WD)')
+        with self.native.PinnedPath(self.root,directory=True) as pin:
+            with self.assertRaisesRegex(Exception,'WRITABLE_DOCKER_INSTALL'):trusted_program_acl(pin.handle,trusted)
 
     def test_hardlinks_and_nonlocal_paths_are_rejected(self):
         file=self.root/'file';file.write_text('x');os.link(file,self.root/'hardlink')
