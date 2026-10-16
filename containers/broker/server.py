@@ -226,9 +226,7 @@ class Broker:
                         for field in ('container','companion'):
                             if row.get(field):
                                 try:
-                                    self.docker.call(['stop','--time','5',row[field]])
-                                    info=json.loads(self.docker.call(['inspect',row[field]]))[0]
-                                    require(not info['State']['Running'],'INSTALL_CLEANUP_UNCERTAIN')
+                                    self.docker.resources.stop(row[field])
                                 except Exception:
                                     errors.append('INSTALL_CLEANUP_UNCERTAIN')
             for job in jobs:

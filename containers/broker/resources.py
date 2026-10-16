@@ -74,6 +74,17 @@ class Resources:
         row['phase']='removed'
         self.save(row)
 
+    def stop(self, container):
+        row=self.find(container)
+        if not self.present(row):
+            row['phase']='removed';self.save(row)
+            return False
+        if self.verify(row)['State']['Running']:
+            self.docker.call(['stop','--time','5',container])
+        require(not self.verify(row)['State']['Running'],'CLEANUP_UNCERTAIN')
+        row['phase']='retained-stopped';self.save(row)
+        return True
+
     def recover(self):
         errors=[]
         with self.lock:
@@ -86,10 +97,7 @@ class Resources:
                     row['phase']='removed';self.save(row);continue
                 info=self.verify(row)
                 if row['kind']=='maintenance':
-                    if info['State']['Running']:
-                        self.docker.call(['stop','--time','5',row['id']])
-                    require(not self.verify(row)['State']['Running'],'CLEANUP_UNCERTAIN')
-                    row['phase']='retained-stopped';self.save(row)
+                    self.stop(row['id'])
                 else:
                     self.remove(row['id'])
             except Exception:

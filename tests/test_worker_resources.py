@@ -46,6 +46,11 @@ class Ownership(unittest.TestCase):
         with self.assertRaises(Denied):self.resources.remove(id)
         self.assertEqual(self.resources.find(id)['phase'],'created')
         self.engine.offline=False;self.resources.remove(id);self.assertEqual(self.resources.find(id)['phase'],'removed')
+    def test_stop_accepts_confirmed_previously_removed_companion_but_not_offline_engine(self):
+        id=self.resources.create(['image'],'image','companion');self.resources.remove(id)
+        self.assertFalse(self.resources.stop(id))
+        self.engine.offline=True
+        with self.assertRaises(Denied):self.resources.stop(id)
     def test_changed_identity_never_removes_foreign_container(self):
         id=self.resources.create(['image'],'image','worker');self.engine.items[id]['Config']['Labels']['abyssus.owner']='foreign'
         with self.assertRaisesRegex(Denied,'IDENTITY'):self.resources.remove(id)
