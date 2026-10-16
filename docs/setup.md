@@ -1,5 +1,9 @@
 # Setup guide
 
+## Container deployment transition — approved 2026-10-16
+
+The user approved [M28–M32](milestones.md) and the [container backend plan](../CONTAINERIZATION.md). The target is native GUI + persistent container backend, with one-time project copies and no synchronization/write-back. M28 will add an explicit container setup path; M32 will make guided container setup the supported default and provide Windows PowerShell source launchers. It will need a supported local container engine, not host Bubblewrap/Node/npm or manual app-backend WSL provisioning. These changes are **not delivered yet**; the existing source instructions below still describe Linux/Bubblewrap. Ubuntu 22.04's standard older Bubblewrap lacks the required --disable-userns flag; rerunning the current setup does not fix that capability. Do not remove the flag or change host kernel policies to bypass it. No container-runtime/OS/global changes are installed automatically. M21 customer installers remain paused.
+
 ## Guided source setup
 
 For the current source prototype, clone this repository inside your Ubuntu/WSL Linux home and run:

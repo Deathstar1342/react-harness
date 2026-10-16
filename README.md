@@ -1,5 +1,7 @@
 # React Harness
 
+**Deployment redesign in progress:** the approved [container backend plan](CONTAINERIZATION.md) and [M28–M32](docs/milestones.md) target a native GUI, persistent managed workspace and one-time copy-on-import (no sync/write-back). Updated container setup/Windows launchers will land in that sequence. The source commands below still describe the existing Linux/Bubblewrap implementation; container deployment and customer installers are not yet delivered. See [current status](docs/STATUS.md).
+
 A local chat workspace for models served through STARK's OpenAI-compatible Chat Completions API. You talk to the architect, which delegates implementation to a coder and brings in a critic to review scope, changes, and verification evidence.
 
 React + TypeScript, a Node.js 24 backend, SQLite via `node:sqlite`, and a local Monaco editor. The backend is designed to run inside WSL/Linux; open the interface from your normal browser.

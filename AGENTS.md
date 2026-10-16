@@ -1,5 +1,7 @@
 # Working agreement
 
+The user approved the M28–M32 container backend sequence on 2026-10-16. Read CONTAINERIZATION.md and the active sections of docs/STATUS.md and docs/milestones.md first. It supersedes historical no-Docker/no-M28/no-successor and Bubblewrap/host-helper deployment requirements for this sequence only. Target native Electron GUI, containerized controller/project workers, persistent user-selected storage, one-time copy-on-import and explicit export; no auto-sync, refresh or write-back. Container execution replaces the process sandbox while preserving runtime approvals/versions/leases/secrets/uncertainty. Only trusted host supervision has Docker control; never mount its socket or controller secrets/state into workers or fall back to a host shell. M28 adds an explicit container setup path; M32 updates supported setup.sh/start.sh defaults and Windows source entrypoints. Keep M21 packaging and every earlier worktree/unreviewed change paused and preserved; no final release or M33 is authorized. No workstation engine/WSL/helper/global provisioning without specific user authorization; use disposable CI/VMs.
+
 Build the application described in docs/architecture.md and docs/milestones.md. Read docs/STATUS.md before starting milestone work.
 
 The user explicitly authorizes commits and pushes to the public GitHub repository Deathstar1342/react-harness from the coordinator and child tasks. Never publish credentials, .env files, local databases, or user project contents. GitHub is the only project hosting service for this work.
