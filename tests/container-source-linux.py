@@ -130,6 +130,8 @@ except Exception as error:
     (OUT/'source-failure.txt').write_text(str(error).replace(KEY,'[hidden synthetic key]'))
     raise
 finally:
+    if (STORAGE/'runtime/broker.log').exists():
+        (OUT/'source-broker.log').write_text((STORAGE/'runtime/broker.log').read_text().replace(KEY,'[hidden synthetic key]'))
     if compose_env:
         subprocess.run(compose+['down'],cwd=ROOT,env=compose_env,capture_output=True)
     (OUT/'source-checks.json').write_text(json.dumps({'checks':checks,'count':len(checks),'platform':'actual disposable Linux Docker + PTY'},indent=2))

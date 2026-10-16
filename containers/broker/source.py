@@ -41,6 +41,19 @@ def main():
     if action == 'stop':
         result = request(storage, 'shutdown')
         require(result == {'stopped': True}, 'CLEANUP_UNCERTAIN')
+        # The signed reply confirms worker drain. Wait for the supervisor's
+        # exclusive lifetime lease too, including listener/proxy/journal cleanup.
+        # An immediate start must not reconnect to the closing session.
+        import fcntl
+        end = time.monotonic() + 20
+        with (Path(storage) / 'runtime/broker.lock').open('a') as lease:
+            while True:
+                try:
+                    fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    require(time.monotonic() < end, 'BROKER_STOP_UNCERTAIN')
+                    time.sleep(0.05)
         print('Owned worker broker stopped; retained records were preserved.')
         return
     try:

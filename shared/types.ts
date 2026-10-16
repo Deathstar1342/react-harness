@@ -120,7 +120,9 @@ export interface PackageHelperPreview {
   stateDigest:string; repositoryDigest:string;
   impact:{newPackages:number;downloadBytes:number;installedBytes:number;removals:0;upgrades:0;downgrades:0;maintainerScripts:'trusted-package-root-execution';triggers:'may-modify-existing-packages-and-services';serviceChanges:'package-defined'};
 }
+export interface ContainerInstallReceipt {targetId:string;baseImageId:string;imageId:string;generation:string;manifestDigest:string}
 export interface PackageHelperRecord {
+  containerReceipt?:ContainerInstallReceipt;
   requestId:string;request:PackageHelperRequest;preview:PackageHelperPreview;previewDigest:string;
   state:'prepared'|'noop'|'authorized'|'running'|'succeeded'|'failed'|'uncertain';
   createdAt:number;updatedAt:number;expiresAt:number;code:string;decision?:PackageHelperDecision;
@@ -132,6 +134,7 @@ export interface InstallSettingsView extends InstallSettings { available: boolea
 export type InstallState = 'preparing' | 'reviewing' | 'pending' | 'approved' | 'authorizing' | 'dispatching' | 'succeeded' | 'failed' | 'noop' | 'rejected' | 'stale' | 'uncertain';
 /** Public evidence only. Helper authorization nonce/descriptor never belong here. */
 export interface InstallRecord {
+  containerReceipt?:ContainerInstallReceipt;
   id: string; chatId: string; projectId: string; frameId: string; role: AgentRole; generation: number; modeVersion: number;
   recommendation: { packages: {name:string;version?:string}[]; reason: string };
   settings: InstallSettings; state: InstallState; createdAt: number; updatedAt: number;

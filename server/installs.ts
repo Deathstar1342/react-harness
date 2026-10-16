@@ -187,7 +187,7 @@ export class InstallService {
   private acceptOutcome(item:InstallRecord,record:PackageHelperRecord,reconciled:boolean) {
     if(record.state==='succeeded' && (!record.reconciliation?.healthy || !record.reconciliation.matches))throw new Error('INVALID_HELPER_EVIDENCE');
     const state=record.state==='succeeded'?'succeeded':record.state==='failed'?'failed':record.state==='noop'?'noop':['prepared','authorized'].includes(record.state)?'stale':'uncertain';
-    this.write({...this.store.install(item.id),state,code:record.code,reconciliation:record.reconciliation,recoveryRequired:state==='uncertain' && !(reconciled && record.reconciliation?.healthy)});
+    this.write({...this.store.install(item.id),state,code:record.code,containerReceipt:record.containerReceipt,reconciliation:record.reconciliation,recoveryRequired:state==='uncertain' && !(reconciled && record.reconciliation?.healthy)});
   }
   async recover(id: string, reconcile: boolean) {
     if(this.closing || this.active.has(id) || this.recovering.has(id))throw conflict('Wait for the active install operation to stop');

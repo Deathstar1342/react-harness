@@ -60,6 +60,8 @@ class Packages:
             result = {**row['record'], 'state':'uncertain', 'code':'INSTALL_PUBLICATION_UNCERTAIN'}
             result.pop('reconciliation', None)
             return result
+        if row['phase'] == 'succeeded':
+            return {**row['record'], 'containerReceipt': {'targetId':row['target']['id'],'baseImageId':row['target']['baseImageId'],'imageId':row['resultImageId'],'generation':row['resultGeneration'],'manifestDigest':row['attestation']['manifestDigest']}}
         return row['record']
 
     def companion(self):
