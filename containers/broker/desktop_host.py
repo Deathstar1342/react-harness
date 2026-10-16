@@ -46,14 +46,18 @@ class DesktopHost:
         for image in ('controllerImage','workerImage'):
             require(self.call(['image','inspect',launch[image],'--format','{{.Id}}']).strip()==launch[image], 'RUNTIME_IMAGE_MISSING')
 
+    def initializer_args(self):
+        return ['run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user',f'{os.getuid()}:{os.getgid()}','--tmpfs','/tmp:size=32m,mode=1777','--mount',f'type=bind,src={self.storage},dst=/initialize','-e','HARNESS_STORAGE_ID='+self.launch['storageId'],self.launch['controllerImage'],'node','--import','tsx','containers/initialize.ts']
+
     def call(self,args,timeout=30):
         p=subprocess.run(['docker','--context',self.launch['context'],*args],env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
         require(len(p.stdout)<=2*1024*1024, 'ENGINE_REPLY_LIMIT')
         if p.returncode!=0:
             # Fixed failure categories only: never include argv, engine stderr or storage/config text.
-            codes={'context':'ENGINE_CONTEXT_FAILED','info':'ENGINE_INFO_FAILED','image':'ENGINE_IMAGE_FAILED','run':'ENGINE_INITIALIZE_FAILED','create':'ENGINE_CREATE_FAILED','start':'ENGINE_START_FAILED'}
+            codes={'context':'ENGINE_CONTEXT_FAILED','info':'ENGINE_INFO_FAILED','image':'ENGINE_IMAGE_FAILED','create':'ENGINE_CREATE_FAILED','start':'ENGINE_START_FAILED'}
             code=codes.get(args[0],'ENGINE_OPERATION_FAILED')
-            if args[0]=='run':
+            if args[0]=='run' and args==self.initializer_args():
+                code='ENGINE_INITIALIZE_FAILED'
                 stderr=p.stderr[:262144]
                 for marker,category in ((b'ERR_MODULE_NOT_FOUND','ENGINE_INITIALIZE_MODULE_MISSING'),(b'Initialization refused or interrupted.','ENGINE_INITIALIZE_PROFILE_REFUSED'),(b'invalid mount config','ENGINE_INITIALIZE_MOUNT_REFUSED'),(b'permission denied','ENGINE_INITIALIZE_PERMISSION_REFUSED')):
                     if marker in stderr:code=category;break
@@ -114,7 +118,7 @@ class DesktopHost:
             require(self.storage.is_dir() and not self.storage.is_symlink() and not list(self.storage.iterdir()),'EMPTY_STORAGE_REQUIRED')
             self.storage.chmod(0o700)
             # A partial initialization is never retried automatically.
-            self.call(['run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user',f'{os.getuid()}:{os.getgid()}','--tmpfs','/tmp:size=32m,mode=1777','--mount',f'type=bind,src={self.storage},dst=/initialize','-e','HARNESS_STORAGE_ID='+self.launch['storageId'],self.launch['controllerImage'],'node','--import','tsx','containers/initialize.ts'],120)
+            self.call(self.initializer_args(),120)
         self.storage_check()
         lock=self.storage/'runtime/desktop-owner.sqlite'
         if not lock.exists():fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600);os.close(fd)
