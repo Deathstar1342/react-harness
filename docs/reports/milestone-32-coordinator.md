@@ -1,5 +1,7 @@
 # Milestone 32 coordinator review
 
+**Final status: delivered as reviewed source implementation on main `b4f7bfce287704ef433243d8679043de3e60e101`. Every required exact-main job/step and fresh artifact has been independently verified. M21 packaging remains paused; this is not a customer release or Windows Docker device/live-provider acceptance.**
+
 M31 reviewed implementation is delivered on GitHub main0f9d6f8955ef088a179308af28508e7288c4be48;every applicable exact-main step/fresh artifacts independently verified in milestone-31-coordinator.md. M32 is the final authorized container milestone;no M33 or release. Dedicated isolated physical-D branch/worktree/chat will be recorded after dispatch.
 
 ## Authorized scope and early contract
@@ -130,3 +132,38 @@ Independently decoded held Installer38963987453 Linux117185785547:obsolete profi
 Reviewed implementation merged/pushed as GitHub mainb4f7bfce287704ef433243d8679043de3e60e101/treed0a984d0678006c5fcf31df162361c4d43dc0938. Product diff against testeda3a9e137 is empty outside docs. Main clean. Exact-main Validate38965740897,Desktop38965740932,support38965740966,helper38965740912,Container38965740969,Source38965740965 running at checkpoint;EVERY applicable job/step and fresh source-bound receipts required before delivery/heartbeat pause. Installer38965740906 separate M21 held delta,not source acceptance. No successor/release.
 
 M32 child compact snapshot cursor1dbde3d3-08a7-4cae-9900-fa6733a997cc:9 confirms completed/idle. Preserve clean isolatedD milestone-32-donly/codex/milestone-32 atc0e7a550,earlier worktrees/failures and original C checkout. Do not reactivate or duplicate completed work except concrete correction. Continue main gate verification;no user-assistance blocker. After validated main delivery,pause heartbeat and report M21 hold/device/provider/manual/package gates;do not auto-resume M21.
+
+## Final exact-main delivery evidence
+
+The approved M28–M32 implementation sequence is complete. All rows below bind implementation main `b4f7bfce287704ef433243d8679043de3e60e101`, tree `d0a984d0678006c5fcf31df162361c4d43dc0938`. Later closeout commits are documentation only. No production code differs from the reviewed tested source outside documented provenance identity. Every applicable step was inspected, with only expected opposite-platform and failure-only diagnostic skips.
+
+| Required workflow | Run | Exact jobs | Outcome |
+| --- | --- | --- | --- |
+| Validate | 38965740897 | 117191636521 | All applicable steps passed |
+| Desktop | 38965740932 | Windows117191637460; Ubuntu117191637805 | All applicable native Electron steps passed |
+| Support runtime | 38965740966 | Ubuntu117191637078; Windows117191637446 | All applicable staging/relocation/native/bootstrap steps passed |
+| Helper regression | 38965740912 | 117191636769 | All applicable disposable regression steps passed; no host deployment |
+| Container | 38965740969 | 117191636963 | All applicable actual owned worker/PTY/install/transfer/supervisor steps passed |
+| Guided source | 38965740965 | Ubuntu22 117191637334; Ubuntu24 117191637546; Windows117194283564 | All applicable production setup/mode/rerun/full GUI/cross-payload/relocated-native steps passed |
+
+All nine fresh main archives were independently downloaded to external D `m32-validation/main-ID.zip` and matched the GitHub SHA256 digest:
+
+| Artifact | ID | SHA256 |
+| --- | --- | --- |
+| Desktop Windows | 12074945985 | e827b8cb01a6b683e727b814e4be1e8fda91ce9458bb85f17431d476d414c387 |
+| Desktop Ubuntu | 12073679848 | 627b4357965985ebdf691a4a96868e0e4c06283527b9a1ea0594797f4a6b2071 |
+| Support Ubuntu | 12074716475 | cc451641bc9529816d3f380f73ac144871240a8a28c0eda1d0ded701b0b71e04 |
+| Support Windows | 12074318960 | ca3c43c2542c6c301a966317a410f3d06e2fde3d95937469d3ef6339a07f1aa9 |
+| Container | 12074593621 | 85f162e3cabfa691f98234f62fb9ce96111a78ce4300567af969dc0935425661 |
+| Complete Windows source payload | 12074404643 | d032bda00b783bd62b0022d7bd123a52e63d706186d8f805bd72dc607c2b3939 |
+| Source Windows evidence | 12074304893 | 1c6528e2502bc47998c91d6330450ef4c6b7317bc2746e20d45734d763ae6e9c |
+| Source Ubuntu24 evidence | 12074134952 | bad534c9c33a4ba38152ac2094e919f0e002ddab57c0fa0452d87ef5c43d42a9 |
+| Source Ubuntu22 evidence | 12074104890 | 45818980c2cebfbbab80328dbcf149d7219ce093bdeff7ef1cd463721f493d44 |
+
+Independently audited the complete fresh main Windows archive:10383files/587355545bytes,all10382manifest hashes and exact member equality matched. Safe relative path/type/case/Windows-alias inventory; no .env, host-native backend .node or node-pty closure. Source/platform/architecture/immutable controller+worker image bindings match main. Against the original candidate payload independently replayed on this workstation, ALL file hashes are identical except app/container-runtime.json and provenance.json, whose differences are the expected exact main source/image identities. This avoids claiming a second workstation replay while independently establishing final payload code identity. The exact-main Windows CI itself executed the complete verifier/private imports/native Electron after relocation without a development junction. Audit receipt main-crosspayload-audit.json remains external to Git.
+
+Fresh main source JSON on BOTH Ubuntu22/24 asserts actual initialized persistent storage/controller, project+idlechat, restart, close/reopen, same identity/config and no automatic goals, initial no-tag startup and preservation of the unrelated conflicting tag. Private Python uses22.04 GCC11.4 baseline. Both connected persisted-chat screenshots and the Windows engine-unavailable screenshot were visually inspected. Dialog return values remain synthetic; no live provider call. Windows receipt explicitly reports engine unavailable and WindowsDockerAcceptance=false. Support relocation receipts retain Windows35files/Linux2923files and measured isolation/import scope. Fresh Container receipts bind main and independently retain32foundation/33worker/15source/53Runtime disk-SQLite/20M30/14M31 checks with no anchored failure output.
+
+Held main Installer38965740906 Linux117191637704 independently inspected:step10 fails waiting for obsolete Persistent profile home (Linux path) selector, with missing update-desktop-database warning; Windows117191639385/117193589086 skipped. No installer acceptance, release or repair was inferred. This stays with the concrete M21 packaging delta.
+
+No required source implementation work remains. Stop the15-minute heartbeat at this validated closeout. Preserve idle clean M32 and every earlier branch/worktree, all cancelled/failed receipts, original C checkout and user data. Do not start M33 or automatically resume M21. M21 uncommitted corresponding-source/notices work remains untouched. Its future coordinator-controlled resumption must address immutable image delivery, complete final manifests/portability, licensing/notices/corresponding source, signing, actual Windows Docker/D-bind/SQLite/transport/dependency reparse, native-human/whole-host/close-during-privileged-install, live STARK and clean-machine/customer package acceptance. These open acceptance classes do not become synthetic successes because source implementation is delivered.

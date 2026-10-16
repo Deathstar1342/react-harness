@@ -1,6 +1,6 @@
 # Delivery milestones
 
-## Active M28–M32 container backend sequence — approved 2026-10-16
+## M28–M32 container backend sequence — delivered 2026-10-16
 
 The user approved implementation of the [container plan](../CONTAINERIZATION.md), one-time copy-on-import, persistent workspace and the previous dedicated-chat/coordinator-review workflow. This supersedes historical no-Docker/no-M28/no-successor restrictions for this sequence only. Run **M28 -> M29 -> M30 -> M31 -> M32** sequentially in **Milestone x** chats and isolated `codex/milestone-x` branches/worktrees from reviewed published main. Coordinator owns routine decisions, independent review, corrections, integration/push and every applicable exact-main CI step before successor dispatch. Resume the existing 15-minute check-in; pause immediately for genuine user assistance. User push/messaging authorization persists. M21 packaging remains paused; no final release or M33 is authorized.
 
@@ -42,7 +42,7 @@ Delivered reviewed implementation on GitHub main `0f9d6f8955ef088a179308af28508e
 
 ### M32 — One-command source setup, full evaluation and packaging handoff
 
-Reviewed source handoff `c0e7a550` / tested implementation `a3a9e137`: all six exact-source workflow jobs/applicable steps and fresh artifacts independently verified. Coordinator source and relocated Windows payload checks pass. Integration is pending exact-main CI; this is not final milestone delivery, Windows Docker device acceptance or M21 packaging resumption. [Independent review](reports/milestone-32-coordinator.md).
+Delivered reviewed implementation on GitHub main `b4f7bfce287704ef433243d8679043de3e60e101` (handoff `c0e7a550`, tested source `a3a9e137`). Every applicable exact-main step independently passed in Validate `38965740897`, Desktop `38965740932`, support `38965740966`, helper `38965740912`, Container `38965740969` and Source `38965740965` including Ubuntu22/24 full exported GUI lifecycle and relocated Windows payload. All nine fresh artifacts were independently hash verified and audited. The approved implementation sequence ends here; the heartbeat stops and no successor starts. M21 remains paused, with Windows Docker device/native-human/live-provider/licensing/signing/notices/clean-machine/customer package gates explicit. [Independent review](reports/milestone-32-coordinator.md).
 
 - Make guided container setup/start the supported default: update `setup.sh`/`start.sh`, add Windows `setup.ps1`/`start.ps1`, remove obsolete Bubblewrap/host-Node/host-apt source prerequisites from the supported path and docs. Existing developer tests may use portable interfaces; never leave an implicit production host execution fallback. Reruns preserve storage, profiles and keys. Source users may build images; customers must not need Git/npm/build commands.
 - Exercise complete native tools/goals/AGENTS/skills/plan/editor/approvals/installs/steering/PTY/import/export with real persistent storage, crash/recreate and clean source onboarding in disposable Linux/Windows environments. Add scoped regression/CI corrections and honest work-side diagnostics; no live STARK claim without access.

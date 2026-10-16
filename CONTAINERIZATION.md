@@ -1,6 +1,6 @@
 # Container backend plan — approved 2026-10-16
 
-**Active direction:** native Electron GUI, containerized backend and project execution, persistent managed workspace, and one-time copy-on-import. The user approved implementation and the M28–M32 milestone workflow. This replaces the earlier Docker-free/Bubblewrap desktop target below. It is a plan, not a claim that the current application already runs this way. [Milestones](docs/milestones.md) and [STATUS](docs/STATUS.md) own delivery state.
+**Active direction:** native Electron GUI, containerized backend and project execution, persistent managed workspace, and one-time copy-on-import. The user approved implementation and the M28–M32 milestone workflow. This replaces the earlier Docker-free/Bubblewrap desktop target below. The M28–M32 implementation is delivered on reviewed main `b4f7bfce287704ef433243d8679043de3e60e101`, with exact-main Linux22/24 exported GUI and relocated Windows payload checks complete. This does not establish actual Windows Docker device, native-human, live-provider or customer installer acceptance; M21 packaging remains paused. [Milestones](docs/milestones.md) and [STATUS](docs/STATUS.md) own delivery state.
 
 ## User experience
 
