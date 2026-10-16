@@ -8,7 +8,7 @@ import ctypes
 import errno
 import hashlib
 import json
-import os
+from native_io import fs as os, root_handle as native_root_handle
 from pathlib import Path
 import re
 import stat
@@ -79,6 +79,9 @@ def policy(rel, included, history):
 
 @contextlib.contextmanager
 def root_handle(root):
+    if os.name=='nt':
+        with native_root_handle(root) as fd:yield fd
+        return
     require(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW'), 'TRANSFER_PLATFORM_UNSUPPORTED')
     root = str(root)
     require(root.startswith('/') and os.path.normpath(root) == root and root != '/', 'UNSAFE_ROOT')
@@ -290,6 +293,9 @@ def publish(stage, destination, stage_identity=None, parent_identity=None):
             require(stamp(os.fstat(target))[:2] == parent_identity, 'DESTINATION_CHANGED')
         if stage_identity is not None:
             require(stamp(os.stat(stage.name, dir_fd=parent, follow_symlinks=False))[:2] == stage_identity, 'STAGE_CHANGED')
+        if os.name=='nt':
+            from windows_handles import publish_new
+            publish_new(stage,destination);return
         rename = ctypes.CDLL(None, use_errno=True).renameat2
         rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
         rename.restype = ctypes.c_int

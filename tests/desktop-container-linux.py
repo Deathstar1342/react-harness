@@ -79,6 +79,13 @@ try:
     check('managed copies and registrations survive container recreation',any(p['id']==imported['project']['id'] for p in api('/projects')))
     shutdown();check('second clean stop retains private state and managed files',(STORAGE/'state/profile/state/state.sqlite').is_file())
 except Exception as error:
+    owner_file=STORAGE/'runtime/desktop-owner.json'
+    if owner_file.exists():
+        owner=json.loads(owner_file.read_text())
+        if owner.get('id'):
+            info=json.loads(docker('inspect',owner['id']))[0]
+            if info['Config'].get('Labels',{}).get('abyssus.desktop')==owner['owner']:
+                (OUT/'m31-desktop-ownership.json').write_text(json.dumps({'ownerPhase':owner.get('phase'),'mounts':[{k:m.get(k) for k in ('Type','Source','Destination','RW')} for m in info['Mounts']],'user':info['Config']['User'],'hostConfig':{key:info['HostConfig'].get(key) for key in ('Privileged','ReadonlyRootfs','NetworkMode','CapDrop','CapAdd','Devices','DeviceRequests','Binds','VolumesFrom','PidMode','IpcMode','UTSMode','Tmpfs','Init','PidsLimit','Memory','NanoCpus','SecurityOpt','PortBindings')}},indent=2))
     (OUT/'m31-desktop-failure.txt').write_text(type(error).__name__+': '+str(error))
     raise
 finally:

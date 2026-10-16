@@ -19,7 +19,7 @@ const documents=new DocumentGuard();
 const controller=new ContainerDesktopController(appRoot);
 let picked:{id:string;path:string;storageId:string;mode:'existing'|'initialize'}|undefined;
 const selectionSchema=z.object({path:z.string().max(4096),storageId:z.uuid()}).strict();
-if(!app.isPackaged&&!app.requestSingleInstanceLock())app.quit();
+if(!app.requestSingleInstanceLock())app.quit();
 else {
   app.on('second-instance',()=>{window?.show();window?.focus();});
   await app.whenReady();
@@ -113,7 +113,7 @@ else {
     const choice=z.object({selectionId:z.uuid().optional()}).strict().parse(input);
     const selected=choice.selectionId?(picked?.id===choice.selectionId?picked:undefined):controller.selection?{...controller.selection,mode:'existing' as const}:undefined;
     if(!selected)throw new Error('Choose storage with the native folder picker.');
-    const ticket=documents.begin();let thaw:(()=>void)|undefined;
+    const ticket=documents.begin();let thaw:(()=>void)|undefined,started=false;
     try {
       const result=await dialog.showMessageBox(window!,{type:'question',title:'Open persistent storage',message:selected.mode==='initialize'?'Initialize this empty app storage folder?':'Open this existing app storage?',detail:selected.path+'\nProjects, chats, settings and dependencies stay here. Docker images and engine cache use separate engine storage; this choice does not relocate them.',buttons:['Cancel','Open workspace'],defaultId:0,cancelId:0});
       if(result.response!==1)return documents.status(controller.state);
@@ -123,20 +123,20 @@ else {
       const temporary=selectionFile+'.tmp';writeFileSync(temporary,JSON.stringify({path:selected.path,storageId:selected.storageId}),{mode:0o600});renameSync(temporary,selectionFile);
       const previous=documents.sessionId;
       const status=await controller.start({path:selected.path,storageId:selected.storageId},selected.mode);
-      documents.check(ticket);documents.publish(status);picked=undefined;
+      started=true;documents.check(ticket);documents.publish(status);picked=undefined;
       if(previous&&previous!==status.sessionId){window!.destroy();createWindow();}
       return status;
-    }finally{thaw?.();documents.end(ticket);}
+    }catch(error){if(started)await controller.stop();throw error;}finally{thaw?.();documents.end(ticket);}
   });
   handler('desktop:container-restart',async()=>{
-    const ticket=documents.begin();let thaw:(()=>void)|undefined;
+    const ticket=documents.begin();let thaw:(()=>void)|undefined,started=false;
     try {
       if(!controller.selection)throw new Error('Open storage first.');
       const answer=await dialog.showMessageBox(window!,{type:'question',message:'Restart the owned runtime?',detail:'Waits for active work and installs to drain. Persistent data remains; goals and uncertain work do not replay.',buttons:['Cancel','Restart'],defaultId:0,cancelId:0});
       if(answer.response!==1)return documents.status(controller.state);
       documents.check(ticket);thaw=await freezeWindow(ticket);await controller.stop();documents.check(ticket);
-      const status=await controller.start(controller.selection,'existing');documents.check(ticket);documents.publish(status);window!.destroy();createWindow();return status;
-    }finally{thaw?.();documents.end(ticket);}
+      const status=await controller.start(controller.selection,'existing');started=true;documents.check(ticket);documents.publish(status);window!.destroy();createWindow();return status;
+    }catch(error){if(started)await controller.stop();throw error;}finally{thaw?.();documents.end(ticket);}
   });
   handler('desktop:transfer',async input=>{
     const selection=z.discriminatedUnion('kind',[z.object({kind:z.literal('import')}).strict(),z.object({kind:z.literal('export'),projectId:z.uuid()}).strict()]).parse(input);

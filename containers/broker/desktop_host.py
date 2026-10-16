@@ -82,7 +82,12 @@ class DesktopHost:
         require(len(info['Mounts'])==len(expected_mounts) and all(m['Type']=='bind' for m in info['Mounts']),'UNEXPECTED_MOUNT')
         config=info['HostConfig']
         require(not config.get('CapAdd') and not config.get('Devices') and not config.get('DeviceRequests') and not config.get('Binds') and not config.get('VolumesFrom') and not config.get('PidMode') and config.get('IpcMode')=='private' and not config.get('UTSMode') and config.get('Tmpfs')=={'/tmp':'size=128m,mode=1777'} and config.get('Init') is True and config.get('PidsLimit')==128 and config.get('Memory')==2147483648 and config.get('NanoCpus')==2000000000 and len(config['SecurityOpt'])==1,'UNSAFE_CONTROLLER_CONFIG')
-        require(actual_mounts==expected_mounts and not config['Privileged'] and config['ReadonlyRootfs'] and config['NetworkMode']=='default' and config['CapDrop']==['ALL'] and 'no-new-privileges' in config['SecurityOpt'] and info['Config']['User']==f'{os.getuid()}:{os.getgid()}', 'OWNERSHIP_CHANGED')
+        require(actual_mounts==expected_mounts,'CONTROLLER_MOUNTS_CHANGED')
+        require(not config['Privileged'] and config['ReadonlyRootfs'],'CONTROLLER_PRIVILEGE_CHANGED')
+        require(config['NetworkMode']=='default','CONTROLLER_NETWORK_CHANGED')
+        require(config['CapDrop']==['ALL'],'CONTROLLER_CAPS_CHANGED')
+        require('no-new-privileges' in config['SecurityOpt'],'CONTROLLER_SECURITY_CHANGED')
+        require(info['Config']['User']==f'{os.getuid()}:{os.getgid()}','CONTROLLER_USER_CHANGED')
         ports=config['PortBindings']
         require(set(ports)=={'3000/tcp'} and len(ports['3000/tcp'])==1 and ports['3000/tcp'][0]['HostIp']=='127.0.0.1','UNSAFE_ENDPOINT')
         if self.owner['id'] is None:self.save({**self.owner,'id':values[0]})
