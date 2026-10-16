@@ -85,6 +85,24 @@ try:
     challenge={'version':1,'revision':1,'probeId':str(uuid.uuid4()),'nonce':secrets.token_hex(32),'launchId':launch['launchId'],'storageId':launch['storageId']}
     measured=FixedStorageProbe(probe_docker,launch['controllerImage'],os.getuid(),os.getgid())(challenge)
     check('fixed trusted image proves distinct readonly slots and independent Linux bind WAL locks',measured['sqlite']['secondWriterDenied'])
+    from socket_egress import SocketEgress
+    probe_docker.image=launch['workerImage'];egress=SocketEgress(probe_docker).start()
+    probe_script="""import socket,os
+for target,expected in [('127.0.0.1',b'403'),('169.254.169.254',b'403'),('registry.npmjs.org',b'200')]:
+ s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.settimeout(15);s.connect('/run/egress/proxy.sock');s.sendall(('CONNECT '+target+':443 HTTP/1.1\\r\\nHost: '+target+':443\\r\\n\\r\\n').encode());reply=s.recv(1024);s.close();assert expected in reply.split(b'\\r\\n',1)[0]
+try:socket.create_connection(('1.1.1.1',443),timeout=1)
+except OSError:pass
+else:raise AssertionError('direct networking available')
+assert not os.path.exists('/run/abyssus-broker') and not os.path.exists('/var/run/docker.sock')
+print('SOCKET_EGRESS_PROVED')
+"""
+    socket_worker=probe_docker.resources.create(['--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user','1000:1000','--mount',egress.worker_mount(),'--entrypoint','/usr/bin/python3',launch['workerImage'],'-I','-c',probe_script],launch['workerImage'],'attestation')
+    socket_info=probe_docker.resources.verify(probe_docker.resources.find(socket_worker))
+    check('socket-only worker mount is readonly and carries no controller or host state',len(socket_info['Mounts'])==1 and socket_info['Mounts'][0]['Type']=='volume' and not socket_info['Mounts'][0]['RW'] and socket_info['HostConfig']['NetworkMode']=='none')
+    socket_output=probe_docker.call(['start','--attach',socket_worker],timeout=60)
+    check('real socket companion allows public TLS connection and denies private metadata/direct networking','SOCKET_EGRESS_PROVED' in socket_output)
+    probe_docker.resources.remove(socket_worker);egress.terminate();egress.wait()
+    check('exact companion and ephemeral socket volume cleanup verified',not egress.present(egress.row))
     probe_docker.resources.db.close()
     api('/health',token=False,expected=401);api('/auth/pair',{'code':'0'*48},expected=403,token=False)
     check('controller requires bearer and disables browser pairing')

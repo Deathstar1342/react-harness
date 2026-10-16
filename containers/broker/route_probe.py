@@ -1,5 +1,7 @@
 """One-shot fixed-image proof for the exact bound Windows broker socket."""
 import json
+import ipaddress
+import time
 import secrets
 import socketserver
 import threading
@@ -15,7 +17,7 @@ def prove_server(docker,image,session_id):
     # All candidates came from read-only native inventory. No wildcard binding,
     # firewall update, host command, or LAN/public adapter can enter this loop.
     for candidate in candidates(windows_adapters()):
-        nonce=secrets.token_hex(32);observed=threading.Event()
+        nonce=secrets.token_hex(32);observed=threading.Event();issued=int(time.time()*1000)
         class Challenge(socketserver.StreamRequestHandler):
             def handle(self):
                 self.request.settimeout(5)
@@ -41,7 +43,9 @@ def prove_server(docker,image,session_id):
                 # probe removal is confirmed. It never dispatches project work.
                 docker.resources.remove(container);container=None;continue
             expected={'version':1,'sessionId':session_id,'nonce':nonce,'port':port,'accepted':True}
-            require(len(result)<=2048 and json.loads(result)==expected and observed.is_set(),'PRIVATE_ROUTE_UNPROVEN')
+            require(len(result)<=2048,'PRIVATE_ROUTE_UNPROVEN');reply=json.loads(result);exact(reply,[*expected,'address'])
+            address=ipaddress.ip_address(reply['address']);require(address.version==4 and address.is_private and not address.is_unspecified and not address.is_link_local and not address.is_multicast,'PRIVATE_ROUTE_UNPROVEN')
+            require({k:reply[k] for k in expected}==expected and observed.is_set() and (candidate['connect']=='host.docker.internal' or str(address)==candidate['connect']),'PRIVATE_ROUTE_UNPROVEN')
             info=docker.resources.verify(docker.resources.find(container));require(info['State']['Status']=='exited' and info['State']['ExitCode']==0,'PRIVATE_ROUTE_UNPROVEN')
             docker.resources.remove(container);container=None;proved=True
         finally:
@@ -52,7 +56,7 @@ def prove_server(docker,image,session_id):
         if proved:
             # Same socket remains bound. Broker installs its authenticated handler
             # before restarting serve_forever; there is no unbind/rebind window.
-            server.route={**candidate,'port':port,'sessionId':session_id}
+            server.route={**candidate,'connectIP':str(address),'port':port,'sessionId':session_id,'proof':{'version':1,'nonce':nonce,'engineId':docker.engine_id,'probeImage':image,'address':str(address),'bindAddress':candidate['bind'],'port':port,'sessionId':session_id,'issuedAt':issued,'expiresAt':issued+30000}}
             return server
     raise RuntimeError('PRIVATE_DOCKER_ROUTE_UNAVAILABLE')
 

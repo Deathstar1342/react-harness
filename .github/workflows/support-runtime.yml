@@ -22,6 +22,8 @@ jobs:
           "M31_SUPPORT_RUNTIME=$env:RUNNER_TEMP/support-runtime" >> $env:GITHUB_ENV
           "M31_RECEIPTS=$env:RUNNER_TEMP/support-receipts" >> $env:GITHUB_ENV
           "M31_APP_ROOT=$env:GITHUB_WORKSPACE/build/app" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/native-fixtures" -Force | Out-Null
+          "M31_TEST_ROOT=$env:RUNNER_TEMP/native-fixtures" >> $env:GITHUB_ENV
       - run: npm ci
       - name: Build prerequisites only in disposable Ubuntu runner
         if: runner.os == 'Linux'

@@ -88,6 +88,12 @@ def stage(output,downloads):
         for file in output.rglob('*'):
             if file.is_symlink():
                 target=file.resolve();require(output in target.parents and target.is_file(),'External runtime symlink');data=target.read_bytes();mode=target.stat().st_mode;file.unlink();file.write_bytes(data);file.chmod(mode)
+        omitted=[]
+        for library in output.rglob('*.a'):
+            require(library.name=='libpython3.13.a' and library.is_file() and output in library.resolve().parents,'Unexpected static build artifact')
+            omitted.append({'path':library.relative_to(output).as_posix(),'size':library.stat().st_size,'sha256':hashlib.sha256(library.read_bytes()).hexdigest()})
+            library.unlink() # Fresh staging only; unused static build input, never loaded by Python.
+        provenance['omittedBuildOnlyStaticArchives']=omitted
         shutil.copyfile(source/'LICENSE',output/'LICENSE')
         executable='bin/python3.13'
         dependencies={}

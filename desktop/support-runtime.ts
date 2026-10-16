@@ -16,7 +16,7 @@ export function supportRuntime(root:string) {
     const target=path.join(directory,name),relative=path.relative(root,target).split(path.sep).join('/'),stat=lstatSync(target);
     if(stat.isSymbolicLink()||realpathSync(target)!==target||++count>20000)throw new Error('Unsafe support runtime member.');
     if(stat.isDirectory()){visit(target);continue;}
-    if(!stat.isFile()||stat.nlink!==1||stat.size>64*1024*1024||(total+=stat.size)>512*1024*1024)throw new Error('Invalid support runtime member.');
+    if(!stat.isFile()||stat.nlink!==1||stat.size>64*1024*1024||(total+=stat.size)>512*1024*1024)throw new Error(`Invalid support runtime member: ${relative} (bytes=${stat.size}, links=${stat.nlink}, regular=${stat.isFile()}).`);
     if(relative==='manifest.json')continue;
     if(!Object.hasOwn(manifest.files,relative)||createHash('sha256').update(readFileSync(target)).digest('hex')!==manifest.files[relative])throw new Error('Support runtime integrity check failed. Repair runtime staging.');
     found.add(relative);

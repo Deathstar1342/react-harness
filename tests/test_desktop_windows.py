@@ -14,7 +14,7 @@ class NativeHandles(unittest.TestCase):
         sys.path.insert(0,str(root));import windows_handles
         cls.native=windows_handles
     def setUp(self):
-        self.root=Path(tempfile.mkdtemp(prefix='m31-native-'))
+        self.root=Path(tempfile.mkdtemp(prefix='m31-native-',dir=os.environ.get('M31_TEST_ROOT'))).resolve()
     def test_opened_parent_cannot_be_renamed_and_file_identity_is_stable(self):
         file=self.root/'file.txt';file.write_text('fixture')
         with self.native.PinnedPath(file,directory=False) as handle:

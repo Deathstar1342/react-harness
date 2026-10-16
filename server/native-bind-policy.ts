@@ -11,7 +11,7 @@ const identity=z.object({dev:z.string().regex(/^[0-9]{1,30}$/),ino:z.string().re
 export const nativeBindPolicySchema=z.object({version:z.literal(1),revision:z.literal(1),platform:z.literal('win32'),storageClass:z.literal('native-ntfs'),phase:z.enum(['initialize','controller']),
  storageId:z.uuid(),launchId:z.uuid(),proofId:z.uuid(),probeRevision:z.literal(1),engineId:z.string().min(1).max(256).regex(/^[!-~]+$/),context:z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/),controllerImage:image,probeImage:image,
  issuedAt:z.number().int().safe().positive(),expiresAt:z.number().int().safe().positive(),slots:z.object({state:identity,config:identity,workspace:identity,control:identity}).strict(),
- broker:z.object({sessionId:z.uuid(),host:z.string().max(64),port:z.number().int().min(1024).max(65535)}).strict().nullable()}).strict();
+ broker:z.object({sessionId:z.uuid(),host:z.ipv4(),port:z.number().int().min(1024).max(65535),route:z.object({version:z.literal(1),nonce:hex,engineId:z.string().min(1).max(256),probeImage:image,address:z.ipv4(),bindAddress:z.ipv4(),port:z.number().int().min(1024).max(65535),sessionId:z.uuid(),issuedAt:z.number().int().safe().positive(),expiresAt:z.number().int().safe().positive()}).strict()}).strict().nullable()}).strict();
 type Policy=z.infer<typeof nativeBindPolicySchema>;
 const rootsFor=(phase:Policy['phase'])=>phase==='initialize'?{state:'/initialize/state',config:'/initialize/config',workspace:'/initialize/workspace',control:'/run/abyssus-broker'}:{state:'/abyssus',config:'/abyssus/profile/config',workspace:'/workspace',control:'/run/abyssus-broker'};
 export class NativeBindPolicy {
@@ -27,7 +27,7 @@ export class NativeBindPolicy {
   if(record.launchId!==env.HARNESS_LAUNCH_ID||record.storageId!==env.HARNESS_STORAGE_ID||record.issuedAt>now||record.expiresAt<now||record.expiresAt-record.issuedAt>30000||record.expiresAt<=record.issuedAt)throw new Error('Native bind policy is stale or changed');
   if(new Set(Object.values(record.slots).map(v=>v.dev+':'+v.ino)).size!==4)throw new Error('Native bind slots must be distinct');
   if(record.phase==='controller'&&!record.broker||record.phase==='initialize'&&record.broker)throw new Error('Native bind phase changed');
-  if(record.broker&&!privateBrokerHost(record.broker.host))throw new Error('Unproven broker host');
+  if(record.broker){const {host,port,sessionId,route}=record.broker;if(!privateBrokerHost(host)||host!==route.address||port!==route.port||sessionId!==route.sessionId||route.engineId!==record.engineId||route.probeImage!==record.probeImage||route.issuedAt>now||route.expiresAt<now||route.expiresAt<=route.issuedAt||route.expiresAt-route.issuedAt>30000)throw new Error('Unproven broker route');}
   const result=new NativeBindPolicy(record);result.verifyRoots();return result;
  }
  verifyRoots(){
@@ -57,7 +57,7 @@ export class NativeBindPolicy {
  }
 }
 export function privateBrokerHost(host:string){
- if(host==='host.docker.internal')return true;
+ if(host==='127.0.0.1')return true;
  const fields=host.split('.');if(fields.length!==4||fields.some(x=>!/^\d{1,3}$/.test(x)||String(Number(x))!==x||Number(x)>255))return false;
  const a=Number(fields[0]),b=Number(fields[1]);return a===10||a===172&&b>=16&&b<=31||a===192&&b===168;
 }
