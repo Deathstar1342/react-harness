@@ -1,9 +1,8 @@
 # Official multi-platform index resolved from registry-1.docker.io, 2026-10-16.
-FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS build
-# Frozen Debian repository, rather than mutable package resolution at rebuild time.
-RUN rm /etc/apt/sources.list.d/debian.sources && \
-    printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261015T000000Z bookworm main\n' > /etc/apt/sources.list && \
-    apt-get update && apt-get install -y --no-install-recommends python3 make g++ ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM node:24.16.0-bookworm@sha256:40ad9f3064e67d6860b4bc3fe1880b2953934fd6320ada990e45fe0efa6badd7 AS build
+# The full official image pins the compiler/Python/CA toolchain with its digest.
+# No apt resolution or TLS bootstrap is needed during our build.
+RUN python3 --version && make --version && g++ --version && test -s /etc/ssl/certs/ca-certificates.crt
 WORKDIR /app
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 COPY package.json package-lock.json ./
@@ -18,6 +17,7 @@ FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c57
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY package.json ./
 COPY server ./server
 COPY shared ./shared

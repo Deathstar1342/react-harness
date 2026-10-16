@@ -86,6 +86,8 @@ try:
     build = c('build', 'controller', ok=False, timeout=1200)
     (OUT / 'build.log').write_text((build.stdout+build.stderr).replace(build_secret, '[build sentinel]'))
     (ROOT / '.env').unlink()
+    if build.returncode:
+        print((build.stdout+build.stderr)[-10000:].replace(build_secret, '[build sentinel]'), flush=True)
     check('pinned Linux controller image built', build.returncode == 0)
     inspect = json.loads(run(['docker', 'image', 'inspect', 'abyssus-controller:m28']).stdout)[0]
     (OUT / 'image.json').write_text(json.dumps({'id': inspect['Id'], 'architecture': inspect['Architecture'], 'os': inspect['Os'], 'base': 'node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203'}, indent=2))
