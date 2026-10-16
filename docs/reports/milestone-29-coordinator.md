@@ -1,5 +1,11 @@
 # Milestone 29 — independent coordinator review
 
+## Reviewed integration published — exact-main CI pending
+
+Handoff merged and published as GitHub main `0ae688572a0652708b55cbd608bb62449e34ca22`. Integration differs from reviewed handoff only in coordinator STATUS/report documentation. Integration typecheck and **83 affected worker/install/goal tests** passed. Exact-main runs are active: Validate `38910170353`, Desktop `38910170556`, helper `38910170430`, Container `38910170304`. Verify every applicable job/step and fresh source-bound container receipt before marking M29 delivered or dispatching M30. Automatic installer workflow is not resumed M21 or release acceptance.
+
+No integration/source blocker. M29 child remains idle; all source/review worktrees and failed receipts preserved. M30 is the approved next managed-copy import/export milestone, but has not started. Windows/container-connected Electron and live STARK limitations remain explicit.
+
 ## Frozen source independently accepted — integration preparing
 
 Reviewed handoff `bf8b97bd0794cc2e86142de81bc01870a5896f06` differs from tested source `10aa3087a45311e0675e1c991930bfe4a4d580ae` / tree `841c99ff69f82e9e0d50a16dbfa77522bef51516` only in its milestone report. Assigned branch/worktree is clean. Coordinator reviewed native dispatch, bounded auth/claims, cleanup-only resource recovery, trusted runner/network/image boundaries, package policy/target/lineage and goal reconciliation; no remaining correction requested. Earlier failures and all worktrees remain preserved.
