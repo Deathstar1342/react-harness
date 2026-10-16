@@ -10,16 +10,18 @@ jobs:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
-    env:
-      M31_SUPPORT_RUNTIME: ${{ runner.temp }}/support-runtime
-      M31_RECEIPTS: ${{ runner.temp }}/support-receipts
-      M31_APP_ROOT: ${{ github.workspace }}/build/app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+      - name: Select disposable external staging
+        shell: pwsh
+        run: |
+          "M31_SUPPORT_RUNTIME=$env:RUNNER_TEMP/support-runtime" >> $env:GITHUB_ENV
+          "M31_RECEIPTS=$env:RUNNER_TEMP/support-receipts" >> $env:GITHUB_ENV
+          "M31_APP_ROOT=$env:GITHUB_WORKSPACE/build/app" >> $env:GITHUB_ENV
       - run: npm ci
       - name: Build prerequisites only in disposable Ubuntu runner
         if: runner.os == 'Linux'

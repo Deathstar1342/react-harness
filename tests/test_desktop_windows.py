@@ -128,6 +128,22 @@ class NativeHandles(unittest.TestCase):
         self.assertEqual(probe_native(self.root,'f'*64),{'wal':True,'secondWriterDenied':True,'reopened':True})
         with self.assertRaises(Exception):probe_native(self.root,'f'*64)
 
+
+    def test_native_adapter_inventory_is_read_only_and_never_nominates_wildcard(self):
+        from windows_network import windows_adapters,candidates
+        rows=windows_adapters();self.assertIsInstance(rows,list)
+        self.assertTrue(all(v['bind']!='0.0.0.0' for v in candidates(rows)))
+
+
+    def test_private_descendant_acl_not_inferred_from_parent(self):
+        self.native.privatize_empty(self.root)
+        for name in ['state','config','workspace','runtime/control']:(self.root/name).mkdir(parents=True)
+        file=self.root/'config/provider';file.write_text('placeholder')
+        with self.native.NativeStorageGuard(self.root) as guard:
+            guard.verify();user=self.native.current_sid()
+            self.set_acl(file,f'O:{user}D:P(A;;FA;;;{user})(A;;FR;;;WD)')
+            with self.assertRaisesRegex(ValueError,'PRIVATE_DACL'):guard.verify()
+
     def test_hardlinks_and_nonlocal_paths_are_rejected(self):
         file=self.root/'file';file.write_text('x');os.link(file,self.root/'hardlink')
         with self.assertRaises(ValueError):self.native.PinnedPath(file,directory=False)

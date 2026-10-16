@@ -187,7 +187,24 @@ class NativeStorageGuard:
         for name,pin in self.pins.items():
             pin.verify()
             if pin.private()!=self.evidence[name]:raise ValueError('NATIVE_SLOT_CHANGED')
+        self.private_descendants()
         return {'root':self.root_proof,'slots':self.evidence}
+    def private_descendants(self):
+        # State/config/control are private classes; workspace contents are not
+        # granted private ownership merely by being under the selected root.
+        count=0
+        def visit(directory,depth):
+            nonlocal count
+            if depth>64:raise ValueError('PRIVATE_STORAGE_DEPTH')
+            for child in Path(directory).iterdir():
+                count+=1
+                if count>100000:raise ValueError('PRIVATE_STORAGE_LIMIT')
+                # SQLite may hold a write transaction; this is ACL/identity
+                # validation, not copy-source byte authorization.
+                with PinnedPath(child,share_write=True) as pin:
+                    pin.private()
+                    if pin.identity['directory']:visit(child,depth+1)
+        for name in ('state','config','control'):visit(self.pins[name].path,0)
     def close(self):self.stack.close()
     def __enter__(self):return self
     def __exit__(self,*_):self.close()

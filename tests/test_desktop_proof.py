@@ -59,4 +59,13 @@ class Proofs(unittest.TestCase):
                 self.proofs.probe=bad
                 with self.assertRaises(Denied):self.proofs.issue()
                 self.assertEqual(self.proofs.pending,{})
+
+class Routes(unittest.TestCase):
+    def test_only_exact_virtual_adapter_candidates_never_wildcard_or_lan(self):
+        from windows_network import candidates
+        adapter={'id':'adapter','name':'vEthernet (WSL)','description':'Hyper-V Virtual Ethernet Adapter','type':6,'status':1,'addresses':['172.28.48.1','0.0.0.0','8.8.8.8','169.254.1.1']}
+        self.assertEqual([x['bind'] for x in candidates([adapter])],['127.0.0.1','172.28.48.1'])
+        for field,value in [('name','Ethernet'),('description','Intel Ethernet'),('status',2),('type',71)]:
+            with self.subTest(field=field):self.assertEqual(len(candidates([{**adapter,field:value}])),1)
+
 if __name__=='__main__':unittest.main()
