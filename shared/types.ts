@@ -147,7 +147,7 @@ export interface InstallRecord {
 export interface ProjectTransferReceipt {
   id:string;kind:'import'|'export';project:string;phase:'copying'|'publishing'|'succeeded'|'failed'|'cancelled'|'uncertain';
   code:string;residue:boolean;manifestDigest:string;files:number;bytes:number;excludedCount:number;
-  excluded:{path:string;reason:string}[];history:boolean;storageId:string;sessionId:string;identity:[number,number]|null;
+  excluded:{path:string;reason:string}[];history:boolean;storageId:string;sessionId:string;identity:[string,string]|null;
 }
 /** M31 supplies the native host runtime; the current source adapter uses terminal-issued codes. */
 export interface HostProjectTransferPicker {

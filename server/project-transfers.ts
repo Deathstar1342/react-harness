@@ -9,7 +9,7 @@ import type {Store} from './store.js';
 import {WorkerClient,type WorkerTransport} from './worker-client.js';
 
 export const transferCode=z.string().regex(/^[a-f0-9]{64}$/);
-const statusSchema=z.object({id:z.uuid(),kind:z.enum(['import','export']),project:z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/),phase:z.enum(['copying','publishing','succeeded','failed','cancelled','uncertain']),code:z.string().regex(/^[A-Z_]+$/),residue:z.boolean(),manifestDigest:transferCode,files:z.number().int().min(0).max(50000),bytes:z.number().int().min(0).max(2147483648),excludedCount:z.number().int().min(0).max(50000),excluded:z.array(z.object({path:z.string().max(240),reason:z.string().max(200)}).strict()).max(100),history:z.boolean(),storageId:z.uuid(),sessionId:z.uuid(),identity:z.tuple([z.number().int().safe(),z.number().int().safe()]).nullable()}).strict();
+const statusSchema=z.object({id:z.uuid(),kind:z.enum(['import','export']),project:z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/),phase:z.enum(['copying','publishing','succeeded','failed','cancelled','uncertain']),code:z.string().regex(/^[A-Z_]+$/),residue:z.boolean(),manifestDigest:transferCode,files:z.number().int().min(0).max(50000),bytes:z.number().int().min(0).max(2147483648),excludedCount:z.number().int().min(0).max(50000),excluded:z.array(z.object({path:z.string().max(240),reason:z.string().max(200)}).strict()).max(100),history:z.boolean(),storageId:z.uuid(),sessionId:z.uuid(),identity:z.tuple([z.string().regex(/^[0-9]{1,30}$/),z.string().regex(/^[0-9]{1,30}$/)]).nullable()}).strict();
 const pause=()=>new Promise(resolve=>setTimeout(resolve,200));
 const key=(code:string)=>`transfer:${createHash('sha256').update(code).digest('hex')}`;
 export class ProjectTransfers {
@@ -52,11 +52,11 @@ export class ProjectTransfers {
       const redeemed=statusSchema.parse(await client.request('transfer_receipt',{code}));
       if(JSON.stringify(redeemed)!==JSON.stringify(receipt))throw new Error('Redeemed receipt differs from the verified completed transfer');
       receipt=redeemed;
-      const root=path.join(this.workspace,receipt.project),info=await lstat(root);
-      if(signal.aborted||!info.isDirectory()||info.isSymbolicLink()||await realpath(root)!==root||!receipt.identity||info.dev!==receipt.identity[0]||info.ino!==receipt.identity[1]||receipt.storageId!==client.storageId||receipt.sessionId!==client.sessionId)throw new Error('Managed copy identity changed before registration');
+      const root=path.join(this.workspace,receipt.project),info=await lstat(root,{bigint:true});
+      if(signal.aborted||!info.isDirectory()||info.isSymbolicLink()||await realpath(root)!==root||!receipt.identity||info.dev.toString()!==receipt.identity[0]||info.ino.toString()!==receipt.identity[1]||receipt.storageId!==client.storageId||receipt.sessionId!==client.sessionId)throw new Error('Managed copy identity changed before registration');
       return this.store.transaction(()=>{
-        const current=lstatSync(root);
-        if(signal.aborted||realpathSync(root)!==root||!current.isDirectory()||current.isSymbolicLink()||current.dev!==receipt.identity![0]||current.ino!==receipt.identity![1]||this.store.projects().some(project=>project.path===root))throw new Error('Managed identity changed or was already registered');
+        const current=lstatSync(root,{bigint:true});
+        if(signal.aborted||realpathSync(root)!==root||!current.isDirectory()||current.isSymbolicLink()||current.dev.toString()!==receipt.identity![0]||current.ino.toString()!==receipt.identity![1]||this.store.projects().some(project=>project.path===root))throw new Error('Managed identity changed or was already registered');
         const project=this.store.createProject(name,root);
         this.store.setState(key(code),{phase:'registered',projectId:project.id,receipt});
         return {project,receipt};
@@ -71,10 +71,10 @@ export class ProjectTransfers {
     const project=this.store.project(projectId);
     if(!this.tools.removeScope)throw new Error('Tool reservation unavailable');
     return this.runtime.exclusiveProjectEdit(projectId,async()=>await this.tools.removeScope!(project.path,undefined,async()=>{
-      const reservation=this.store.getState<{claim:string;sessionId:string;storageId:string;identity:[number,number]}|null>(`transfer:reservation:${projectId}`,null);
+      const reservation=this.store.getState<{claim:string;sessionId:string;storageId:string;identity:[string,string]}|null>(`transfer:reservation:${projectId}`,null);
       if(!reservation||reservation.claim!==key(code))throw new Error('This code does not own the pending export reservation');
-      const info=lstatSync(project.path);
-      if(!info.isDirectory()||info.isSymbolicLink()||info.dev!==reservation.identity[0]||info.ino!==reservation.identity[1])throw new Error('Reserved managed project identity changed');
+      const info=lstatSync(project.path,{bigint:true});
+      if(!info.isDirectory()||info.isSymbolicLink()||info.dev.toString()!==reservation.identity[0]||info.ino.toString()!==reservation.identity[1])throw new Error('Reserved managed project identity changed');
       const client=await this.connect();
       if(client.storageId!==reservation.storageId)throw new Error('Export storage identity changed');
       const prior=this.store.getState<{receipt?:ProjectTransferReceipt}>(key(code),{}).receipt;
@@ -82,8 +82,8 @@ export class ProjectTransfers {
       if(result.receipt&&(result.receipt.kind!=='export'||result.receipt.project!==path.basename(project.path)||result.receipt.storageId!==reservation.storageId||result.receipt.sessionId!==reservation.sessionId||['copying','publishing'].includes(result.receipt.phase)||prior&&(result.receipt.id!==prior.id||result.receipt.manifestDigest!==prior.manifestDigest)))throw new Error('Export is not confirmed stopped');
       if(prior&&!result.receipt)throw new Error('Previously observed transfer claim disappeared');
       return this.store.transaction(()=>{
-        const current=lstatSync(project.path);
-        if(current.dev!==reservation.identity[0]||current.ino!==reservation.identity[1]||this.store.getState<{claim:string}|null>(`transfer:reservation:${projectId}`,null)?.claim!==key(code))throw new Error('Export reservation changed');
+        const current=lstatSync(project.path,{bigint:true});
+        if(current.dev.toString()!==reservation.identity[0]||current.ino.toString()!==reservation.identity[1]||this.store.getState<{claim:string}|null>(`transfer:reservation:${projectId}`,null)?.claim!==key(code))throw new Error('Export reservation changed');
         this.store.setState(key(code),{...this.store.getState<Record<string,unknown>>(key(code),{}),released:true,receipt:result.receipt});
         this.store.setState(`transfer:reservation:${projectId}`,null);this.store.removalError(projectId,'');
         return {released:true as const,receipt:result.receipt};
@@ -97,8 +97,8 @@ export class ProjectTransfers {
       const client=await this.connect();
       this.claim(code);
       // Persist before yielding: restart cannot silently clear a still-live export.
-      const identity=lstatSync(project.path);
-      this.store.setState(`transfer:reservation:${projectId}`,{claim:key(code),sessionId:client.sessionId,storageId:client.storageId,identity:[identity.dev,identity.ino]});
+      const identity=lstatSync(project.path,{bigint:true});
+      this.store.setState(`transfer:reservation:${projectId}`,{claim:key(code),sessionId:client.sessionId,storageId:client.storageId,identity:[identity.dev.toString(),identity.ino.toString()]});
       this.store.removalError(projectId,'Export is pending or uncertain. Wait for its confirmed receipt before editing this managed copy.');
       try {
         const result=await this.copy(client,code,'export',path.basename(project.path),signal);

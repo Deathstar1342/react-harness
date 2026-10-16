@@ -14,8 +14,8 @@ function fixture(){
   const root=mkdtempSync(path.join(tmpdir(),'m30-'));cleanup.push(()=>rmSync(root,{recursive:true,force:true}));
   const store=new Store(path.join(root,'state.sqlite'));cleanup.push(()=>store.close());
   const folder=randomUUID(),workspace=path.join(root,'workspace');mkdirSync(workspace);mkdirSync(path.join(workspace,folder));
-  const info=lstatSync(path.join(workspace,folder)),storageId=randomUUID(),sessionId=randomUUID();
-  const receipt={id:randomUUID(),kind:'import',project:folder,phase:'succeeded',code:'COMPLETE',residue:false,manifestDigest:'a'.repeat(64),files:1,bytes:4,excludedCount:0,excluded:[],history:false,storageId,sessionId,identity:[info.dev,info.ino]};
+  const info=lstatSync(path.join(workspace,folder),{bigint:true}),storageId=randomUUID(),sessionId=randomUUID();
+  const receipt={id:randomUUID(),kind:'import',project:folder,phase:'succeeded',code:'COMPLETE',residue:false,manifestDigest:'a'.repeat(64),files:1,bytes:4,excludedCount:0,excluded:[],history:false,storageId,sessionId,identity:[info.dev.toString(),info.ino.toString()]};
   const calls:string[]=[];
   const client:WorkerTransport={storageId,sessionId,request:async(op)=>{calls.push(op);return receipt;}};
   const service=new ProjectTransfers(store,{} as Runtime,{} as ToolService,async()=>client,workspace);
@@ -34,7 +34,7 @@ it('refuses incomplete, mismatched and cancelled imports without registration or
   for(const fault of ['failed','identity','cancelled']){
     const f=fixture(),abort=new AbortController();
     if(fault==='failed')f.receipt.phase='failed';
-    if(fault==='identity')f.receipt.identity=[0,0];
+    if(fault==='identity')f.receipt.identity=['0','0'];
     if(fault==='cancelled')abort.abort();
     await expect(f.service.import('Copy','c'.repeat(64),abort.signal)).rejects.toThrow();
     expect(f.store.projects()).toHaveLength(0);

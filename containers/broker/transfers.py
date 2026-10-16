@@ -47,7 +47,7 @@ def relative(value):
 
 
 def stamp(info):
-    return [info.st_dev, info.st_ino, info.st_mode, info.st_nlink, info.st_size, str(info.st_mtime_ns), str(info.st_ctime_ns)]
+    return [str(info.st_dev), str(info.st_ino), info.st_mode, info.st_nlink, info.st_size, str(info.st_mtime_ns), str(info.st_ctime_ns)]
 
 
 def policy(rel, included, history):

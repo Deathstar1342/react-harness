@@ -21,7 +21,7 @@ const receipts=process.env.M30_RECEIPTS??'test-results';await mkdir(receipts,{re
 try {
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   let imported=false,imports=0,exports=0,browsing=0;
-  const receipt={id:randomUUID(),kind:'import',project:project.path.split('/').at(-1),phase:'succeeded',code:'COMPLETE_WITH_EXCLUSIONS',residue:false,manifestDigest:'a'.repeat(64),files:14,bytes:2048,excludedCount:2,excluded:[{path:'.env',reason:'Sensitive project file; explicit host inclusion required'},{path:'node_modules',reason:'Dependency, build or cache directory'}],history:false,storageId:randomUUID(),sessionId:randomUUID(),identity:[1,2]};
+  const receipt={id:randomUUID(),kind:'import',project:project.path.split('/').at(-1),phase:'succeeded',code:'COMPLETE_WITH_EXCLUSIONS',residue:false,manifestDigest:'a'.repeat(64),files:14,bytes:2048,excludedCount:2,excluded:[{path:'.env',reason:'Sensitive project file; explicit host inclusion required'},{path:'node_modules',reason:'Dependency, build or cache directory'}],history:false,storageId:randomUUID(),sessionId:randomUUID(),identity:['1','2']};
   await page.route('**/api/**',async route=>{
     const request=route.request(),url=new URL(request.url());
     const reply=(json:unknown)=>route.fulfill({json});
