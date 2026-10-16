@@ -13,8 +13,8 @@ it('actual private writes refuse missing host scope and lost replies before crea
  const authority=await import('../server/native-storage.js');authority.installNativeStorage(policy,check);
  // Native Linux container paths use POSIX syntax; local fixture replaces only
  // the lexical platform parser, leaving actual writes and gate checks intact.
- const hostDirname=path.dirname.bind(path),dirname=vi.spyOn(path.posix,'dirname').mockImplementation(hostDirname);
- const absolute=vi.spyOn(path.posix,'isAbsolute').mockReturnValue(true),normalize=vi.spyOn(path.posix,'normalize').mockImplementation(value=>value);
+ const hostDirname=path.dirname.bind(path),dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(hostDirname):undefined;
+ const absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockReturnValue(true):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;
  try{
   const {durableWrite}=await import('../server/profile.js');
   expect(()=>durableWrite(filename,'unscoped')).toThrow(/freshness/);expect(existsSync(filename)).toBe(false);
@@ -22,12 +22,12 @@ it('actual private writes refuse missing host scope and lost replies before crea
   check.mockRejectedValueOnce(new Error('lost host reply'));
   await expect(authority.runNativeOperation(()=>durableWrite(filename,'replayed'))).rejects.toThrow('lost host reply');
   await expect(authority.runNativeOperation(()=>durableWrite(filename,'retry'))).rejects.toThrow(/recovery/);expect(readFileSync(filename,'utf8')).toBe('authorized');
- }finally{absolute.mockRestore();normalize.mockRestore();dirname.mockRestore();}
+ }finally{absolute?.mockRestore();normalize?.mockRestore();dirname?.mockRestore();}
 });
 
 it('real Fastify async routes retain scope across done and await, then refuse an expired pending write',async()=>{
  const root=mkdtempSync(path.join(tmpdir(),'native-http-')),filename=path.join(root,'private.json'),record={storageId:randomUUID(),launchId:randomUUID()};let clock=Date.now();
- const date=vi.spyOn(Date,'now').mockImplementation(()=>clock),hostDirname=path.dirname.bind(path),dirname=vi.spyOn(path.posix,'dirname').mockImplementation(hostDirname),absolute=vi.spyOn(path.posix,'isAbsolute').mockReturnValue(true),normalize=vi.spyOn(path.posix,'normalize').mockImplementation(value=>value);
+ const date=vi.spyOn(Date,'now').mockImplementation(()=>clock),hostDirname=path.dirname.bind(path),dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(hostDirname):undefined,absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockReturnValue(true):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;
  const authority=await import('../server/native-storage.js'),{durableWrite}=await import('../server/profile.js');
  const check=vi.fn(async()=>({...record,gateId:'b'.repeat(64),issuedAt:clock,expiresAt:clock+10000}));
  const policy={record,verifyRoots:vi.fn(),permits:vi.fn((file:string)=>file===root||file.startsWith(root+path.sep))} as unknown as NativeBindPolicy;
@@ -38,5 +38,5 @@ it('real Fastify async routes retain scope across done and await, then refuse an
   expect((await app.inject({method:'POST',url:'/write'})).statusCode).toBe(200);expect(readFileSync(filename,'utf8')).toBe('async success');
   expect((await app.inject({method:'POST',url:'/delayed'})).statusCode).toBe(500);expect(readFileSync(filename,'utf8')).toBe('async success');
   expect((await app.inject({method:'POST',url:'/write'})).statusCode).toBe(500);expect(check).toHaveBeenCalledTimes(2);
- }finally{await app.close();date.mockRestore();absolute.mockRestore();normalize.mockRestore();dirname.mockRestore();}
+ }finally{await app.close();date.mockRestore();absolute?.mockRestore();normalize?.mockRestore();dirname?.mockRestore();}
 });

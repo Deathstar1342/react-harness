@@ -1,3 +1,4 @@
+import {installFixedEnvironment} from './environment.js';
 import { NativeBindPolicy } from '../server/native-bind-policy.js';
 import { installNativeStorage,runNativeOperation } from '../server/native-storage.js';
 import { WorkerClient } from '../server/worker-client.js';
@@ -9,8 +10,7 @@ process.umask(0o077);
 const env:NodeJS.ProcessEnv={PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/tmp',NODE_ENV:'production',
   HARNESS_EXECUTION_MODE:'container',HARNESS_STORAGE_ID:process.env.HARNESS_STORAGE_ID,HARNESS_DESKTOP:process.env.HARNESS_DESKTOP,HARNESS_NATIVE_BIND_DIGEST:process.env.HARNESS_NATIVE_BIND_DIGEST,HARNESS_LAUNCH_ID:process.env.HARNESS_LAUNCH_ID,
   HARNESS_HOME:'/abyssus',HARNESS_WORKSPACE_ROOT:'/workspace',HOST:'0.0.0.0',PORT:'3000'};
-for(const key of Object.keys(process.env))delete process.env[key];
-Object.assign(process.env,env);
+installFixedEnvironment(env);
 try {
   const policy=NativeBindPolicy.load(env);
   if(policy){if(policy.record.phase!=='controller')throw new Error('Wrong native storage phase');const client=await WorkerClient.connectNative(policy);installNativeStorage(policy,()=>client.request('storage_check',{}),client.nativeObservation());}

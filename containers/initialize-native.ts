@@ -1,3 +1,4 @@
+import {installFixedEnvironment} from './environment.js';
 /** Fixed initializer for a host-attested empty NTFS scaffold. No phase RPC. */
 import { readdirSync,readFileSync,unlinkSync } from 'node:fs';
 import { NativeBindPolicy } from '../server/native-bind-policy.js';
@@ -7,7 +8,7 @@ import { prepareProfile,durableWrite,regularFile } from '../server/profile.js';
 import { Store } from '../server/store.js';
 process.umask(0o077);
 const env:NodeJS.ProcessEnv={PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/tmp',NODE_ENV:'production',HARNESS_EXECUTION_MODE:'container',HARNESS_STORAGE_ID:process.env.HARNESS_STORAGE_ID,HARNESS_NATIVE_BIND_DIGEST:process.env.HARNESS_NATIVE_BIND_DIGEST,HARNESS_LAUNCH_ID:process.env.HARNESS_LAUNCH_ID};
-for(const key of Object.keys(process.env))delete process.env[key];Object.assign(process.env,env);
+installFixedEnvironment(env);
 try{
  const policy=NativeBindPolicy.load(env);
  if(!policy||policy.record.phase!=='initialize'||process.getuid?.()===0)throw new Error('Native initializer phase required');
