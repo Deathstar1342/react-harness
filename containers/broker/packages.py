@@ -65,19 +65,23 @@ class Packages:
         return row['record']
 
     def companion(self):
-        args = ['run', '-d', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+        args = ['--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                 '--pids-limit', '64', '--memory', '128m', '--cpus', '1', '--user', f'{self.docker.uid}:{self.docker.gid}',
                 '--mount', f'type=bind,src={self.docker.storage / "runtime/egress"},dst=/run/egress,readonly',
                 '--entrypoint', '/usr/bin/python3', self.docker.image, '-I', '/opt/abyssus-worker/worker-bridge.py']
-        return self.docker.call(args).strip()
+        container = self.docker.resources.create(args, self.docker.image, 'companion')
+        self.docker.call(['start',container])
+        return container
 
     def maintenance(self, image, companion=None):
         self.docker.attestor.verify(image)
-        args = ['run', '-d', '--network', 'container:' + companion if companion else 'none', '--cap-drop', 'ALL',
+        args = ['--network', 'container:' + companion if companion else 'none', '--cap-drop', 'ALL',
                 '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--cap-add', 'KILL',
                 '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--memory', '2g', '--cpus', '2', '--user', '0:0',
                 '--tmpfs', '/tmp:size=256m,mode=1777', '--entrypoint', '/usr/bin/python3', image, '-I', '-c', 'import time;time.sleep(3600)']
-        return self.docker.call(args).strip()
+        container = self.docker.resources.create(args, image, 'maintenance')
+        self.docker.call(['start',container])
+        return container
 
     def invoke(self, row, action, body):
         args = ['exec', '-i', '--user', '0:0', row['container'], '/usr/bin/env', '-i', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
@@ -89,11 +93,16 @@ class Packages:
         return decode(value.encode())
 
     def cleanup(self, row):
+        errors=[]
         for field in ('container', 'companion'):
             if row.get(field):
-                self.docker.call(['rm', '--force', row[field]])
-                row[field] = None
-                self.save(row)
+                try:
+                    self.docker.resources.remove(row[field])
+                    row[field] = None
+                    self.save(row)
+                except Exception:
+                    errors.append(field)
+        require(not errors,'INSTALL_CLEANUP_UNCERTAIN')
 
     def dispatch(self, op, body):
         require(type(body) is dict and type(body.get('project')) is str and PROJECT.fullmatch(body['project']))
@@ -159,6 +168,7 @@ class Packages:
                 return row['record']
             require(row['phase'] == 'authorized' and row['record']['decision'] == decision, 'INSTALL_CONSUMED')
             require(not self.busy(project), 'INSTALL_RECOVERY_REQUIRED')
+            require(not any(json.loads(raw)['project']==project and json.loads(raw)['state'] in ('accepted','running','uncertain') for (raw,) in self.db.execute('SELECT data FROM claims')), 'PROJECT_EXECUTION_BUSY')
             row['phase'] = 'executing'
             row['record'].update(state='running', code='RUNNING')
             self.save(row)  # Durable before apt effects; never execute this decision twice.
@@ -176,7 +186,7 @@ class Packages:
                     reconciliation = self.invoke(observed, 'observe', row['record']['preview'])
                     require(reconciliation['healthy'] and reconciliation['matches'], 'INSTALL_OBSERVATION_MISMATCH')
                 finally:
-                    self.docker.call(['rm', '--force', observed['container']])
+                    self.docker.resources.remove(observed['container'])
                 row['record']['reconciliation'] = reconciliation
                 self.save(row)
             return self.receipt(row)
@@ -202,7 +212,9 @@ class Packages:
                 if outcome['state'] != 'succeeded':
                     row['phase'] = outcome['state']
                     self.save(row)
-                    # Keep uncertain maintenance identity for evidence; no replay/re-adoption.
+                    # Failed/noop transactions can be removed; uncertain layers remain evidence.
+                    if outcome['state'] in ('failed','noop'):
+                        self.cleanup(row)
                     return
                 row['phase'] = 'publishing'
                 self.save(row)

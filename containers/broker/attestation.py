@@ -105,7 +105,7 @@ class Attestor:
         info = json.loads(self.docker.call(['image', 'inspect', image]))[0]
         require(info['Id'] == image and not info['Config'].get('Volumes') and info['Config'].get('Env',[]) == self.expected_env, 'IMAGE_CONTROL_METADATA')
         require(info.get('Architecture') == 'amd64' and info.get('Os') == 'linux', 'IMAGE_PLATFORM')
-        container = self.docker.call(['create', '--network', 'none', '--entrypoint', '/usr/bin/true', image]).strip()
+        container = self.docker.resources.create(['--network', 'none', '--entrypoint', '/usr/bin/true', image], image, 'attestation')
         process = None
         watchdog = None
         timed_out = threading.Event()
@@ -128,7 +128,7 @@ class Attestor:
                     process.kill()
                 process.stdout.close()
             # A failed cleanup prevents the caller from receiving any attestation.
-            self.docker.call(['rm', container])
+            self.docker.resources.remove(container)
 
     def verify(self, image):
         if image not in self.verified:

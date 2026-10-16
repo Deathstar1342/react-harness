@@ -52,6 +52,8 @@ class Broker:
                 return {k: record[k] for k in ('claimId', 'binding', 'sessionId', 'identity', 'expiresAt')}
             if op == 'activate':
                 record = self.journal.owned(body)
+                require(record['state']=='prepared','CLAIM_CONSUMED')
+                require(record['contextId'] in self.docker.contexts,'WORKER_LOST')
                 require(not self.packages.busy(record['project']), 'INSTALL_RECOVERY_REQUIRED')
                 _, _, identity = self.docker.topology(record['project'], record['operation']['kind'] == 'git')
                 self.docker.verify(self.docker.contexts[record['contextId']])
@@ -211,7 +213,7 @@ class Broker:
                         errors.append('WORKER_CLEANUP_UNCERTAIN')
                 for (raw,) in self.journal.db.execute('SELECT data FROM worker_installs').fetchall():
                     row = json.loads(raw)
-                    if row['phase'] in ('prepared','authorized','preparing'):
+                    if row['phase'] in ('prepared','authorized','preparing','failed','noop'):
                         try:
                             self.packages.cleanup(row)
                             row['phase'] = 'failed'
@@ -299,10 +301,12 @@ def serve(storage, storage_id, source, context):
     descriptor = runtime / 'control/session.json'
     with Server(str(socket_path), Handler) as server:
         data = {'protocol': PROTOCOL, 'sessionId': session, 'key': key, 'storageId': storage_id, 'socket': '/run/abyssus-broker/broker.sock'}
-        with descriptor.open('w') as file:
+        temporary = descriptor.with_suffix('.pending')
+        with temporary.open('w') as file:
             file.write(canonical(data))
             file.flush()
             os.fsync(file.fileno())
+        temporary.replace(descriptor)
         def stop(*_):
             def drain():
                 try:
@@ -315,11 +319,13 @@ def serve(storage, storage_id, source, context):
         try:
             server.serve_forever()
         finally:
-            broker.shutdown()
-            proxy.terminate()
-            proxy.wait(timeout=10)
-            descriptor.unlink(missing_ok=True)
-            journal.db.close()
+            try:
+                broker.shutdown()
+            finally:
+                proxy.terminate()
+                proxy.wait(timeout=10)
+                descriptor.unlink(missing_ok=True)
+                journal.db.close()
 
 if __name__ == '__main__':
     import sys

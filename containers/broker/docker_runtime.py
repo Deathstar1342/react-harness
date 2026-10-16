@@ -29,6 +29,9 @@ class Docker:
         require(not any('rootless' in str(v) or 'userns' in str(v) for v in info.get('SecurityOptions', [])), 'UNSUPPORTED_UID_MAPPING')
         self.image = self.call(['image', 'inspect', 'abyssus-worker:m29', '--format', '{{.Id}}']).strip()
         require(re.fullmatch(r'sha256:[a-f0-9]{64}', self.image), 'WORKER_IMAGE_MISSING')
+        from resources import Resources
+        self.resources = Resources(self)
+        self.resources.recover()
         from attestation import Attestor
         self.attestor = Attestor(self)
         self.contexts = {}
@@ -96,10 +99,8 @@ class Docker:
             directory.mkdir(mode=0o700, exist_ok=True)
             require(directory.resolve() == directory and directory.stat().st_uid == self.uid, 'UNSAFE_CACHE')
         self.attestor.verify(identity['imageId'])
-        name = 'abyssus-worker-' + str(uuid.uuid4())
         target = '/workspace/' + request['project']
-        args = ['create', '--name', name, '--label', 'abyssus.storage=' + self.storage_id,
-                '--label', 'abyssus.context=' + key, '--network', 'none', '--init', '--read-only',
+        args = ['--label', 'abyssus.context=' + key, '--network', 'none', '--init', '--read-only',
                 '--cap-drop', 'ALL', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--cap-add', 'KILL', '--security-opt', 'no-new-privileges',
                 '--pids-limit', '256', '--memory', '2g', '--cpus', '2', '--user', '0:0',
                 '--tmpfs', '/tmp:size=256m,mode=1777', '--tmpfs', '/run:size=16m,mode=755',
@@ -114,7 +115,7 @@ class Docker:
             else:
                 args += ['--mount', f'type=bind,src={self.blank},dst={destination},readonly']
         args += ['--entrypoint', '/usr/bin/python3', identity['imageId'], '-I', '/opt/abyssus-worker/worker-bridge.py']
-        container = self.call(args).strip()
+        container = self.resources.create(args, identity['imageId'], 'worker')
         require(re.fullmatch('[a-f0-9]{64}', container), 'INVALID_CONTAINER_ID')
         owned = {'container': container, 'identity': identity, 'project': request['project'], 'contextId': key}
         self.contexts[key] = owned  # Retain ownership if start/cleanup fails.
@@ -143,7 +144,5 @@ class Docker:
         if not owned:
             return
         # Exact locally created ID only. Never discover/adopt from a name or PID.
-        self.call(['rm', '--force', owned['container']])
-        inspection = subprocess.run(self.argv(['inspect', owned['container']]), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
-        require(inspection.returncode != 0, 'CLEANUP_UNCERTAIN')
+        self.resources.remove(owned['container'])
         del self.contexts[context]

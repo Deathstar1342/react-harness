@@ -56,3 +56,12 @@ it('a changed A generation rejects its old approval before execute',async()=>{
   f.targets.set(f.a.id,{...f.targets.get(f.a.id)!,id:'d'.repeat(64),generation:randomUUID()});
   expect(await f.advance(a.id)).toMatchObject({ok:false});expect(f.helpers.get(f.a.id)!.helper.execute).not.toHaveBeenCalled();
 });
+
+it.each(['imageId','generation','manifestDigest'] as const)('rejects replacement final container %s during recovery',async field=>{
+  const f=fixture(),a=f.create(f.chatA.id);await f.advance(a.id);f.service.decide(a.id,'approve',()=>true);await f.advance(a.id);
+  const before=structuredClone(f.store.install(a.id)),records=f.helpers.get(f.a.id)!.records,record=records.get(a.id)!;
+  record.containerReceipt![field]=field==='generation'?randomUUID():field==='imageId'?'sha256:'+'d'.repeat(64):'d'.repeat(64);
+  await expect(f.service.recover(a.id,false)).rejects.toThrow(/original recovery gate/);
+  expect(f.store.install(a.id)).toEqual(before);
+  expect(f.helpers.get(f.a.id)!.helper.execute).toHaveBeenCalledTimes(1);
+});

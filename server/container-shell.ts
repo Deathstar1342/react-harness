@@ -51,7 +51,7 @@ export class ContainerShellPool {
         }
         // The exact prepared binding was durably authorized above. No retry on a lost activation reply.
         activated=true;
-        await client.request('activate',claim(binding));
+        z.object({claimId:z.literal(binding.claimId),binding:z.literal(binding.binding),state:z.literal('accepted')}).strict().parse(await client.request('activate',claim(binding)));
         let offset=0,cancelSent=false,cancelFailed=false;const deadline=Date.now()+request.timeoutMs+60000;
         const decoder=new StringDecoder('utf8');
         for(;;){

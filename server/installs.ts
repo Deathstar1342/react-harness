@@ -185,6 +185,8 @@ export class InstallService {
     } finally {signal.removeEventListener('abort',abort);this.controllers.delete(id);}
   }
   private acceptOutcome(item:InstallRecord,record:PackageHelperRecord,reconciled:boolean) {
+    const current=this.store.install(item.id);
+    if(current.containerReceipt&&helperCanonical(current.containerReceipt)!==helperCanonical(record.containerReceipt??null))throw new Error('CONTAINER_LINEAGE_CHANGED');
     if(record.state==='succeeded' && (!record.reconciliation?.healthy || !record.reconciliation.matches))throw new Error('INVALID_HELPER_EVIDENCE');
     const state=record.state==='succeeded'?'succeeded':record.state==='failed'?'failed':record.state==='noop'?'noop':['prepared','authorized'].includes(record.state)?'stale':'uncertain';
     this.write({...this.store.install(item.id),state,code:record.code,containerReceipt:record.containerReceipt,reconciliation:record.reconciliation,recoveryRequired:state==='uncertain' && !(reconciled && record.reconciliation?.healthy)});

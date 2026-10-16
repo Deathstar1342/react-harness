@@ -41,6 +41,10 @@ class Attestation(unittest.TestCase):
         calls=[]
         class Docker:
             env={}
+            @property
+            def resources(self):return self
+            def create(self,args,image,kind):return 'b'*64
+            def remove(self,id):calls.append(['rm',id])
             def call(self,args):
                 calls.append(args)
                 if args[0]=='image':return json.dumps([{'Id':'sha256:'+'a'*64,'Config':{'Env':[]},'Architecture':'amd64','Os':'linux'}])
