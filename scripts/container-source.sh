@@ -10,10 +10,11 @@ action="${1:-}"; option="${2:-}"
 [[ "$action" == setup || "$action" == start ]] || fail 'Expected setup or start.'
 [[ -z "$option" || "$option" == --check || "$action" == setup && "$option" == --no-start || "$action" == start && "$option" == --stop ]] || fail 'Unsupported option.'
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 && "$EUID" != 0 ]] || fail 'Container source currently supports non-root Linux x64. Windows D: storage/entrypoints require later Windows validation; nothing was provisioned.'
-for command in docker stat realpath flock curl; do command -v "$command" >/dev/null || fail "Missing $command. Install prerequisites through your approved administrator; this script never provisions the host."; done
+for command in docker stat realpath flock curl python3; do command -v "$command" >/dev/null || fail "Missing $command. Install prerequisites through your approved administrator; this script never provisions the host."; done
 for name in DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_API_VERSION DOCKER_CONFIG; do [[ -z "${!name:-}" ]] || fail "Unset $name; select a supported local Docker context explicitly before running."; done
 # Only host connection configuration reaches Docker. Provider keys and inherited .env values do not.
 d() { env -i HOME="$HOME" PATH="$PATH" docker "$@"; }
+[[ -x /usr/bin/python3 ]] || fail 'Host Python 3 at /usr/bin/python3 is required for the source broker; nothing was provisioned.'
 context="$(d context show)"
 endpoint="$(d context inspect "$context" --format '{{.Endpoints.docker.Host}}')"
 [[ "$endpoint" == unix:///* && -S "${endpoint#unix://}" ]] || fail 'Only a reachable local Unix-socket Docker engine is supported. Remote/TCP/SSH endpoints are refused.'
@@ -80,12 +81,19 @@ flock -n 9 || fail 'Another source supervisor owns this storage.'
 if [[ "$action" == setup ]]; then
   [[ -t 0 && -t 1 ]] || fail 'Provider setup requires an interactive terminal.'
   c build controller
+  d --context "$context" build -f "$ROOT/containers/Worker.Dockerfile" -t abyssus-worker:m29 "$ROOT"
+  mkdir -p -- "$ABYSSUS_STORAGE_ROOT/runtime/control" "$ABYSSUS_STORAGE_ROOT/runtime/egress"
   c run --rm --no-deps controller node --import tsx containers/configure.ts
   [[ "$option" != --no-start ]] || exit 0
 fi
-if [[ "$option" == --stop ]]; then c stop controller; exit 0; fi
+if [[ "$option" == --stop ]]; then
+  c stop controller
+  env -i HOME="$HOME" PATH="$PATH" /usr/bin/python3 -I "$ROOT/containers/broker/source.py" stop "$ABYSSUS_STORAGE_ROOT" "$ABYSSUS_STORAGE_ID" "$ROOT" "$context"
+  exit 0
+fi
 # Never build, initialize, recreate volumes or pull implicitly on start.
 check_storage
+env -i HOME="$HOME" PATH="$PATH" /usr/bin/python3 -I "$ROOT/containers/broker/source.py" start "$ABYSSUS_STORAGE_ROOT" "$ABYSSUS_STORAGE_ID" "$ROOT" "$context"
 c up -d --no-build --pull never --wait --wait-timeout 90 controller
 request="$(c exec -T controller node --import tsx containers/probe.ts request)"
 response="$(env -i PATH="$PATH" curl --noproxy '*' --silent --show-error --fail --max-time 5 --header 'Content-Type: application/json' --data-binary @- http://127.0.0.1:3000/api/backend/readiness <<< "$request")"

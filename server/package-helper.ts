@@ -6,7 +6,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile, lstat } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { z } from 'zod';
-import type { PackageHelperDecision, PackageHelperRecord, PackageHelperRequest, PackageHelperTarget } from '../shared/types.js';
+import type { LocalPackageTarget, PackageHelperDecision, PackageHelperRecord, PackageHelperRequest, PackageHelperTarget } from '../shared/types.js';
 
 export const helperProtocol='abyssus-helper-v1' as const;
 const hex=z.string().regex(/^[a-f0-9]{64}$/);
@@ -71,8 +71,8 @@ export class PackageHelperClient {
   }
   async hello(){
     const reply=await this.request<{protocol:typeof helperProtocol;target:PackageHelperTarget}>('hello',{});
-    if(reply.protocol!==helperProtocol||reply.target.installationId!==this.#descriptor.installationId)throw new PackageHelperError('HELPER_TARGET_MISMATCH');
-    return reply;
+    if(reply.protocol!==helperProtocol||reply.target.scope==='project-container'||reply.target.installationId!==this.#descriptor.installationId)throw new PackageHelperError('HELPER_TARGET_MISMATCH');
+    return {...reply,target:reply.target as LocalPackageTarget};
   }
   prepare(request:PackageHelperRequest){return this.request<PackageHelperRecord>('prepare',packageRequestSchema.parse(request));}
   authorize(decision:PackageHelperDecision){return this.request<PackageHelperRecord>('authorize',decisionSchema.parse(decision));}

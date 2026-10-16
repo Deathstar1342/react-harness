@@ -5,11 +5,15 @@ permissions:
 jobs:
   linux-container:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Real Linux controller build and storage boundary checks
         run: python3 tests/container-linux.py
+      - name: Portable broker protocol and egress checks
+        run: python3 -m unittest discover -s tests -p 'test_worker_*.py' -v
+      - name: Real owned worker PTY and container package transactions
+        run: python3 tests/container-worker-linux.py
       - name: Actual source launcher and private terminal setup
         run: python3 tests/container-source-linux.py
       - name: Preserve container receipts including failures

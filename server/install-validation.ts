@@ -8,7 +8,9 @@ const text = z.string().max(512);
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const name = z.string().regex(/^[a-z0-9][a-z0-9+.-]{1,63}$/);
 const version = z.string().regex(/^[0-9][A-Za-z0-9.+:~\-]{0,127}$/);
-export const targetSchema = z.object({ id: hex, installationId: z.string().uuid(), machineId: z.string().regex(/^[a-f0-9]{32}$/), distribution: z.enum(['ubuntu','debian']), release: z.string().regex(/^[0-9.]{1,32}$/), architecture: z.literal('amd64'), manager: z.literal('apt'), adapterVersion: z.literal(1) }).strict();
+const localTargetSchema = z.object({ id: hex, installationId: z.string().uuid(), machineId: z.string().regex(/^[a-f0-9]{32}$/), distribution: z.enum(['ubuntu','debian']), release: z.string().regex(/^[0-9.]{1,32}$/), architecture: z.literal('amd64'), manager: z.literal('apt'), adapterVersion: z.literal(1) }).strict();
+export const containerTargetSchema=z.object({scope:z.literal('project-container'),id:hex,storageId:z.string().uuid(),projectId:hex,baseImageId:z.string().regex(/^sha256:[a-f0-9]{64}$/),generation:z.string().uuid(),distribution:z.literal('debian'),release:z.literal('12'),architecture:z.literal('amd64'),manager:z.literal('apt'),adapterVersion:z.literal(1)}).strict();
+export const targetSchema=z.union([localTargetSchema,containerTargetSchema]);
 const uri = z.string().max(2048).refine(value => {
   try { const url = new URL(value); return ['http:','https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash; } catch { return false; }
 });

@@ -56,7 +56,7 @@ def package_request(body):
 
 
 class Audit:
-    def __init__(self, file):
+    def __init__(self, file, recover=True):
         self.db = sqlite3.connect(file)
         self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=FULL")
@@ -65,7 +65,7 @@ class Audit:
           CREATE TABLE IF NOT EXISTS nonces(nonce TEXT PRIMARY KEY, expires INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY, id TEXT NOT NULL, event TEXT NOT NULL);
         """)
-        for (raw,) in self.db.execute("SELECT record FROM requests").fetchall():
+        for (raw,) in (self.db.execute("SELECT record FROM requests").fetchall() if recover else []):
             record = json.loads(raw)
             if record["state"] in ("authorized", "running"):
                 record["state"] = "uncertain" if record["state"] == "running" else "failed"

@@ -10,6 +10,7 @@ try {
   if(process.getuid?.()===0 || readdirSync(root).length)throw new Error('Initialization requires an empty non-root-owned selected directory');
   privateDirectory(root);
   for(const name of ['state','config','workspace','runtime'])privateDirectory(path.join(root,name));
+  for(const name of ['control','egress'])privateDirectory(path.join(root,'runtime',name));
   const profile=await prepareProfile({env:{HARNESS_HOME:path.join(root,'state'),HARNESS_INIT:'1'},cwd:'/app'});
   try {
     const store=new Store(path.join(profile.paths.dataDir,'state.sqlite'));

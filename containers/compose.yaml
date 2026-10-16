@@ -34,6 +34,11 @@ services:
         source: "${ABYSSUS_STORAGE_ROOT:?}/workspace"
         target: /workspace
         bind: {create_host_path: false}
+      - type: bind
+        source: "${ABYSSUS_STORAGE_ROOT:?}/runtime/control"
+        target: /run/abyssus-broker
+        read_only: true
+        bind: {create_host_path: false}
     healthcheck:
       test: [CMD, node, --import, tsx, containers/health.ts]
       interval: 5s

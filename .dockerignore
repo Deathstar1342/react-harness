@@ -24,3 +24,7 @@
 **/*.pem
 **/node_modules
 **/.git
+!helper/
+!helper/core.py
+!helper/apt_adapter.py
+!helper/apt.conf
