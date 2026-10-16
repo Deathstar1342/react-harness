@@ -143,7 +143,10 @@ class TransferFaults(unittest.TestCase):
         with patch('transfer_service.copy',delayed):
             self.broker.dispatch('transfer_begin',{'code':code,'kind':'export','project':ticket['project']});self.assertTrue(entered.wait(2))
             for op in ('install_prepare','reset'):
-                with self.assertRaises(Exception):self.broker.dispatch(op,{'project':ticket['project']})
+                with self.assertRaisesRegex(Exception,'TRANSFER_BUSY'):self.broker.dispatch(op,{'project':ticket['project']})
+            import uuid
+            with self.assertRaisesRegex(Exception,'TRANSFER_BUSY'):
+                self.broker.dispatch('prepare',{'claimId':str(uuid.uuid4()),'project':ticket['project'],'contextId':'a'*64,'operation':{'kind':'shell','command':'echo must-not-run'},'timeoutMs':1000,'outputLimit':1000})
             self.assertTrue(self.broker.transfers.busy(ticket['project']))
             self.broker.dispatch('transfer_cancel',{'code':code});self.assertTrue(self.broker.transfers.busy(ticket['project']))
             gate.set();self.assertEqual(self.wait(code)['phase'],'cancelled')

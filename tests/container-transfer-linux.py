@@ -112,6 +112,26 @@ try {const result=await tools.execute({projectRoot:root,chatId:'m30-worker',agen
     api('/projects/'+project['id']+'/editor',{'path':'ordinary.txt','owner':'m30-human','dirty':False})
     exported=api('/projects/'+project['id']+'/export',{'code':token})
     check('explicit export preserves managed bytes and source separation',exported['phase']=='succeeded' and (destination/'worker.txt').read_text()=='managed-worker' and not (source/'worker.txt').exists())
+    active_destination=base/'m30-active-export'
+    active_code,active_ticket=select(str(storage),sid,str(root),'export',str(active_destination),managed.name);authorize(storage,active_code,active_ticket)
+    active_script=script.replace('printf managed-worker > worker.txt; test -t 1','printf active > active-worker.txt; sleep 3; printf stopped > active-worker.txt')
+    active=subprocess.Popen(['docker','exec','-i',controller,'node','--import','tsx','--input-type=module','-',project['path']],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    try:
+        active.stdin.write(active_script);active.stdin.close();active.stdin=None
+        deadline=time.monotonic()+20
+        while not (managed/'active-worker.txt').exists():
+            assert active.poll() is None and time.monotonic()<deadline,'worker did not start'
+            time.sleep(.02)
+        check('actual active worker prevents host export admission',api('/projects/'+project['id']+'/export',{'code':active_code},fail=True)>=400 and not active_destination.exists())
+        preview=api('/projects/'+project['id']+'/deletion-preview',{})
+        check('pending export quarantine prevents managed deletion',api('/projects/'+project['id'],{'mode':'disk','canonicalPath':preview['canonicalPath'],'confirmationToken':preview['confirmationToken']},method='DELETE',fail=True)>=400 and managed.exists())
+        check('pending export quarantine prevents reset',api('/projects/'+project['id']+'/sandbox/reset',{},fail=True)>=400)
+        _,err=active.communicate(timeout=30);assert active.returncode==0,err
+        released=api('/projects/'+project['id']+'/transfer-release',{'code':active_code})
+        check('explicit host release revokes unconsumed export after real worker drains',released=={'released':True,'receipt':None} and not active_destination.exists() and (managed/'active-worker.txt').read_text()=='stopped')
+        check('released transfer code cannot recopy',api('/projects/'+project['id']+'/export',{'code':active_code},fail=True)>=400 and not active_destination.exists())
+    finally:
+        if active.poll() is None:active.kill();active.wait(timeout=10)
     collision=base/'m30-collision'
     token,ticket=select(str(storage),sid,str(root),'export',str(collision),managed.name);authorize(storage,token,ticket)
     collision.mkdir();(collision/'keep').write_text('never replace')
