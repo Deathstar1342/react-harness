@@ -64,7 +64,11 @@ $taskEndpoint=Run-Tool $taskDocker @('context','inspect',$taskContext,'--format'
 if ($taskEndpoint -notmatch '^npipe:(?://|////)\./pipe/(?:docker_engine|dockerDesktopLinuxEngine)$') { throw 'Only the local Docker Desktop named-pipe engine is supported.' }
 $taskEngine=Run-Tool $taskDocker @('--context',$taskContext,'info','--format','{{.ID}}|{{.OSType}}|{{.Architecture}}|{{.DockerRootDir}}|{{json .SecurityOptions}}')
 if ($taskEngine -notmatch '\|linux\|(amd64|x86_64)\|' -or $taskEngine -match 'rootless|userns') { throw 'A local Linux x64 engine with the supported user mapping is required.' }
-$taskBuilder=Run-Tool $taskDocker @('--context',$taskContext,'buildx','inspect',$taskContext,'--format','{{.Driver}}|{{range .Nodes}}{{.Endpoint}}{{end}}')
+$taskBuilderReply=Run-Tool $taskDocker @('--context',$taskContext,'buildx','inspect',$taskContext)
+$drivers=[regex]::Matches($taskBuilderReply,'(?m)^Driver:[ \t]*([^\r\n]+)\r?$')
+$endpoints=[regex]::Matches($taskBuilderReply,'(?m)^Endpoint:[ \t]*([^\r\n]+)\r?$')
+if ($drivers.Count -ne 1 -or $endpoints.Count -ne 1) { throw 'Ambiguous local build driver' }
+$taskBuilder=$drivers[0].Groups[1].Value+'|'+$endpoints[0].Groups[1].Value
 if ($taskBuilder -notin @("docker|$taskContext","docker|$taskEndpoint")) { throw 'Use the local context Docker build driver; remote/custom builders are refused.' }
 Write-Output ('Engine data root inside Docker: '+$taskEngine.Split('|')[3]+'. Actual Windows backing/cache drive is unknown. Selecting D: below does not move Docker storage.')
 if ($Action -eq 'setup' -and $Check) { exit 0 }

@@ -18,7 +18,7 @@ case "$*" in
 'context show') printf 'default\n';;
 'context inspect default --format {{.Endpoints.docker.Host}}') printf '%s\n' 'unix://SOCKET';;
 '--context default info --format {{.ID}}|{{.OSType}}|{{.Architecture}}|{{.DockerRootDir}}|{{json .SecurityOptions}}') printf '%s\n' 'ENGINE';;
-'--context default buildx inspect default --format {{.Driver}}|{{range .Nodes}}{{.Endpoint}}{{end}}') printf 'docker|default\n';;
+'--context default buildx inspect default') printf 'Driver: docker\nEndpoint: default\n';;
 '--context default image inspect '* ) printf '%s\n' "$5";;
 *) exit 92;;
 esac

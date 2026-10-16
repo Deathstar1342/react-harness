@@ -28,7 +28,10 @@ endpoint="$(d context inspect "$context" --format '{{.Endpoints.docker.Host}}')"
 engine="$(d --context "$context" info --format '{{.ID}}|{{.OSType}}|{{.Architecture}}|{{.DockerRootDir}}|{{json .SecurityOptions}}')"
 [[ "$engine" == *'|linux|x86_64|'* || "$engine" == *'|linux|amd64|'* ]] || fail 'A Linux x64 engine is required'
 [[ "$engine" != *rootless* && "$engine" != *userns* ]] || fail 'Rootless/remapped engines are unsupported; no settings changed.'
-builder="$(d --context "$context" buildx inspect "$context" --format '{{.Driver}}|{{range .Nodes}}{{.Endpoint}}{{end}}')"
+builder="$(d --context "$context" buildx inspect "$context")"
+driver="$(sed -n 's/^Driver:[[:blank:]]*//p' <<< "$builder")"
+build_endpoint="$(sed -n 's/^Endpoint:[[:blank:]]*//p' <<< "$builder")"
+builder="$driver|$build_endpoint"
 [[ "$builder" == "docker|$context" || "$builder" == "docker|$endpoint" ]] || fail 'Use the local context Docker build driver; remote/custom builders are refused.'
 printf 'Local engine ready. Engine data root: %s\n' "$(cut -d '|' -f4 <<< "$engine")"
 printf 'Docker images/build cache remain in that separate engine storage. A VM backing drive is not proven by this path and is never moved by setup.\n'
