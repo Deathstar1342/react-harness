@@ -19,7 +19,7 @@ def verify(root,source,controller,worker,platform):
     root=Path(root);manifest=root/'SHA256SUMS';info=manifest.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_size>16*1024**2:raise ValueError('Invalid manifest')
     expected={};folded=set()
-    for line in manifest.read_text().splitlines():
+    for line in manifest.read_text(encoding='utf8').splitlines():
         match=re.fullmatch(r'([a-f0-9]{64})  ([^\x00-\x1f\\:]+)',line)
         if not match:raise ValueError('Invalid manifest member')
         digest,name=match.groups();parts=name.split('/')
@@ -35,7 +35,7 @@ def verify(root,source,controller,worker,platform):
             if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1:raise ValueError('Runtime special/hardlink refused')
             if relative=='SHA256SUMS':continue
             total+=info.st_size
-            if total>2*1024**3 or info.st_size>512*1024**2 or relative not in expected:raise ValueError('Runtime inventory/size mismatch')
+            if total>2*1024**3 or info.st_size>512*1024**2 or relative not in expected:raise ValueError('Runtime inventory/size mismatch at '+ascii(relative[:200]))
             digest=hashlib.sha256()
             with file.open('rb') as stream:
                 while chunk:=stream.read(1024*1024):digest.update(chunk)

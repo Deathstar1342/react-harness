@@ -18,36 +18,48 @@ function Run-Tool([string]$Executable,[string[]]$Arguments,[string]$Log='', [int
     foreach ($name in @('SystemRoot','WINDIR','USERPROFILE','APPDATA','LOCALAPPDATA','PATH','HOME')) { if ([Environment]::GetEnvironmentVariable($name)) { $processInfo.EnvironmentVariables[$name]=[Environment]::GetEnvironmentVariable($name) } }
     if ($taskRuntime) { $processInfo.EnvironmentVariables['TEMP']=(Join-Path $taskRuntime 'temp'); $processInfo.EnvironmentVariables['TMP']=(Join-Path $taskRuntime 'temp') }
     $process=New-Object Diagnostics.Process; $process.StartInfo=$processInfo; $started=$false
+    $memory=New-Object IO.MemoryStream; $file=$null; $saturated=$false; $total=0L
     try {
-        if (-not $process.Start()) { throw 'Source tool failed to start' };$started=$true
-        $streams=@($process.StandardOutput.BaseStream,$process.StandardError.BaseStream)
-        $buffers=@((New-Object byte[] 8192),(New-Object byte[] 8192)); $pending=@($null,$null);$done=@($false,$false)
-        $memory=New-Object IO.MemoryStream; $file=$null; $total=0L; $watch=[Diagnostics.Stopwatch]::StartNew()
+        # Reserve a fresh log before starting anything. Never overwrite prior evidence.
         if ($Log) { $file=[IO.File]::Open($Log,'CreateNew','Write','Read') }
-        try {
-            for ($i=0;$i -lt 2;$i++) { $pending[$i]=$streams[$i].ReadAsync($buffers[$i],0,8192) }
-            while (-not ($done[0] -and $done[1])) {
-                for ($i=0;$i -lt 2;$i++) {
-                    if (-not $done[$i] -and $pending[$i].IsCompleted) {
-                        $count=$pending[$i].GetAwaiter().GetResult()
-                        if ($count -eq 0) { $done[$i]=$true;continue }
-                        $total+=$count;$limit=262144L;if ($Log) { $limit=67108864L }
-                        if ($total -gt $limit) { throw 'Source output limit exceeded. Partial logs and uncertain intent are retained.' }
-                        if ($file) { $file.Write($buffers[$i],0,$count);$file.Flush() } else { $memory.Write($buffers[$i],0,$count) }
-                        $pending[$i]=$streams[$i].ReadAsync($buffers[$i],0,8192)
+        if (-not $process.Start()) { throw 'Source tool failed to start' };$started=$true
+        $watch=[Diagnostics.Stopwatch]::StartNew()
+        $streams=@($process.StandardOutput.BaseStream,$process.StandardError.BaseStream)
+        $buffers=@((New-Object byte[] 65536),(New-Object byte[] 65536)); $pending=@($null,$null);$done=@($false,$false)
+        for ($i=0;$i -lt 2;$i++) { $pending[$i]=$streams[$i].ReadAsync($buffers[$i],0,65536) }
+        while (-not ($done[0] -and $done[1])) {
+            for ($i=0;$i -lt 2;$i++) {
+                if (-not $done[$i] -and $pending[$i].IsCompleted) {
+                    $count=$pending[$i].GetAwaiter().GetResult()
+                    if ($count -eq 0) { $done[$i]=$true;continue }
+                    $total+=$count;$limit=262144L;if ($Log) { $limit=67108864L }
+                    if ($total -gt $limit -and $Seconds -gt 0) { throw 'Source output limit exceeded. Partial logs and uncertain intent are retained.' }
+                    if ($total -gt $limit -and -not $saturated) { $saturated=$true;Write-Warning 'Desktop log limit reached. Further output is drained without saving; the desktop remains running.' }
+                    if (-not $saturated) {
+                        if ($file) {
+                            try { $file.Write($buffers[$i],0,$count);$file.Flush() }
+                            catch { if ($Seconds -gt 0) { throw };$saturated=$true;Write-Warning 'Desktop log is unavailable. Output will be drained; the desktop remains running.' }
+                        } else { $memory.Write($buffers[$i],0,$count) }
                     }
+                    $pending[$i]=$streams[$i].ReadAsync($buffers[$i],0,65536)
                 }
-                if ($Seconds -gt 0 -and $watch.Elapsed.TotalSeconds -gt $Seconds) { throw 'Source operation timed out. Intent remains uncertain; nothing replayed.' }
-                [Threading.Thread]::Sleep(10)
             }
-            $process.WaitForExit()
-            if ($process.ExitCode -ne 0) { throw 'Source tool failed. Inspect retained logs; nothing reset/replayed.' }
-            if (-not $Log) { return [Text.Encoding]::UTF8.GetString($memory.ToArray()).TrimEnd() }
-        } finally {
-            if (-not $process.HasExited) { $process.Kill() }
-            if ($file) { $file.Flush($true);$file.Dispose() };$memory.Dispose()
+            if ($Seconds -gt 0 -and $watch.Elapsed.TotalSeconds -gt $Seconds) { throw 'Source operation timed out. Intent remains uncertain; nothing replayed.' }
+            [Threading.Thread]::Sleep(1)
         }
-    } finally { if ($started -and -not $process.HasExited) { $process.Kill() }; $process.Dispose() }
+        # EOF is not process exit. Preserve the same absolute deadline after both pipes close.
+        if ($Seconds -gt 0) {
+            $remaining=[int][Math]::Max(0,$Seconds*1000-$watch.ElapsedMilliseconds)
+            if (-not $process.WaitForExit($remaining)) { throw 'Source exit deadline exceeded after output closed. Intent remains uncertain.' }
+        } else { $process.WaitForExit() }
+        if ($process.ExitCode -ne 0) { throw 'Source tool exited unsuccessfully. Inspect retained logs; nothing reset/replayed.' }
+        if (-not $Log) { return [Text.Encoding]::UTF8.GetString($memory.ToArray()).TrimEnd() }
+    } finally {
+        # GUI lifetime belongs to the user. Logging/launcher failures cannot kill their desktop.
+        if ($Seconds -gt 0 -and $started -and -not $process.HasExited) { $process.Kill() }
+        if ($file) { try { $file.Flush($true) } catch { if ($Seconds -gt 0) { Write-Warning 'Partial source log could not be flushed.' } };$file.Dispose() }
+        $memory.Dispose();$process.Dispose()
+    }
 }
 function No-Links([string]$Value) {
     $item=Get-Item -LiteralPath $Value -Force

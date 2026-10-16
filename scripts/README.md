@@ -1,3 +1,9 @@
+# Source setup and diagnostics
+
+Supported source launchers are root setup.sh/start.sh and setup.ps1/start.ps1. They use source-desktop.sh/source-desktop.ps1 and the native bootstrap helper to select an external runtime, build exact container payloads, verify the complete target closure and open the native desktop. See [setup](../docs/setup.md), [acceptance](../docs/m32-acceptance.md) and [packaging delta](../docs/m32-packaging-handoff.md).
+
+container-source.sh, source-common.sh and source-setup.ts are historical direct/browser regression surfaces; they are not a supported production fallback. stage-support-runtime.py and source-payload.py are trusted build-time producers, not generic model/renderer tools. Source bootstraps accept no provider secret input.
+
 # Bounded native provider diagnostic
 
 Run the reviewed redesigned checkout with Node 24+. No npm install or running app is needed. Put `STARK_BASE_URL`, `STARK_API_KEY` and `M27_MODEL` in a private environment file **outside the checkout**. The base URL must be your authorized HTTPS API base and the model must be an exact catalog ID. There is no default, alias, 3.5/3.8 substitution or migration.

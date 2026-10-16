@@ -21,7 +21,9 @@ jobs:
       - run: npm ci
       - name: Guided source entrypoint refusal and environment checks
         timeout-minutes: 10
-        run: python3 tests/source-desktop-boundaries.py
+        run: |
+          python3 tests/source-desktop-boundaries.py
+          python3 -B -m unittest discover -s tests -p 'test_source_payload.py' -v
       - run: npm run typecheck
       - run: npm test
       - name: Bounded native diagnostic synthetic HTTP and SSE

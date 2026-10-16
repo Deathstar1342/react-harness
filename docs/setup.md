@@ -1,359 +1,73 @@
 # Setup guide
 
-## Container deployment transition — approved 2026-10-16
+## Guided container source setup (M32)
 
-The user approved [M28–M32](milestones.md) and the [container backend plan](../CONTAINERIZATION.md). M28 adds the [explicit container source foundation](#explicit-container-source-foundation-m28): authenticated controller and persistent storage. M29 adds owned worker execution and per-project container installs on the explicit Linux source path; managed imports remain unavailable until M30. M32 will make guided container setup the supported default and provide Windows PowerShell entrypoints. Native GUI integration and the later milestone features are not implied by this source foundation. The historical direct-source instructions below still describe Linux/Bubblewrap. Ubuntu 22.04's older Bubblewrap lacks the required --disable-userns flag; do not remove it or change host policies to bypass that boundary. No container-runtime/OS/global changes are installed automatically. M21 customer installers remain paused.
+The source entrypoints build and open the native Electron desktop. They require an existing local Linux container engine and never install Docker, WSL, host Node, Python, Bubblewrap, apt packages or a privileged helper. Source setup can build images; the future customer package must ship its reviewed payload without Git/npm/build instructions. M21 packaging remains paused.
 
-## Guided source setup (historical direct mode)
+Target platforms are non-root Ubuntu 22.04/24.04 x64 desktops and Windows x64. The Windows source implementation retains a separate actual Docker Desktop/device acceptance gate: native tests and a relocated Windows payload do not prove NTFS bind permissions, cross-platform SQLite behavior, transport or dependency-link compatibility. Workers still refuse every Windows reparse point. See [M32 acceptance](m32-acceptance.md) for current evidence and gates.
 
-For the current source prototype, clone this repository inside your Ubuntu/WSL Linux home and run:
+Use an approved local Docker Engine on Linux or Docker Desktop with its Linux engine on Windows. Select its normal local context before setup. TCP, SSH and remote contexts, rootless/user-namespace remapping and custom/remote Buildx drivers are refused. Docker's local context build driver must be available. The scripts do not configure or start an engine, modify Docker settings, adjust execution policy, change AppArmor, install a distro or acquire host administrator rights.
+
+Linux needs Bash, Git, tar, standard coreutils and the normal desktop libraries used by Electron and private Python. Windows needs Git for source snapshots, its system tar executable and an approved PowerShell script policy. Native GUI/library checks belong to the actual supported OS; missing libraries or blocked user namespaces require the machine administrator's approved setup. Disposable CI may install its own prerequisites; that does not authorize workstation changes. WSLg and other distributions remain separate environment acceptance.
+
+From a clean source checkout, run one command:
 
 ```bash
 bash setup.sh
 ```
 
-The interactive script checks non-root Linux and working Bubblewrap namespaces. It offers missing Ubuntu/Debian prerequisites through an explicit `sudo apt-get` confirmation. If Linux Node 24+/npm is unavailable on x64, it offers a private Node 24.16.0 download from nodejs.org with the same pinned SHA256 as runtime staging; it never pipes a downloaded installer into a shell. Other architectures need an existing compatible Node installation. Network/proxy or administrator restrictions remain actionable errors; security settings are never disabled automatically.
+On Windows, use PowerShell from the checkout:
 
-Setup runs locked `npm ci` with the unnecessary Electron executable download disabled for browser use, verifies SQLite/PTY loading, selects a private profile (default `~/.local/share/abyssus-native`), privately prompts for URL/key/exact model IDs, and builds the UI. Model defaults are provisional until checked against your catalog. You may leave the provider blank and configure it in Settings later. The key is hidden in the terminal and saved only through the existing private configuration writer; it is not put in arguments, launcher files or npm/build environments. Changing a saved endpoint requires explicitly supplying a replacement key. Enter on reruns preserves saved values and profile identity; incompatible/active profiles reject without erasing them. Existing imported projects are untouched.
+```powershell
+.\setup.ps1
+```
 
-After setup, use `bash start.sh` from the checkout, including in a new terminal. The ignored `.source-setup/home` records only the selected profile path. The launcher uses that selection and clears inherited provider URL/key/model overrides so a stale shell override cannot redirect the saved key. Explicit migration/data overrides must be removed before this guided flow; manual advanced startup remains available below. Stop with Ctrl+C. `bash setup.sh --no-start` finishes setup without launching; `bash setup.sh --check` checks prerequisites read-only. Stop any app running from this checkout before pulling updates and rerunning setup, because setup reinstalls dependencies and rebuilds the UI. Native compilation uses a private transient header cache under `/tmp`, removed after installation or failure, to avoid header-path quoting problems when the home contains spaces.
+Setup asks for a **new external runtime/build/cache folder**. On Windows, choose an explicit local NTFS path such as `D:\abysSUS-source-runtime`. There is no default C: runtime location. The selected root contains the exact tracked source snapshot, build intent and logs, exported application/Electron/private Python payload, temporary files and desktop selection/cache. A small ignored `.container-desktop-source/selection` pointer is stored in the source checkout. Docker keeps its own image layers and build cache separately: its reported Linux data root does not establish the Windows VM backing drive. Inspect that location through your approved Docker administration; setup never moves it.
 
-Use a Linux filesystem path, not `/mnt/c` or `/mnt/d`; a WSL distro stored on D already stores its Linux home there. Ordinary setup may need approved access to Ubuntu repositories, nodejs.org and npm. It does not install the privileged apt helper, contact STARK, alter WSL distributions, or update an installed desktop preview. Native model testing still occurs at work through Settings → Test connection.
+The native desktop then asks separately for persistent **app storage**. Choose an empty local folder, or deliberately reopen established storage. Projects, chats, provider configuration, goals, skills and receipts stay there. Missing established storage stops startup; it does not create an empty profile elsewhere. Enter provider address/key and exact model IDs only through the existing private Settings flow. Setup does not read, prompt for, log or pass provider credentials to a build. Work-only STARK validation remains deferred; there is no reason to enter work credentials on an unrelated machine.
 
-This is a source convenience script, not the customer installer. The intended packaged onboarding bundles the runtime/backend/UI and guides storage/provider setup without npm/profile commands. Windows still requires the supported Linux/WSL backend and OS-authorized prerequisites. M21 packaging remains paused, including the known portability/internal-manifest/source-notices/manual acceptance gates; no one-click customer release is claimed by this script.
-
-## System install settings (M19)
-
-Open Settings: **System installs** immediately follows workspace approvals. **Ask every time** is the default. Workspace autonomy never changes it. **Auto-approve** admits only supported concrete apt previews; **AI review** uses an independent selected reviewer and falls back to a human when review is invalid/unavailable. Reviewer selection starts from the critic default and is separate from saved chat models. Policy and reviewer edits save to this profile and invalidate pending decisions.
-
-The environment label identifies the authenticated helper in the local backend's Linux target. This milestone does not select another WSL distribution or provision/start a helper. Missing/unsupported helper is shown clearly; normal application use remains available. Follow the explicit administrator/setup contract in [helper.md](helper.md); do not use an agent shell or grant it sudo as a fallback. M20 owns guided desktop provisioning/selection.
-
-Review every requested/dependency version, provenance and target in the approval card. Trusted apt package scripts execute as root, triggers may affect existing packages/services, and metadata bounds do not bound these effects. Previews expire after two minutes. **Request a new preview** creates a new decision; expired approval cannot carry over. A changed/steered task requires a new package recommendation. Planning cannot install under any policy.
-
-**System install history** in the conversation or Settings shows actual outcomes and decision sources on demand. Cancellation stops subsequent agent work but cannot undo dispatched package effects. Lost replies/restarts preserve correlation; use **Check helper status** then **Reconcile installed state**, never repeat execution to guess the outcome. Healthy reconciliation is an observation, not a rewrite of uncertain history. Unhealthy package state needs separate administrator recovery. Pending/uncertain installs protect chat/project removal; pause undecided work or resolve recovery first. Historical uncertainty alone does not prevent closing the app.
-
-## M17 sandbox prerequisites and limits
-
-Agent execution and fixed Git reads require a **non-root Linux backend**, Bubblewrap with `--disable-userns` support, permitted unprivileged user namespaces, `socat`, distro bash/Python, Python venv support, and the existing Node 24+/node-pty prerequisites. Missing/blocked prerequisites produce an actionable failure; commands never run on the host as a fallback. On Ubuntu/Debian, a trusted administrator can provision `bubblewrap socat python3-venv` through normal package setup. This application does not install those system packages or change kernel/AppArmor settings automatically. The CI workflow's sudo/sysctl commands apply only to its disposable runner; do not copy those host-policy changes blindly onto a workstation. Native Windows file/UI tests are portable checks, not Linux sandbox acceptance. No local Podman service distro is used.
-
-Select a plain Linux project directory separate from app home/state/config/toolchains and other registered projects. Windows mount paths, credential directories, nested mounts, external links/hardlinks/sockets and external Git worktree metadata are unsupported. Existing `.env`, `.npmrc`, credential directories and arbitrary-shell `.git` are hidden. File tools keep their existing path protections. `git_status`/`git_diff` work through fixed sandboxed Git; **shell Git commit/branch operations cannot access the imported repository metadata**. Do not put credentials into ordinary source files expecting filename masks to identify them.
-
-Use `npm install` with the default public npm registry, and `python3 -m venv .venv` followed by `.venv/bin/pip install --index-url https://pypi.org/simple ...`. Only npm/PyPI registry HTTPS destinations are reachable through the private proxy. Alternate/private registries, Git dependencies, arbitrary URLs, localhost/backend/helper/LAN/metadata services and direct Internet sockets are unavailable. TLS verification stays enabled. Install hooks execute in the same sandbox; an allowed registry/package is not a promise that its code is harmless. Public certificate files under protected filename patterns can be masked; use the exposed system trust bundle when a project library requires a CA path.
-
-Project-local dependencies and private caches survive shell restart. A package install that adds protected paths can cause the next command to discard the old mount layout; resubmit explicitly to start a fresh sandbox. POST `/api/projects/:id/sandbox/reset` with `{}` deliberately closes idle shells and clears private cache/home/temp only; it preserves source, `.venv`, `node_modules`, app configuration and state. Running/dirty/background/recovery-blocked projects cannot reset. Uncertain teardown quarantines execution and prevents a successful backend shutdown; investigate and recover the exact backend process rather than replaying commands.
-
-**Pause commands before external topology changes or introducing new secrets.** Existing masks hide in-place edits. Protected inode replacement while idle is detected before the next command. Concurrent host introduction of an unmasked secret/link during an executing command is outside this boundary; imported files remain directly mounted. Shared-kernel bugs, destructive changes within the writable project, registry-directed exfiltration and resource exhaustion remain risks. There is no cgroup or disk-quota guarantee.
-
-Run the backend inside WSL/Linux and open the interface in your Windows browser. These instructions assume you already have a WSL Linux distribution. Run the shell commands below in that distribution, not in PowerShell.
-
-You can use projects, chats, and the file editor without model access. For this deployment, STARK is available only at work; perform the provider checks there.
-
-## 1. Check prerequisites
-
-Install Node.js **24 or newer** with npm inside WSL, using your organization's approved installation method. A Windows Node installation does not replace the Linux installation. You also need Git, Bash, Python 3, make, and a C++ compiler. Python and the compiler support the native PTY dependency.
-
-On Ubuntu/Debian, install the non-Node prerequisites with:
+For unattended build preparation with an explicit destination:
 
 ```bash
-sudo apt update
-sudo apt install -y git curl python3 python3-venv build-essential bubblewrap socat
+bash setup.sh --no-start --runtime-root /absolute/external/abyssus-runtime
 ```
 
-Verify the tools in your WSL terminal:
+```powershell
+.\setup.ps1 -NoStart -RuntimeRoot D:\abysSUS-source-runtime
+```
+
+These commands build the application; they do not initialize app storage or configure a provider. `bash setup.sh --check` / `.\setup.ps1 -Check` perform read-only engine/build capability checks. They do not prove the full application or filesystem/device acceptance matrix.
+
+Later launches use the same saved runtime:
 
 ```bash
-node --version
-npm --version
-node -p 'process.platform'
-git --version
-python3 --version
+bash start.sh
 ```
 
-Expect Node `v24.x` or newer and platform `linux`. If Node resolves to a Windows executable, install/use the Linux version before continuing. Persistent shell, Python execution, and test commands require the Linux backend; native Windows is suitable for the UI and portable development checks.
-
-## 2. Clone and install
-
-Keep the app and working projects under your Linux home directory for filesystem performance:
-
-```bash
-mkdir -p ~/apps
-cd ~/apps
-git clone https://github.com/Deathstar1342/react-harness.git
-cd react-harness
-npm ci
-export HARNESS_HOME="$HOME/.local/share/abyssus-native"
-npm run profile:init
+```powershell
+.\start.ps1
 ```
 
-`profile:init` explicitly creates a fresh profile in the selected home and prints its private configuration path. M22 requires a new `HARNESS_HOME`; keep the installed preview and old profiles unchanged. Use `.env.example` as a reference; never copy over saved settings. No separate database service or Python backend is required.
+`start.sh --check` / `start.ps1 -Check` validate the selected runtime, complete file inventory, source/platform/image bindings and exact local engine without launching the desktop. Start never builds, downloads, pulls, resets, replaces credentials or replays uncertain actions. Close the native window normally to use its existing dirty-editor/install/owned-supervisor drain safeguards. The old `--container` Bash spelling selects the same native source default; it is not a browser or host-execution fallback. Old `--stop` browser-source semantics are not part of the supported native entrypoint.
 
-## 3. Configure STARK
+## Reruns, interrupted setup and updates
 
-Open the path printed by `profile:init`, `$HARNESS_HOME/profile/config/.env`, in your local editor. Keep that explicit `HARNESS_HOME` exported in every launch shell. Set your work provider's URL and key:
+A completed setup rerun validates and reuses its saved payload and desktop selection. It preserves app storage and provider settings. Changing `--runtime-root`/`-RuntimeRoot` does not move an established selection. An incomplete selection, missing payload, changed inventory, changed engine identity or missing immutable image refuses; no implicit rebuild or replacement follows.
 
-```dotenv
-STARK_BASE_URL=https://your-provider.example/v1
-STARK_API_KEY=your-local-key
+Build intent is written before each image build and export. Failed logs and partially exported files remain for inspection. A failed or timed-out Docker client may leave an engine build running; the script does not infer rollback or replay it. Preserve the selected root and its selection pointer. Investigate the exact retained attempt before any explicit new build; do not delete app storage, run broad Docker prune, change engine identity or remove unrelated containers to make a rerun pass.
 
-ARCHITECT_MODEL=gemini-3.5-pro
-CODER_MODEL=gemini-3.5-flash-withtools
-CRITIC_MODEL=gemini-3.5-pro
-```
+Source updates are deliberate new build generations. The existing selection stays pinned to its source commit. Until a reviewed update/drain UI is provided, use a separate clean checkout and a new external runtime root after closing the prior native desktop; deliberately choose the same established app storage in the new desktop. Keep the prior payload and receipts for recovery. The launcher refuses tracked edits rather than calling a dirty tree the recorded commit. It sends an allowlisted Git archive of the exact commit to the builder; untracked files, local configuration, private PDFs and user projects are not build inputs. Git hooks/fsmonitor and inherited `GIT_*` execution configuration are disabled for bootstrap operations.
 
-Use the API prefix supplied by your provider. If the discovery endpoint is `https://example.internal/api/v1/models`, set the base URL to `https://example.internal/api/v1`. Do not include `/models` or `/chat/completions` in the base URL. The backend appends these paths itself.
+## Project and execution behavior
 
-Model IDs must match your STARK catalog exactly. The role names above are configurable defaults, not a guarantee that every STARK deployment exposes them. Requests use native Chat Completions tools and matching tool results, without requiring `response_format` or Responses API requests. These model IDs are provisional candidates, not live-verified aliases. Provider limits remain unknown; `.env.example` contains configurable application budgets. Catalog metadata and ordinary/native/streaming diagnostic evidence are separate. Assist lanes that ignore tools cannot perform execution roles.
+Import copies selected contents once into a managed project. The managed copy becomes authoritative. The source is not mounted into workers, synchronized, refreshed, written back or deleted. Import review shows exclusions and refuses unsafe links/special files/collisions. Explicit Export writes a copy to a new unrelated destination and never silently merges into the original. Removing a managed project cannot delete its original source.
 
-Keep real keys in the local `.env`, which Git ignores. Do not put them in chat messages, screenshots, or repository files. Leaving `STARK_API_KEY` empty lets you explore the UI without calling models. Restart after manual `.env` edits. Model defaults and the shared API key can also be saved through Settings without restarting, as described below.
+Workspace approval modes remain separate from system-install Ask / Auto-approve / AI review policies. Package transactions target only the exact project container. Provider secrets, controller state, the Docker socket, host root/home and original import locations are not worker mounts. Container replacement does not authorize replay of uncertain installs, commands or goals. Approved recipes and dependency persistence remain distinct from a worker's disposable writable layer.
 
-### Provider Settings
+## Evidence and package boundary
 
-Open Settings to select architect/coder/critic defaults from the discovered catalog or type exact model IDs manually when discovery is unavailable or incomplete. Choose **Save provider settings**. These defaults apply to **new chats only**; existing chats retain their saved role assignments through resume, compaction and restart. M22 requires a fresh native profile; old chats are not converted.
+The new source workflow requires actual source setup on Ubuntu 22.04 and 24.04 and an actual relocated Windows payload with its own dependency closure. Existing Container, Validate, Desktop, support-runtime and helper regression workflows remain required. Linux engine checks, native Windows handle tests, cross-staging, human native dialogs, actual Windows Docker, live-provider and clean-machine installation are different evidence classes. See the [milestone report](reports/milestone-32.md) for exact source/run identities and retained failures.
 
-The password field always starts empty. Leaving it blank keeps the saved key. Enter a replacement or explicitly select **Clear saved API key**, then save. The input is cleared after submission and the saved key is never sent back to the browser. A replacement/clear affects the next dispatched provider request in every chat; in-flight requests retain their captured credentials. Test connection remains a separate operation, and saving provider settings clears results that describe an older configuration. Approval, Debug and workspace controls retain their existing behavior.
+The repository currently contains no root project license; source setup grants no new license. Upstream runtime/dependency notices remain in their payload locations. Redistribution decisions, complete image/software notices and corresponding source, final manifests, signing, installers and clean-machine acceptance belong to the [M21 resumption delta](m32-packaging-handoff.md). No installer/release is published by this milestone.
 
-Settings updates the selected profile's `config/.env`, preserving unrelated configuration. Original process environment variables take precedence and lock the corresponding model/key controls, including externally supplied empty values. Remove such overrides from the launching shell/service and restart before editing those fields in Settings. A launcher that preloads dotenv also creates process overrides. Custom `DOTENV_PATH`, `DOTENV_ENCODING`, `DOTENV_OVERRIDE`, `DOTENV_FAST` and their `DOTENV_CONFIG_*` variants are unsupported; use the UTF-8 `profile/config/.env` in the selected application home. Provider URL and transport remain backend-only configuration requiring restart.
-
-Use a regular private `.env`, not a symlink or hardlink, in a trusted writable backend folder. Values entered in Settings must be single-line; unsupported quote combinations/syntax reject explicitly. External edits while the backend is running cause saves to reject; restart to load those edits. A rare error saying **settings saved and active** means replacement completed but a subsequent file check failed: inspect the local file and restart before saving again. Do not run multiple backend instances against the same configuration/data directory. Windows file privacy depends on the directory ACL; Linux replacements use mode 0600.
-
-Useful optional settings:
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `HOST` | `127.0.0.1` | Local-only listener; the app requires a loopback address |
-| `PORT` | `3000` | Backend and built UI port |
-| `HARNESS_HOME` | `$XDG_DATA_HOME/abyssus` or `~/.local/share/abyssus` on Linux | Absolute private application home; set in the launching environment |
-| `HARNESS_DATA_DIR` | `HARNESS_HOME/profile/state` | Explicit state-directory override; prefer an absolute path |
-| `HARNESS_WORKSPACE_ROOT` | `~/React Harness Projects` when unset | Initial destination for new projects; use an absolute Linux path if setting it |
-| `APPROVAL_MODE` | `balanced` | Default for new chats: `balanced`, `review`, or `autonomous` |
-| `MODEL_STREAMING` | `true` | Set `false` if the provider does not support streaming |
-
-Settings in the UI can override the new-project workspace locally. Existing projects stay in place. Relative paths saved in the profile `.env` resolve from `profile/config`; relative paths explicitly supplied in the process environment retain launch-directory semantics. Use absolute override paths for stable launches. Use `.env.example` for token budgets, request limits, and optional per-role prompt files.
-
-## 4. Build and start
-
-```bash
-npm run build
-npm start
-```
-
-Keep that terminal running, then open [http://localhost:3000](http://localhost:3000) in your Windows browser. Use the configured port if you changed it. Stop the server with **Ctrl+C**. On later launches, run `npm start` from the checkout; rebuild after pulling frontend changes.
-
-For development instead:
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173). This starts both the backend and Vite with automatic reloads. The development proxy currently targets backend port `3000`; keep that port or update `vite.config.ts` to match. Run either development or normal startup, not both on the same port.
-
-## 5. Verify access at work
-
-Open **Settings → Test connection** for the built-in check. It verifies the model catalog and sends up to three small reply-format probes. It uses your normal configured transport and shared account budgets, with a 25-second total deadline. Failed or cancelled requests may consume budget. A timeout or “not checked” result requires a later retry; it is not a successful provider check. No diagnostic reply executes an action, and raw responses and credentials are not shown.
-
-With the app running, use another WSL terminal:
-
-```bash
-curl --fail-with-body http://127.0.0.1:3000/api/health
-curl --fail-with-body http://127.0.0.1:3000/api/models
-```
-
-The health check should return `{"ok":true}`. The models route calls STARK through the backend using your local configuration; you do not need to put the API key in a shell command. Check that the returned catalog includes your three configured role IDs. Discovery success alone does not prove native tool or streaming compatibility.
-
-Try this first workflow in a disposable project:
-
-1. Create a project by name. The app creates a unique folder in the default workspace and initializes a local Git repository. Use **Import** and the folder explorer for an existing project.
-2. Create a chat, open **Settings**, and choose **Review every change** under **Current chat** so you can inspect proposed writes and commands. The separate future-chat default does not change this chat. Approval and Debug changes save immediately; workspace selection has its own Save workspace button.
-3. Send: `Create a hello.txt file containing Hello from Harness. Ask the critic to review the result. Do not install packages or run shell commands.`
-4. Inspect the proposed file diff, approve it, and confirm the file and critic result appear. A refusal, parsing error, or unfinished run is a failed compatibility check, not a successful execution.
-5. Open the file in the editor, change its text, and save. Ask the architect to read the current contents and confirm it sees the manual edit. Drag the editor's left divider or use its expand/restore button for more space.
-6. Restart the app, reopen the project/chat, and confirm the conversation and saved file remain. Interrupted runs require explicit resumption; live PTY state does not survive a backend restart.
-
-Live STARK behavior has not yet been validated by the repository's synthetic-provider tests. Record failures without sharing credentials or confidential project contents.
-
-## 6. Python projects and test reports
-
-The app does not bundle your project's Python packages. Prepare them in the target project, for example:
-
-```bash
-cd /absolute/path/to/your/project
-python3 -m venv .venv
-.venv/bin/python -m pip install pytest
-.venv/bin/python -m pytest --junitxml=.react-harness-test-results.xml
-```
-
-Use your project's requirements or package manager when applicable. Ask the coder to use `run_tests` with that command and the report path `.react-harness-test-results.xml`. Running a shell command alone does not populate structured results. The test tool requires a fresh JUnit report, which appears as runner → run → individual tests in the UI.
-
-## Project guidance
-
-Create `AGENTS.md` in the root of each imported or created project to describe conventions, relevant commands, file ownership, and verification expectations. Start from the [example](examples/AGENTS.md.example), replacing its suggestions with your project's requirements. All three roles receive the current file outside their compacted history. The file is included in project model requests, so keep credentials and other secrets out of it.
-
-The hierarchy is enforced runtime controls and fixed native policy, then explicit human requests/corrections, then fresh project guidance. Historical guidance, model assignments, tool output and summaries retain their labelled provenance and cannot become human authorization. Versioned server-only role modules describe responsibilities; optional prompt files extend them within a 32,000-byte UTF-8 bound and cannot expand tools or permissions. Current-task human messages and original assignment criteria remain outside compactable summaries; too much protected context produces an explicit budget error. Private per-request prompt versions/digests support reproducible evaluation without publishing extension text or paths. Independent code still validates actions and enforces role/mode permissions, approval policy, path/version checks and editor leases; prompt construction does not guarantee real-model compliance.
-
-Only the exact root `AGENTS.md` is automatically loaded. Nested discovery is not supported. The file must be regular, non-linked UTF-8 text without NUL bytes, at most 32,000 UTF-8 bytes. Missing means no project guidance; an empty file is a valid distinct version. Content is never silently truncated. Unreadable, invalid, oversized, directory, symbolic-link/junction, or hard-link entries produce an actionable error and discard prepared proposals. Repair or remove the file, then **Resume**. Any discarded write/command needs a fresh proposal and, where policy requires, a new approval—even if the repaired file has its old content again.
-
-The runtime reads and compares the file before requests, after completed replies, after action inspection, when handling approval decisions, and immediately before dispatching a prepared tool action. Compaction is followed by another check. Paused/restarted runs refresh on explicit resume; stale approvals return a conflict and awaiting chats reconsider the proposal. No watcher notification is needed to catch a change at these boundaries. Changes do not rewrite historical transcripts or invalidate approvals belonging to completed work.
-
-These are content-snapshot checks, not an atomic lock against external filesystem writers. An edit after the last successful read, or a temporary change restored between reads, may be observed only at a later boundary. An already running command is not stopped or rolled back by an instructions edit; pause/interrupt handles cancellation separately. Interrupted executions retain uncertain-outcome evidence and are never replayed automatically. Frequent concurrent edits can use up the normal 100-step run budget; stabilize the file before resuming.
-
-## Updating and keeping your data
-
-
-Stop the backend before making a consistent backup. Back up the selected application home, any external data override, and your separate project folders to private storage. `profile/state` (or the explicit override) contains conversations and runtime records; Git alone does not back up that data or projects outside this checkout. Project records contain local paths, so moving to another machine may require restoring the same paths or importing the folders again. For this redesign use a fresh native profile; preserve the old profile as a private backup.
-
-From the repository root, update with:
-
-```bash
-git pull --ff-only
-npm ci
-npm run build
-npm start
-```
-
-Preserve your `.env` and data directory. Compare `.env.example` for new options instead of copying over your settings. If Git reports local changes or a divergent branch, resolve those changes before continuing; do not reset away your work.
-
-## Troubleshooting
-
-| Symptom | What to check |
-| --- | --- |
-| UI reports missing STARK configuration | Set both URL and key in the selected home's `profile/config/.env`, then restart the backend. |
-| Model discovery fails | Confirm you are on the work network/VPN, the URL includes the correct API prefix, and the key is valid. WSL must have its own working network and certificate trust; Windows browser access alone is not sufficient. |
-| Certificate validation fails | Use your organization's approved CA configuration for Node/WSL; do not disable TLS verification. |
-| Model is missing or completions fail | Compare exact model IDs with `/api/models`. Confirm the provider supports Chat Completions and the requested streaming/output limits. |
-| Model refuses native tools or returns only internal status prose | Capture a sanitized error/example for protocol investigation. The runtime rejects invalid native calls; discovery alone does not verify tools. Use Test connection for separate harmless evidence. |
-| PTY unavailable or `node-pty` failed to install | Confirm `process.platform` is `linux`, install Python/make/C++ prerequisites, and rerun `npm ci`. Check installation output; do not reuse Windows `node_modules` in WSL. |
-| Page cannot connect | Confirm the startup terminal is still running and the WSL health check succeeds. Check the port and Windows-to-WSL localhost forwarding. Keep the listener local. |
-| Port already in use | Stop the earlier app instance or choose a different `PORT`; update the dev proxy too if using Vite. |
-| New UI change is missing | Run `npm run build` for normal startup and refresh the browser. |
-| File change requires review or reports a conflict | Inspect the approval or refresh the file. Save/discard unsaved edits and let the model re-read before trying a revised proposal. |
-| Shell directory or variables disappeared after restart | Expected: chats and tool evidence persist, but live shell sessions do not. |
-
-For contributor checks, run `npm run typecheck`, `npm test`, and `npm run build`. Linux CI includes real PTY tests; Windows skips platform-specific cases. See [architecture](architecture.md), [API contract](api-contract.md), and [current status](STATUS.md) for implementation details and remaining acceptance work.
-
-## Terminal command evidence
-
-Select a chat and open **Terminal** beside Files to inspect real command/output evidence. It starts closed each time you switch chats. Opening or closing it only changes the local panel; chat drafts, editor buffers, and running backend work stay intact. **Tests** remains available beneath it, including its failure indicator, with Debug either on or off. Internal critic/coder conversation remains controlled by Debug.
-
-Commands show their originating agent, logical shell session, command ID, status, output, and recorded exit code when available. Python actions show the submitted source. **Completed / Exit 0** means the command boundary reported zero; a separate tool/report error can still require attention in Tests. **Failed** means a recorded nonzero command exit. **Interrupted** reflects an actual cancellation/timeout result, not merely clicking Pause or Interrupt. **Uncertain** means no reliable command outcome exists, including execution interrupted by backend restart. The app never automatically reruns an uncertain action. Review workspace changes before deciding how to proceed.
-
-This is a read-only view; use the chat to request work. Running is explicitly the last recorded state, and disconnected views show a reconnecting notice. Shell state can be lost or recreated after interruption/restart; session labels identify the logical agent shell slot, not a promise of restored processes or variables.
-
-The view uses the latest 1,000 activity events and indicates omitted history or missing lifecycle evidence. Each command keeps up to the last 64,000 characters of available output; individual live chunks are capped at 16,000 characters and tool output has its existing byte limit. Final recorded output replaces overlapping live chunks. Truncation notices distinguish partial evidence from empty captured output. Old events without command IDs appear under **Unassociated / legacy evidence** and never establish a command's completion. Open Debug Activity to inspect other tool traces.
-
-## Changes and undo
-
-Open **Changes** beside Files when you want to inspect work. The panel starts closed and leaves the editor and its unsaved buffer mounted. **Current project Git changes** includes staged, unstaged, renamed, deleted, and untracked files, including manual or pre-existing changes. It does not attribute every dirty file to an agent. Select a file for a readable diff; rename review includes the original and destination paths. Protected credential paths are excluded. Git-unavailable projects can still show recorded-write history.
-
-**Recorded agent writes** lists individual `write_file` attempts with their status and originating chat. Select one to inspect the recorded forward diff and **Undo preview**, then explicitly click **Undo this write**. The backend restores only the stored previous content; a newly created file is removed without removing its directory or siblings. The Git index is never changed, so a staged version can remain different from the restored working file. No Git reset or whole-task rollback is performed. Review arbitrary shell effects through Git; they have no automatic undo. Actions completed before snapshot recording was introduced have no retroactive snapshots.
-
-Pause all active chats in the project and wait for their actions to stop before undoing. The backend checks actual running work, including actions still stopping after Pause, and blocks starts/resumes/approvals during an undo. A rejected active-work check does not interrupt a chat for you. Close Changes to use the chat's Pause control, then reopen the preview. Other chats receive file-change notifications and their unexecuted proposals are invalidated; paused chats stay paused.
-
-Undo compares the current content hash with the recorded result and checks all dirty editor leases. A later saved manual edit blocks undo. Save or deliberately discard unsaved edits before trying again; a dirty-buffer rejection does not consume the undo. Previews expire after five minutes or a backend restart; Refresh and select the record again. Only confirmed writes are eligible. `recording` is an execution intent, `rejected` means the file mutation did not start, and `unknown` means no reliable outcome was recorded. `undoing` is a durable claim; interrupted writes/undos recover as `unknown` and cannot be retried automatically. Inspect actual files and the recorded before/after diff to decide what remains.
-
-The panel displays the latest 100 history records and explicitly indicates omitted older entries. Git output is bounded to 1 MB; individual review diffs are limited to 200 KB with a one-second computation budget for snapshot diffs. Oversized review returns an explicit message and no undo button. Stored snapshots retain full file content within the existing 2 MB file-tool limit and are private data in the backend SQLite database. Keep backups private; history is not currently pruned automatically.
-
-These content checks and in-process file locks do not atomically exclude external programs. A change after the last filesystem check, or a change reverted to identical bytes between checks, may escape detection. Use one backend instance per data directory/project and avoid external writers during undo. File permissions are retained by the existing save primitive, but undo is content restoration, not restoration of original filesystem metadata, directory creation, or arbitrary shell state.
-
-## Remove chats and projects
-
-Use the sidebar's **…** button beside a chat or selected project. It appears on hover or keyboard focus (and for the selected chat). Tab reaches the button and its action; Escape closes the disclosure or confirmation. Cancel returns focus to the overflow button.
-
-**Delete chat** removes its conversation and associated app history, leaving project files and other chats intact. **Remove from app only** removes the project registration and all its chats while preserving the folder, Git history, hidden files and other contents. Importing that folder later starts fresh app history.
-
-**Delete project and files** is permanent, including for imported folders. A second dialog shows the canonical backend directory, and requires that exact directory to be typed before enabling the final button. Cancel at either stage leaves files intact. This deletes only the chosen project's directory, never its workspace parent, and does not use a recycle bin.
-
-Save or discard unsaved editor buffers first. Pause active project chats and wait for their actions and background jobs to finish; requesting Pause alone does not prove work stopped. Resolve pending proposals and uncertain execution records before removal. The backend independently rejects dirty leases and pending work even if another browser attempts the request. Finish pending file saves, imports or workspace preference changes before retrying.
-
-Disk deletion refuses unsafe roots, application/config/data folders, overlapping registered projects, symbolic links/junctions, special entries, mounted subtrees and oversized trees. Remove an overlapping registration from the app first, or use app-only removal and manage the files externally. The app does not follow links to remove their destinations. Stop external writers and use only one backend instance; native path checks cannot exclude every external filesystem race.
-
-If deletion is interrupted or partially fails, the project remains listed with **Review incomplete removal**. Inspect the actual remaining folder. Either retry **Delete project and files** with a fresh confirmation, or choose **Remove from app only**. When all files were removed but app-record cleanup failed, use app-only recovery. No retry happens automatically after restart, and new work stays blocked until recovery. Keep independent backups of files and private app data you need.
-
-For disposable browser verification, build the client and run `node --import tsx tests/removal-browser-fixture.ts`. It serves the real app on `http://127.0.0.1:3183` using fresh temporary projects/database and no provider. Press Enter in its terminal to stop and remove only that fixture; it also expires after 15 minutes. Never test deletion against real projects.
-
-## Plan first, then build in the same chat
-
-Send `/plan` followed by your task. Planning stays active across completed replies and backend restarts. Open **Plan** in the chat header to inspect phases/steps; it is reachable even at the bottom of a long conversation. Once the plan is ready, choose **Start building** there, or send exactly `go ahead` or `start building` (a final period/exclamation mark is allowed). This authorizes execution mode using the current plan; normal approval and file-version checks still apply. Send `/plan` again to restore planning. Other prose, examples and conditional requests do not silently lift the restriction.
-
-Progress reflects associated work and review evidence. A coder reporting completion still needs its independent critic review. Unassociated legacy work and model-authored `done` statuses do not establish completion. Expanding a step's evidence or progress history shows the recorded outcomes and source IDs. Structural plan edits reset current progress; unchanged plan structure preserves it. Historical failures remain retained. New guidance conservatively requires a fresh delegation to accept affected work. Backend restart interrupts unfinished progress and never replays uncertain commands. A stale Start building button requires a refresh; reconcile an in-flight/uncertain operation before retrying.
-
-The panel is closed initially, has its own height/scroll bound, and can be closed with Escape while focus is inside it. Composer drafts and mounted file editors remain intact. Narrow layouts wrap the header controls. Recent history can omit older source events; SQLite retains them.
-
-For a credential-free browser smoke test, build the UI, then run `node --import tsx tests/planning-browser-fixture.ts` and open the printed localhost URL. It creates only a disposable temporary project/database and uses explicit synthetic responses. Press Enter in the fixture terminal to stop and remove that fixture, or allow its 30-minute shutdown. It is not a live STARK or Linux PTY acceptance test.
-
-
-## Durable profile, migration and lifecycle
-
-Installation files stay in the checkout or future installation directory. Linux/WSL owns its database inside the selected Linux environment; no launch-time Windows/WSL database copying occurs. `HARNESS_HOME` is an absolute, persistent launcher override. Its default is `${XDG_DATA_HOME:-~/.local/share}/abyssus` on Linux and `%LOCALAPPDATA%/abysSUS` on Windows (portable development only). The home contains `profile/config/.env`, `profile/state/state.sqlite`, migration receipts and a private runtime descriptor. `cache/sandboxes` is a reserved future location; M16 does not create a sandbox. Projects remain in their original locations, or the separate configured workspace.
-
-For a **new installation**, run `npm run profile:init`, edit the printed `.env`, then `npm run build` and `npm start`. An alternative first launch is `HARNESS_INIT=1 npm start`. Later launches need neither command nor one-time flag. A missing initialized database/configuration fails closed instead of creating an apparently empty account.
-
-For an **upgrade from a legacy checkout**:
-
-For M22, choose a fresh explicit `HARNESS_HOME`, run `npm run profile:init`, and use that same home on every launch. Do not reuse the installed preview's home or external state directory. Profile and database markers require `native-tools-v1`; old state is rejected without deletion, profile conversion, or silent `.env` reset. Existing project folders remain intact and can be explicitly imported into the fresh profile.
-
-The existing relocation command supports only sources already marked with the same native format; it cannot convert old prototype chats. Ownership, WAL backup, bounded artifact copying, interruption receipts and explicit data-directory selection protections remain. Never remove ownership files, erase an old profile, or merge databases to bypass rejection.
-
-The backend locks the canonical home and effective data/config directories with persistent SQLite ownership files. Different homes sharing data collide; process exit releases locks without stale PID cleanup. Never remove ownership files to bypass a running instance. A port collision fails and releases startup resources without attaching to or killing that listener. A successful launch remembers its effective data directory. Losing/changing an override fails; restore the old value or deliberately select the new location with `HARNESS_SELECT_DATA=1 HARNESS_DATA_DIR=/absolute/selected/state npm start`. This selects a profile target and does not copy or merge old chats. A failed listen does not replace a previously working data binding.
-
-Ctrl+C/SIGTERM and the authenticated shutdown contract stop new work, close event streams and await runtime/tool/store cleanup before releasing ownership. A hanging/failed drain retains ownership; it is never reported as successful shutdown and uncertain operations are not replayed. If the process must be terminated externally, inspect uncertain records after restart. The private `backend.json` descriptor is for a trusted launcher; a plain `/api/health` response or matching port does not authenticate a backend. See the API contract for nonce/HMAC readiness and shutdown. Never include the descriptor in diagnostics, browser payloads or published files.
-
-Unix home/config directories must be owned by the current user with mode 0700; config and descriptors use 0600. Windows inherits the user's directory ACLs. Trusted local directory/OS locking semantics are required; network filesystems and arbitrary external path substitution are not supported security boundaries. The current same-user unsandboxed shell can read private files despite environment filtering. M17 owns process isolation; M20 will translate the one-time bootstrap controls into setup choices. No Electron, privileged helper, sandbox, or installed-desktop acceptance is claimed here.
-
-## Optional privileged system installs (M18)
-
-System installs stay disabled until explicit administrator provisioning in the selected Linux/WSL environment. Backend launch does not provision/start the helper. M18 provides trusted backend interfaces and fixed administrator setup/repair/uninstall entrypoints; it does not add the later Settings or guided desktop setup. See [helper prerequisites, trusted staging and recovery](helper.md). Do not run the privileged CI probes on a workstation. No WSL service distro, kernel settings, helper or system packages were changed locally for M18.
-## Electron desktop and browser pairing (M20)
-
-The runnable desktop shell, dedicated runtime staging, guided profiles, native folder selection and optional trusted helper setup are documented in [desktop setup](desktop.md). M21 owns final installers/release acceptance. Ordinary `npm start` now displays a single-use five-minute pairing code; enter it in the browser before using API/SSE. Backend restart revokes paired sessions. Configure endpoint/key in Settings; changing endpoints requires explicit replacement or clear of an existing key. No live-provider probe runs merely from saving.
-## Durable goals
-
-Use `/goal <objective>` for explicitly authorized ongoing work. Add acceptance criteria on separate `- <criterion>` lines; without bullets the objective itself is the single criterion. For an investigation where historical read results are sufficient, mark its criterion literally `- [observation] <criterion>`. Unmarked criteria require current workspace evidence. Empty or duplicate criteria are rejected. A goal needs a nonempty plan and reviewed tool evidence before completion; prose alone cannot complete it.
-
-The compact Goal/status/phase control opens the existing plan panel. Expand details for criteria, blockers, evidence, quota and superseded scope. **Revise goal scope** requires an explicit reason and preserves earlier revisions; sending another `/goal` does not replace the current one. Model plan edits cannot quietly remove required work. Ordinary messages remain conversational when no goal is active.
-
-`/goal` in planning mode does not authorize file writes, commands or installs. Use the current **Start building** control to release planning. `/btw` steers while preserving scope, and a paused goal stays paused until **Resume**. Approval decisions release only their exact proposal and do not renew the goal budget. Backend restart restores state without launching work. Uncertain effects remain blocked and are never automatically replayed or cleared by a goal revision.
-
-Goal continuation has bounded quotas: 128 model turns, 256 model/queue transitions, or 16 turns without newly accepted required scope. A long useful assignment may hit the conservative last limit; inspect progress and explicitly Resume. Completion is based on recorded scoped evidence and independent reviews, with known limits for outside-scope files, shell state, report authenticity and external races. It does not establish live-provider behavior or installed-device acceptance.
-## Reusable workflow skills
-
-Open **Skills** in the chat header when needed. Create a draft with a slug, short description and workflow steps, or ask the architect to “turn this completed work into a skill.” Drafts stay in the chat database; **Keep draft** preserves edits without creating a workflow file. Planning permits drafting and guidance selection. **Preview save** and **Confirm save** require execution mode and show the exact project destination/diff. File editor ownership, whole-file versions and active-process exclusions still apply. An external edit preserves your buffer and rejects the stale save; inspect/discard/reload before proposing a new change.
-
-Saved project workflows live in `.abyssus/skills/<name>/SKILL.md`. The header uses exactly `name`, `description` and `references` with JSON literal values between `---` lines; this is not general YAML. See the [format and bounds](api-contract.md#m26-reusable-workflow-skills). Optional referenced Markdown/text lives only under that skill's `resources/` directory. No scripts or imports execute when a skill is loaded.
-
-**Invoke guidance** pins the inspected document/resource revision. It pauses existing work and does not start building or resume a goal. Continue explicitly with a message, Resume or Start building as appropriate. A stale selection is visible; inspect the current workflow and invoke its exact revision again or deselect it. Refreshing instructions does not reconcile uncertain effects.
-
-**Promote to personal** requires an authenticated backend session and explicit confirmation of the fixed destination under the backend application home's `skills/<name>/` directory. It copies the document and declared resources, not the entire project folder. The personal root is on the selected backend, which can differ from the Windows desktop host. Same-name project/personal workflows remain separate explicit identities. Back up personal skills together with the application home; never copy credentials into workflows. A partial or unknown promotion retains its files/claim and blocks replay, further personal promotion and removal of its origin evidence. There is no automatic cleanup or generic reset.
-# Explicit container source foundation (M28)
-
-On a supported **local Linux x64 Docker Engine** with Compose 2.24+, run `bash setup.sh --container`, then `bash start.sh --container`. Setup prompts for an explicitly new/empty private storage directory and private provider/model inputs. `--no-start` configures without launching; `--check` checks engine capabilities without storage mutation. Stop the owned controller and worker broker with `bash start.sh --container --stop`. Rerun setup only after stopping the controller. Existing default `setup.sh`/`start.sh` behavior below remains the historical direct-source flow until M32.
-
-This path needs Docker/Compose and host `/usr/bin/python3` (standard library), ordinary Linux Bash, curl, flock, stat and realpath, **not host Node/npm, Bubblewrap, apt, sudo or a privileged helper**. It never installs/reconfigures Docker, WSL, a distribution, user namespaces or global settings. Unsupported/offline/permission-denied engines fail explicitly. Remote/TCP/SSH contexts, environment endpoint overrides, root execution, rootless engines and userns-remapped engines are unsupported until their storage UID mapping is validated. The controller runs as your numeric UID/GID with dropped capabilities and a read-only root filesystem.
-
-Select a canonical, user-owned mode-0700 directory on local ext4/xfs/btrfs, separate from the checkout. `config/` contains the private native provider file, `state/` the native profile and SQLite/WAL, `workspace/` managed project files, and `runtime/` disposable supervision metadata. SQLite is at `state/profile/state/state.sqlite`; skills and other native profile data remain beneath `state/`. Each mounted directory carries the same storage identity. The private `.container-source/selection` file records only root and identity, not credentials. Missing selection or established mounts/metadata/database stops startup. Keep selection with the checkout; restoring a selection or interrupted initialization requires explicit operator inspection, never deletion/reset/reinitialization of old data. Back up the database only while stopped or with SQLite's backup API, including all committed WAL data.
-
-Containers may be replaced without deleting this storage. Image layers and Docker build cache consume **the engine's own configured disk**, separately from the selected application directory. Windows D: binds and SQLite locking have **not** been accepted in M28. The future alternative is an explicitly selected engine-managed Linux volume, physically inside Docker Desktop's VM disk (which can be on C: unless previously relocated by the operator). This launcher selects neither Windows storage nor that volume alternative, and never moves Docker's disk settings.
-
-The host publishes only `127.0.0.1:3000`; occupied ports fail. The launcher verifies a fresh HMAC readiness proof from that exact host endpoint and the selected profile, while Docker health checks independently verify the internal listener. Browser pairing uses an expiring, single-use code deliberately displayed to the operator; reusable transport/lifecycle keys remain private and are never printed. Provider keys enter the private config through a hidden terminal prompt, not build arguments, environment variables, URLs or image layers.
-
-M29 builds a pinned worker image and starts the host broker for command/PTY/Python/test/fixed-Git execution and per-project package installs; import and host directory browsing wait for managed transfers in M30. New empty projects use the existing file-only Git layout and `/workspace` confinement. Native Electron integration comes later. This is source setup evidence, not an installer release, Windows acceptance or live-provider validation. M21 remains paused.
-
-M29 worker commands preserve cwd and exported environment within a chat/agent context. Shell functions, aliases and options are local to one command, so group dependent shell statements together. Reset/capture loss is shown explicitly. Public HTTP(S) proxy egress replaces the direct sandbox's registry-only policy; private services and arbitrary network protocols remain unavailable. Broker/controller/provider storage and Docker control are never mounted in workers.
-
-Install settings still choose Ask, Auto-approve or AI review, but approved apt transactions affect only an isolated project container image. Publication requires host verification of trusted interpreter/runner/library bytes and confirmed cleanup. Some packages that alter the trusted execution base are deliberately refused. Dependencies installed in project home/cache persist separately. Explicit runtime reset retains recipes and requires fresh approval to reinstall; uncertain transactions are never retried automatically. Engine-managed image layers/cache use the engine's existing disk configuration. No host engine, WSL, helper or global provisioning occurs.
-
-The Linux source broker uses a private Unix socket and Python standard library. This does not establish Windows/Docker Desktop socket compatibility, Windows D: locking, native Electron lifecycle/picker acceptance or live-provider acceptance. Those remain the later sequence's explicit work. Do not delete journals or original storage to bypass uncertainty/capacity errors.
-
-## Managed project transfers (M30)
-
-In container source mode, Import copies once to a new authoritative `/workspace/<uuid>` project. From the source checkout's host terminal run `bash scripts/project-transfer.sh`, select import, enter the source there, review exclusions and optional Git history, and type the explicit authorization phrase. Paste the resulting single-use code into **Import existing** in the app. The browser never selects a host path. This source interim flow requires the existing Linux Python prerequisite; M31 supplies the container-connected native folder picker.
-
-The project overflow menu offers **Export project copy**. Save/discard editor changes, pause chats and resolve pending/uncertain actions first. Follow the same terminal command, choose export, provide the managed folder identity shown in the dialog, and select a destination that does not exist. The app independently reserves the project and drains owned workers while the host copies. No existing destination, even empty, is overwritten or merged. There is no automatic synchronization, refresh or write-back to the original source.
-
-By default dependencies/build caches and sensitive configuration are excluded, and a fresh inert Git repository is created. Exact ordinary sensitive files may be explicitly included during host review; known app/credential paths remain forbidden. Separate Git-history opt-in preserves supported ordinary local object/ref/index metadata, including staged and deleted historical bytes; history can retain secrets even when current sensitive files are excluded. Hooks, configuration, logs and unsafe Git indirection are never activated or copied. Dirty working files remain independent of history. Exclusions and counts are shown after the copy; full bounded manifests are retained privately on the host.
-
-Copies reject links, special files, hardlinks, unsafe/colliding names, nested mounts and changed sources. A failure/cancellation/restart can leave private staging residue or complete unregistered output. Inspect host-private `runtime/transfers` and the transfer journal before taking a new explicit action; the app never resumes, recopies, auto-registers or deletes these outputs on restart. Capacity exhaustion requires explicit operator inspection; unresolved records are not evicted. Source bytes/mtime/mode are preserved, but reading can update access times. Destination modes retain ordinary executability with private permissions, without special permission bits or extended metadata. Removing a container project can affect only its managed copy, never its original import source.
-
-After a lost export response, the project retains a separate export reservation, including across backend restart. In Export, enter the original code and choose **Verify stopped export and release reservation**. This asks the host to prove the exact copy thread has stopped or permanently revoke the unused authorization. It only unlocks the managed source; review any destination/staging residue separately. Unknown/changed host journal identity refuses release, and acknowledgement/COMMIT loss retains the reservation. No copy is retried. Source launcher log tails may contain old and current pairing messages after restart; use the newest code. M32 owns improving that source-launcher presentation.
-
-
-Container exports must use a separate new folder outside every original import tree. The host retains original-folder identities across ticket expiry, project removal and restart; it never silently evicts this protection. A missing, renamed or replaced original conservatively blocks exports until its original location is restored. Missing/corrupt transfer provenance blocks new transfers. Concurrent host selection/copy can report `TRANSFER_LINEAGE_BUSY`; wait until the existing transfer finishes before making a new selection. Linux subtree bind mounts/subvolume aliases are unsupported source/destination selections; ordinary whole-filesystem mounts remain supported. See [the transfer contract](api-contract.md#original-folder-protection-for-container-transfers-m30) for exact limits.
+The old direct-backend and browser-source scripts remain internal regression fixtures. They are not a supported workaround for missing container runtime or an implicit fallback to host shells. Model/native argument validation, approvals, versions, leases, guidance/skill revisions and uncertain-effect protections are unchanged.

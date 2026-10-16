@@ -10,6 +10,7 @@ function Native-Method($Name,$Library,$Return,$Parameters) {
 Native-Method CreateFileW kernel32.dll ([IntPtr]) @([string],[uint32],[uint32],[IntPtr],[uint32],[uint32],[IntPtr])
 Native-Method CreateDirectoryW kernel32.dll ([bool]) @([string],[IntPtr])
 Native-Method CloseHandle kernel32.dll ([bool]) @([IntPtr])
+Native-Method GetFileInformationByHandleEx kernel32.dll ([bool]) @([IntPtr],[int],[byte[]],[uint32])
 Native-Method GetFileInformationByHandle kernel32.dll ([bool]) @([IntPtr],[byte[]])
 Native-Method GetFinalPathNameByHandleW kernel32.dll ([uint32]) @([IntPtr],[Text.StringBuilder],[uint32],[uint32])
 Native-Method GetSecurityInfo advapi32.dll ([uint32]) @([IntPtr],[int],[uint32],[IntPtr].MakeByRefType(),[IntPtr].MakeByRefType(),[IntPtr].MakeByRefType(),[IntPtr].MakeByRefType(),[IntPtr].MakeByRefType())
@@ -68,14 +69,27 @@ function Pin-SourcePath([string]$Value,[switch]$TrustedProgram,[switch]$Private)
     return $last
 }
 function Close-SourcePins([int]$Keep=0) { while ($script:SourcePins.Count -gt $Keep) { $index=$script:SourcePins.Count-1;[void]$script:SourceNative::CloseHandle($script:SourcePins[$index]);$script:SourcePins.RemoveAt($index) } }
+function Assert-StreamInventory([bool]$Succeeded,[byte[]]$Buffer) {
+    if (-not $Succeeded) { throw 'Held-handle stream inventory unavailable' }
+    $offset=0;$count=0
+    do {
+        if ($offset -lt 0 -or $offset+24 -gt $Buffer.Length -or ++$count -gt 1024) { throw 'Invalid stream inventory bounds' }
+        $next=[BitConverter]::ToUInt32($Buffer,$offset);$length=[BitConverter]::ToUInt32($Buffer,$offset+4)
+        if ($length -eq 0 -or $length%2 -ne 0 -or $length -gt 592 -or $offset+24+$length -gt $Buffer.Length) { throw 'Invalid stream name length' }
+        $name=[Text.Encoding]::Unicode.GetString($Buffer,$offset+24,$length)
+        if ($name -cne '::$DATA' -or $count -ne 1) { throw 'Alternate data stream refused' }
+        if ($next -eq 0) { break }
+        if ($next -lt 24+$length -or $next%8 -ne 0) { throw 'Invalid stream inventory chain' }
+        $offset+=$next
+    } while ($true)
+}
 function No-AlternateStreams([string]$Value) {
-    $buffer=New-Object byte[] 600;$handle=$script:SourceNative::FindFirstStreamW($Value,0,$buffer,0)
-    if ($handle -eq [IntPtr](-1)) { throw 'Stream inventory unavailable' }
+    $keep=$script:SourcePins.Count
     try {
-        do {
-            $name=[Text.Encoding]::Unicode.GetString($buffer,8,592).Split([char]0)[0]
-            if ($name -cne '::$DATA') { throw 'Alternate data stream refused' }
-        } while ($script:SourceNative::FindNextStreamW($handle,$buffer))
-    } finally { [void]$script:SourceNative::FindClose($handle) }
+        $handle=Pin-SourcePath $Value
+        $buffer=New-Object byte[] 65536
+        $ok=$script:SourceNative::GetFileInformationByHandleEx($handle,7,$buffer,$buffer.Length)
+        Assert-StreamInventory $ok $buffer
+    } finally { Close-SourcePins $keep }
 }
 function Flush-SourceFile([string]$Value) { $stream=[IO.File]::Open($Value,'Open','ReadWrite','Read');try{$stream.Flush($true)}finally{$stream.Dispose()} }
