@@ -99,7 +99,12 @@ try:
     check('saved-selection setup rerun preserves profile, key and selection',before_config==config.read_bytes() and before_profile==(STORAGE/'state/profile/profile.json').read_bytes() and before_selection==selection.read_bytes())
     active=subprocess.run(compose+['ps','--status','running','-q'],cwd=ROOT,env=compose_env,capture_output=True,text=True,check=True)
     check('--no-start leaves no controller running',not active.stdout.strip())
+    with socket.socket() as probe:
+        probe.settimeout(1)
+        check('previous component listener has stopped',probe.connect_ex(('127.0.0.1',3000))!=0)
     with socket.socket() as occupied:
+        # Reuse only TIME_WAIT from the preceding real HTTP suite; never share a listener.
+        occupied.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
         occupied.bind(('127.0.0.1',3000));occupied.listen()
         refused=launch(ok=False)
         check('occupied unrelated host port refuses launch without pairing or adoption',refused.returncode!=0 and 'Authenticated readiness passed' not in refused.stdout and 'Browser pairing code' not in refused.stdout and occupied.getsockname()==('127.0.0.1',3000))
