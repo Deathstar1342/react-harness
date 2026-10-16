@@ -19,7 +19,7 @@ Wire contract: single storage_targets opcode, max8 targets with fixed state/conf
 
 Finite auxiliary leaf reader allows delete sharing only for derived SQLite auxiliary metadata, with held strict parent/main pins and no content reads. DELETE/WAL/PERSIST writer and observer behavior must pass independently. Default PinnedPath, ancestors, main DB, source, workspace and ordinary atomic-record handles keep deny-delete. Full scans must precede live writers or follow proved drain; active reconnect uses exact owned operator/roots, not a recursive scan over live unrelated records.
 
-Required before enable: complete mapped callsite wiring; response digest/nonce/generation/late reply tests; creation/temp/final checks; DB replacement poison; concurrent atomic publication and DELETE/WAL/PERSIST writer tests; bounded native timings; full source suites and exact CI. Actual Windows Docker mapping and permission semantics remain separate device evidence.
+Acceptance checks: complete mapped callsite wiring; response digest/nonce/generation/late reply tests; creation/temp/final checks; DB replacement poison; concurrent atomic publication and DELETE/WAL/PERSIST writer tests; bounded native timings; full source suites and exact CI. Actual Windows Docker mapping and permission semantics remain separate device evidence.
 
 ## Concrete callsites and evidence
 
@@ -33,4 +33,4 @@ Required before enable: complete mapped callsite wiring; response digest/nonce/g
 
 Current targeted receipts: native-journal4 (4 pass, actual NTFS/crash-reopen); desktop-python26 (98 run/96 pass/2 platform skips); native-target-wire1 (22 pass) and wire2 (11 pass including exact Unicode digest/root-substitution/invalid-selector refusal); native-phase3 (3 pass, actual native metadata and authenticated TCP, synthetic Linux route proof). These precede the final hot-observation regression and are not Windows Docker acceptance.
 
-Final local regression for this candidate: typecheck22; full5 1003 pass/46 skips; desktop-python28 101 run/99 pass/2 skips; build5; native-smoke6. Full native suite includes concurrent unrelated atomic publication/DELETE transactions and separate exact operator/config ACL poisoning. Source-bound CI remains pending.
+Final local regression for this candidate: typecheck22; full5 1003 pass/46 skips; desktop-python28 101 run/99 pass/2 skips; build5; native-smoke6. Full native suite includes concurrent unrelated atomic publication/DELETE transactions and separate exact operator/config ACL poisoning. Exact 6e7cdc2 source-bound applicable CI is now green; see milestone-31.md for job IDs, artifact hash and distinct device gates.
