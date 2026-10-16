@@ -1,5 +1,13 @@
 # Milestone 29 — independent coordinator review
 
+## Delivered on reviewed GitHub main — 2026-10-16
+
+M29 delivery gate is satisfied at `0ae688572a0652708b55cbd608bb62449e34ca22`; subsequent coordinator commits are documentation only. Independently inspected EVERY applicable exact-main job/step: Validate `38910170353` / `117003703642`; Desktop `38910170556` / Windows `117003706252`, Ubuntu `117003705792`; helper `38910170430` / `117003703807`; Container `38910170304` / `117003704605`. All required checks passed; only expected platform/failure-diagnostic steps skipped. Complete API snapshots are retained outside Git.
+
+Fresh main container artifact `12049643556` downloaded and SHA256 matched `341e84772b6c59c1657c22452698d15981d170a42a320e8dd1b2b9feb8fce637`; exact main source field, worker29/source15 counts and Runtime53 checks/no failures inspected. Fresh Windows `12049359078` and Ubuntu `12050221550` desktop artifact metadata bind the same main SHA; metadata provenance is distinct from independently downloaded container-byte verification. Earlier source artifact and coordinator920Windows/45skips,30Python,typecheck/build/actual WindowsElectron/screenshot plus83integration evidence remain valid.
+
+M30 may start from published kickoff documentation beyond this reviewed implementation. Preserve idle M29/branch/D review worktrees and all failures. M21 remains paused; no release, Windows container GUI/D storage or live-provider acceptance is implied.
+
 ## Reviewed integration published — exact-main CI pending
 
 Handoff merged and published as GitHub main `0ae688572a0652708b55cbd608bb62449e34ca22`. Integration differs from reviewed handoff only in coordinator STATUS/report documentation. Integration typecheck and **83 affected worker/install/goal tests** passed. Exact-main runs are active: Validate `38910170353`, Desktop `38910170556`, helper `38910170430`, Container `38910170304`. Verify every applicable job/step and fresh source-bound container receipt before marking M29 delivered or dispatching M30. Automatic installer workflow is not resumed M21 or release acceptance.
