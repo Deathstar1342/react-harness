@@ -257,7 +257,7 @@ class Broker:
             self.shutdown_done.set()
 
 
-def serve(storage, storage_id, source, context):
+def serve(storage, storage_id, source, context, worker_image=None):
     import fcntl
     import signal
     os.umask(0o077)
@@ -277,7 +277,7 @@ def serve(storage, storage_id, source, context):
     session = str(uuid.uuid4())
     key = secrets.token_hex(32)
     journal = Journal(str(runtime / 'worker-journal.sqlite'), session)
-    docker = Docker(storage, storage_id, source, context)
+    docker = Docker(storage, storage_id, source, context, worker_image)
     from transfer_service import area
     area(storage)
     broker = Broker(journal, docker)
@@ -346,5 +346,5 @@ def serve(storage, storage_id, source, context):
 
 if __name__ == '__main__':
     import sys
-    require(len(sys.argv) == 5, 'INVALID_LAUNCH')
+    require(len(sys.argv) in (5, 6), 'INVALID_LAUNCH')
     serve(*sys.argv[1:])

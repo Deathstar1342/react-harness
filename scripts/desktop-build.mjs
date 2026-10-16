@@ -9,7 +9,7 @@ await rm(output,{recursive:true,force:true});
 execFileSync(process.execPath,[root+'node_modules/typescript/bin/tsc','-p',root+'desktop/tsconfig.json','--outDir',output],{cwd:root,stdio:'inherit'});
 await mkdir(path.join(output,'dist'),{recursive:true});
 await cp(process.env.ABYSSUS_WEB_OUTPUT??root+'dist/client',path.join(output,'dist/client'),{recursive:true});
-for(const file of ['entry.cjs','bootstrap.cjs'])await cp(root+'desktop/'+file,path.join(output,'desktop',file));
+for(const file of ['entry.cjs','bootstrap.cjs','source-entry.cjs'])await cp(root+'desktop/'+file,path.join(output,'desktop',file));
 await cp(root+'containers/broker',path.join(output,'containers/broker'),{recursive:true,filter:file=>!file.includes('__pycache__')&&!file.endsWith('.pyc')});
 for(const file of ['worker-runner.py','worker-bridge.py','container-apt.py'])await cp(root+'containers/'+file,path.join(output,'containers',file));
 await mkdir(path.join(output,'helper'),{recursive:true});

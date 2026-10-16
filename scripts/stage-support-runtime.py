@@ -47,12 +47,14 @@ def member(name,seen):
     require(len(seen)<=30000 and len(name)<=1024,'Archive limit exceeded')
     return value
 
-def stage(output,downloads):
+def stage(output,downloads,target_platform=None):
+    target_platform=target_platform or sys.platform
+    require(target_platform in ('linux','win32') and (target_platform==sys.platform or sys.platform=='linux' and target_platform=='win32'),'Unsupported cross-staging platform')
     require(not output.exists(),'Output already exists; inspect it instead of overwriting')
     downloads.mkdir(parents=True,exist_ok=True)
     output.mkdir(parents=True)
-    provenance={'version':VERSION,'release':RELEASE,'license':'PSF-2.0 and bundled dependency notices','sourceURL':f'https://www.python.org/ftp/python/{VERSION}/Python-{VERSION}.tar.xz','sourceSHA256':SOURCE_SHA,'platform':sys.platform}
-    if sys.platform=='win32':
+    provenance={'version':VERSION,'release':RELEASE,'license':'PSF-2.0 and bundled dependency notices','sourceURL':f'https://www.python.org/ftp/python/{VERSION}/Python-{VERSION}.tar.xz','sourceSHA256':SOURCE_SHA,'platform':target_platform}
+    if target_platform=='win32':
         name=f'python-{VERSION}-embed-amd64.zip';url=f'https://www.python.org/ftp/python/{VERSION}/{name}'
         archive=downloads/name;download(url,archive,WIN_SHA,32*1024**2)
         seen=set();total=0
@@ -109,10 +111,13 @@ def stage(output,downloads):
         if file.is_file():
             total+=file.stat().st_size;require(total<=512*1024**2 and len(files)<20000,'Runtime inventory limit')
             files[file.relative_to(output).as_posix()]=hashlib.sha256(file.read_bytes()).hexdigest()
-    manifest={'version':1,'pythonVersion':VERSION,'platform':sys.platform,'arch':'x64','executable':executable,'files':files}
+    manifest={'version':1,'pythonVersion':VERSION,'platform':target_platform,'arch':'x64','executable':executable,'files':files}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     env={k:v for k,v in os.environ.items() if not k.startswith(('PYTHON','LD_'))}
-    subprocess.run([str(output/executable),'-I','-B','-c','import sqlite3,ssl,ctypes,zlib; print("Bundled runtime imports verified")'],cwd=output,env=env,check=True)
+    if target_platform==sys.platform:
+        subprocess.run([str(output/executable),'-I','-B','-c','import sqlite3,ssl,ctypes,zlib; print("Bundled runtime imports verified")'],cwd=output,env=env,check=True)
+    else:
+        print('Cross-staged runtime: actual target execution remains required.')
     print('Staged private support runtime; no global interpreter was installed.')
 
 if __name__=='__main__':

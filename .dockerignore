@@ -28,3 +28,13 @@
 !helper/core.py
 !helper/apt_adapter.py
 !helper/apt.conf
+
+!desktop/
+!desktop/**
+!scripts/
+!scripts/desktop-build.mjs
+!scripts/stage-support-runtime.py
+!scripts/stage-container-runtime.py
+!scripts/source-payload.py
+
+!scripts/source-payload-verify.py

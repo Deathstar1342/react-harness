@@ -43,6 +43,9 @@ jobs:
           $env:M31_ELECTRON_EXE=(node -e "process.stdout.write(require('electron'))")
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $env:M31_ELECTRON_EXE -PathType Leaf)) { throw 'Pinned Electron binary staging failed' }
           & "$env:M31_SUPPORT_RUNTIME/python.exe" -I -B -m unittest discover -s tests -p "test_desktop_*.py" -v
+      - name: Native source bootstrap aliases, ownership and bounded streams
+        if: runner.os == 'Windows'
+        run: ./tests/source-desktop-native.ps1 -FixtureRoot "${{ runner.temp }}/native-fixtures"
       - name: Linux private-runtime protocol and host proof checks
         if: runner.os == 'Linux'
         run: "$M31_SUPPORT_RUNTIME/bin/python3.13 -I -B -m unittest discover -s tests -p 'test_desktop_*.py' -v"

@@ -42,6 +42,8 @@ Delivered reviewed implementation on GitHub main `0f9d6f8955ef088a179308af28508e
 
 ### M32 — One-command source setup, full evaluation and packaging handoff
 
+Reviewed source handoff `c0e7a550` / tested implementation `a3a9e137`: all six exact-source workflow jobs/applicable steps and fresh artifacts independently verified. Coordinator source and relocated Windows payload checks pass. Integration is pending exact-main CI; this is not final milestone delivery, Windows Docker device acceptance or M21 packaging resumption. [Independent review](reports/milestone-32-coordinator.md).
+
 - Make guided container setup/start the supported default: update `setup.sh`/`start.sh`, add Windows `setup.ps1`/`start.ps1`, remove obsolete Bubblewrap/host-Node/host-apt source prerequisites from the supported path and docs. Existing developer tests may use portable interfaces; never leave an implicit production host execution fallback. Reruns preserve storage, profiles and keys. Source users may build images; customers must not need Git/npm/build commands.
 - Exercise complete native tools/goals/AGENTS/skills/plan/editor/approvals/installs/steering/PTY/import/export with real persistent storage, crash/recreate and clean source onboarding in disposable Linux/Windows environments. Add scoped regression/CI corrections and honest work-side diagnostics; no live STARK claim without access.
 - Audit existing desktop package assumptions against container payload/provenance/runtime detection, storage relocation, dependency notices/source/security/manifest/signing and clean-machine gates. Produce a concrete M21 resumption handoff, not a final installer release or merge of its old unreviewed changes. Do not silently waive native picker/OS/runtime/manual gates.

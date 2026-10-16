@@ -1,60 +1,28 @@
 # React Harness
 
-**Deployment redesign in progress:** the approved [container backend plan](CONTAINERIZATION.md) and [M28–M32](docs/milestones.md) target a native GUI, persistent managed workspace and one-time copy-on-import (no sync/write-back). Updated container setup/Windows launchers will land in that sequence. The source commands below still describe the existing Linux/Bubblewrap implementation; container deployment and customer installers are not yet delivered. See [current status](docs/STATUS.md).
+The approved [container backend plan](CONTAINERIZATION.md) uses a native Electron GUI, containerized controller/project workers, persistent selected storage and one-time copy-on-import. See [current status](docs/STATUS.md) and [M32 evidence gates](docs/m32-acceptance.md); customer packaging remains paused.
 
-A local chat workspace for models served through STARK's OpenAI-compatible Chat Completions API. You talk to the architect, which delegates implementation to a coder and brings in a critic to review scope, changes, and verification evidence.
+A local chat workspace for models served through STARK's native OpenAI-compatible Chat Completions API. The architect delegates implementation to a coder and brings in a critic to review scope, changes and verification evidence. React/TypeScript, Node24 inside the controller, node:sqlite and a local Monaco editor preserve conversations and editing state.
 
-React + TypeScript, a Node.js 24 backend, SQLite via `node:sqlite`, and a local Monaco editor. The backend is designed to run inside WSL/Linux; open the interface from your normal browser.
+## Guided source launch
 
-## Run in WSL
+With an approved preexisting local Linux Docker engine, run `bash setup.sh` on an Ubuntu22.04/24.04 x64 desktop, or `.\setup.ps1` in Windows PowerShell. Choose an explicit external runtime/build/cache directory, then choose separate persistent app storage in the native desktop. Later use `bash start.sh` or `.\start.ps1`. No global host Node/Python, Bubblewrap, host apt/helper or manual Ubuntu backend setup is required. The scripts do not provision Docker/WSL or change host policy.
 
-**Quick setup:** in a fresh checkout inside your Ubuntu/WSL Linux home, run `bash setup.sh`. It checks sandbox prerequisites, offers missing Ubuntu packages with an explicit sudo prompt, offers a pinned checksum-verified user-local Node runtime if needed, installs locked npm dependencies, initializes/selects a private native profile, prompts for API settings with a hidden key, and builds the UI. No provider calls, privileged helper provisioning, kernel-policy changes or profile migration occur. Later run **`bash start.sh`** from that checkout; it remembers the profile without putting credentials in the launcher. See [guided setup](docs/setup.md#guided-source-setup).
+Source setup builds pinned runtime/image payloads; it is not a customer installer. Windows entrypoints and payload validation remain distinct from the open actual Docker Desktop/D-drive/SQLite/dependency-link device gate. Docker's own backing/cache drive is separate from the selected runtime and app folders. See the **[Setup guide](docs/setup.md)** for exact prerequisites, read-only checks, reruns, retained failed builds and storage behavior.
 
-For a full walkthrough, including work-network STARK checks, upgrades, backups, and troubleshooting, see the **[Setup guide](docs/setup.md)**.
-
-Prerequisites: Node.js 24 or newer, npm, Git, Bash, and Python 3 for Python tools. If `node-pty` needs to compile on your Linux distribution, install its usual native build prerequisites (Python 3, make, and a C++ compiler). Keep the checkout and working projects in your WSL home directory for filesystem performance.
-
-```bash
-git clone https://github.com/Deathstar1342/react-harness.git
-cd react-harness
-npm ci
-export HARNESS_HOME="$HOME/.local/share/abyssus-native"
-npm run profile:init
-```
-
-Edit the configuration path printed by `profile:init` (`$HARNESS_HOME/profile/config/.env`). Use `.env.example` as a reference; never overwrite an existing profile's settings:
-
-```dotenv
-STARK_BASE_URL=https://your-provider.example/v1
-STARK_API_KEY=your-local-key
-```
-
-Use your provider's real API prefix in the base URL. The backend appends `/models` and `/chat/completions`; it sends native `tools`, assistant `tool_calls` and matching `role:tool` results. It does not depend on `/responses` or `response_format`.
-
-```bash
-npm run build
-npm start
-```
-
-Open http://localhost:3000. For development, `npm run dev` runs the backend on port 3000 and Vite on port 5173. Restart the backend after changing its profile `.env`. Configuration, state and built UI lookup no longer depend on the backend launch directory.
-
-M22 requires a fresh native prototype profile. Keep the same explicit `HARNESS_HOME` for initialization and every launch. Old profiles are rejected without deletion or conversion; preserve the installed preview and its project folders. Do not point this prototype at the installed preview's home. Same-format profile relocation retains the existing lifecycle protections; it does not migrate the old action protocol.
-
-The UI opens without credentials so you can manage projects and files. Sending model messages requires the STARK URL and key. Windows can run the UI and portable tests, but persistent shell/Python/test execution requires the Linux backend; unsupported PTY execution returns an explicit error.
+Enter provider address/key and exact role models through private Settings. Existing settings are preserved. The provider receives native `tools`, assistant `tool_calls` and matching tool results; prose never executes. No work credentials are needed to validate independent source/runtime behavior. Work-only STARK acceptance remains deferred.
 
 ## Work with projects and chats
 
-Create or import local projects, then keep separate conversations for separate tasks. Chats, plans, approvals, tool evidence, and model context are stored in the selected home's `profile/state/state.sqlite`. Keep this local data private. `HARNESS_DATA_DIR` overrides the state directory; its effective identity is remembered to detect lost overrides. Imported projects remain outside the profile and are never moved by migration.
+New projects live in selected managed storage. Import copies a reviewed selection once into a new authoritative managed project; it leaves the original untouched. There is no automatic synchronization, refresh or write-back. Explicit Export saves to a new unrelated destination. Removing a managed project cannot delete its original source.
 
-The dark chat interface includes a folder explorer for imports and Settings for the default workspace. Create a project with just a name under `~/React Harness Projects` (or `HARNESS_WORKSPACE_ROOT`); the backend chooses a unique folder. Change the default workspace in Settings without moving existing projects. See [current validation status](docs/STATUS.md).
-
-Imported directories stay in place; importing does not copy files or rewrite existing Git history. New projects get a local Git repository. Project paths belong to the backend machine: inside WSL, use Linux paths such as `/home/you/projects`, or mounted Windows paths under `/mnt`.
+Chats, goals, plans, approvals, skills, settings and execution receipts persist across owned container restarts/recreation. Missing established storage refuses startup rather than silently resetting. Old native-prototype/profile migration remains out of scope; preserve unrelated profiles and installed previews.
 
 Send `/plan ...` to plan without new mutations. Send `/btw ...` or another message during a run to steer it at the next safe boundary. Pause, resume, and interrupt are available in the chat. Cancelling does not undo changes already applied. After a backend restart, resume explicitly; an uncertain command is reported instead of blindly replayed.
 
-Put project conventions in a root `AGENTS.md` (see [example](docs/examples/AGENTS.md.example)). The architect, coder, and critic receive fresh guidance automatically, separately from conversation summaries. Explicit user requests take precedence; runtime permissions, approval rules, and the response protocol still apply. Only the root file is loaded; nested files are not discovered.
+Put project conventions in a root `AGENTS.md` (see [example](docs/examples/AGENTS.md.example)). The architect, coder, and critic receive fresh guidance automatically, separately from conversation summaries. Explicit user requests take precedence; runtime permissions, approval rules, and the response protocol still apply. Scoped project guidance follows the current revision-aware discovery rules; see the [API contract](docs/api-contract.md).
 
-Use a regular UTF-8 text file of at most 32,000 bytes. Missing or empty files are supported; invalid, oversized, symbolic-linked, or hard-linked files stop the run until repaired or removed. Changes are checked around requests and before execution, including after approval waits and on resume, without relying on file-watcher notifications. Changed guidance discards prepared proposals for reconsideration and invalidates their approvals. It does not undo completed work or stop an already running command. See [project guidance details](docs/setup.md#project-guidance) for recovery and freshness limits.
+Use a regular UTF-8 text file of at most 32,000 bytes. Missing or empty files are supported; invalid, oversized, symbolic-linked, or hard-linked files stop the run until repaired or removed. Changes are checked around requests and before execution, including after approval waits and on resume, without relying on file-watcher notifications. Changed guidance discards prepared proposals for reconsideration and invalidates their approvals. It does not undo completed work or stop an already running command. See the [API contract](docs/api-contract.md) for current guidance recovery and freshness limits.
 
 ## Approvals and editing
 
@@ -68,11 +36,11 @@ Open **Settings** to select an approval level for the current chat or set the de
 
 File approvals show the exact current-to-proposed diff and reference the file version. Stale proposals are rejected. Unsaved editor buffers have renewable ownership leases; changes in another editor or chat trigger refresh/conflict handling. Abandoned leases expire after 45 seconds.
 
-The shell runs with the backend user's operating-system permissions. A working directory is not a sandbox, and a command approval cannot predict every resulting file change. Do not treat coder path scopes as operating-system confinement. File tools enforce project boundaries and exclude credential paths; child shell environments omit model API credentials. Run only on a trusted local machine.
+Shell/Python/tests execute in exact owned project containers. Only trusted host supervision controls Docker. Workers do not receive provider secrets, controller state, Docker sockets, host root/home or original imports. Workspace approvals and container system-install policies remain independent; approval cannot predict every package/command effect. Versions, editor leases, mutation reservations and uncertain-effect no-replay protections remain enforced.
 
 Linux PTY sessions retain `cd` and shell variables across commands and sequential delegations in the same chat while the backend stays alive. Restarting the backend does not restore shell memory or processes.
 
-Open **Changes** beside Files to review current Git changes or separate recorded agent writes. Git changes include pre-existing work, manual edits, and shell effects. Select a recorded write to see its original diff and an explicit undo preview, then choose **Undo this write**. Pause active chats in that project first. Undo requires the file to still match the recorded result and have no dirty editor lease; it preserves Git staging and unrelated files. It restores one file's previous content or removes that one newly created file. Shell effects, old actions without snapshots, and uncertain operations have no automatic undo. See [changes and undo](docs/setup.md#changes-and-undo) for limits and recovery.
+Open **Changes** beside Files to review current Git changes or separate recorded agent writes. Git changes include pre-existing work, manual edits, and shell effects. Select a recorded write to see its original diff and an explicit undo preview, then choose **Undo this write**. Pause active chats in that project first. Undo requires the file to still match the recorded result and have no dirty editor lease; it preserves Git staging and unrelated files. It restores one file's previous content or removes that one newly created file. Shell effects, old actions without snapshots, and uncertain operations have no automatic undo. See [changes and undo contracts](docs/api-contract.md) for limits and recovery.
 
 ## Models, context, and test evidence
 
@@ -112,6 +80,6 @@ npm test
 npm run build
 ```
 
-GitHub CI runs these checks on Linux, including real PTY tests. Local tests use synthetic providers and temporary projects; they do not establish live STARK compatibility. Live-provider acceptance requires your credentials. Automated visual verification remains pending the Codex browser-permission issue documented in [STATUS](docs/STATUS.md).
+GitHub CI runs these checks on Linux, including real PTY tests. Local tests use synthetic providers and temporary projects; they do not establish live STARK compatibility. Live-provider acceptance requires your credentials. Actual desktop/engine, native-human, device, live-provider and installer evidence remain separate in [STATUS](docs/STATUS.md).
 
 See [architecture](docs/architecture.md), [milestones](docs/milestones.md), and [API contract](docs/api-contract.md). Do not commit `.env`, `.harness`, generated builds, or user project contents.
