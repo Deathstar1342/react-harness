@@ -1,3 +1,4 @@
+import {assertNativePath,nativeStorageActive} from './native-storage.js';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
@@ -8,20 +9,24 @@ import { ProviderSettingsFile } from './provider-settings.js';
 
 const fail = (message:string) => new Error(message);
 export function privateDirectory(directory:string) {
+  assertNativePath(directory,true,true);
   mkdirSync(directory,{recursive:true,mode:0o700});
   const stat=lstatSync(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw fail('Application directory must not be a link');
-  if (process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode & 0o077)!==0)) throw fail('Application directory must be owned by this user with mode 0700');
+  if (!nativeStorageActive() && process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode & 0o077)!==0)) throw fail('Application directory must be owned by this user with mode 0700');
 }
-export function regularFile(filename:string) {
+export function regularFile(filename:string,privateClass=true) {
+  assertNativePath(filename,privateClass);
   const stat=lstatSync(filename);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink!==1) throw fail('Application files must be regular and unlinked');
 }
 export function durableWrite(filename:string, value:string) {
+  assertNativePath(filename,true,true);
   if(existsSync(filename))regularFile(filename);
   const temporary=`${filename}.${randomUUID()}.tmp`;
   const fd=openSync(temporary,'wx',0o600);
   try {writeFileSync(fd,value);fsyncSync(fd);} finally {closeSync(fd);}
+  assertNativePath(temporary);assertNativePath(filename,true,true);
   renameSync(temporary,filename);
   // Windows does not support opening directories for fsync. File contents are flushed on both platforms.
   if (process.platform!=='win32') {const dir=openSync(path.dirname(filename),'r');try{fsyncSync(dir);}finally{closeSync(dir);}}
@@ -50,6 +55,7 @@ function treeHash(directory:string):string {
 export class ProfileOwnership {
   private db?:DatabaseSync;
   constructor(directory:string) {
+    assertNativePath(directory,true,true);
     mkdirSync(directory,{recursive:true,mode:0o700});
     if (lstatSync(directory).isSymbolicLink()) throw fail('Ownership directory must not be a link');
     const canonical=realpathSync(directory),filename=path.join(canonical,'.backend-owner.sqlite');

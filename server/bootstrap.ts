@@ -1,3 +1,4 @@
+import {runNativeOperation} from './native-storage.js';
 import path from 'node:path';
 import { createHmac } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
@@ -13,7 +14,8 @@ import { BackendLifecycle } from './lifecycle.js';
 import { TransportAuth } from './transport-auth.js';
 import { verifyContainerStorage } from './container-storage.js';
 
-export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean}={}) {
+export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean}={}) {return runNativeOperation(()=>startBackendScoped(options));}
+async function startBackendScoped(options:ProfileOptions & {transportToken?:string;desktop?:boolean}) {
   const env={...(options.env ?? process.env)};
   if(env.HARNESS_EXECUTION_MODE==='container') {
     verifyContainerStorage(env.HARNESS_STORAGE_ID ?? '');
@@ -29,7 +31,7 @@ export async function startBackend(options:ProfileOptions & {transportToken?:str
   let lifecycle:BackendLifecycle|undefined;
   const descriptor=path.join(profile.paths.home,'backend.json');
   let closePromise:Promise<void>|undefined;
-  const close=():Promise<void>=>closePromise ??= (async()=>{
+  const close=():Promise<void>=>closePromise ??= runNativeOperation(async()=>{
     // Failed or hanging drains retain ownership. Process exit releases the OS locks.
     await app?.close();
     if(!app)await tools.dispose();
@@ -37,7 +39,7 @@ export async function startBackend(options:ProfileOptions & {transportToken?:str
     const stopped={version:1,instanceId:lifecycle?.instanceId,profileId:lifecycle?.profileId,state:'stopped'};
     durableWrite(descriptor,JSON.stringify({...stopped,...(lifecycle?{mac:createHmac('sha256',lifecycle.key).update(JSON.stringify(stopped)).digest('hex')}:{})}));
     resources?.close();profile.ownership.close();
-  })();
+  });
   try {
     lifecycle=new BackendLifecycle(profile.id,env.HARNESS_LAUNCH_KEY);
     const auth=new TransportAuth(lifecycle.instanceId,options.transportToken,!options.desktop);

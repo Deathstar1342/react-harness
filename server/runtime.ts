@@ -1,3 +1,4 @@
+import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
 import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef } from '../shared/types.js';
@@ -838,10 +839,11 @@ export class Runtime {
       if(state.generation!==generation)continue;
       if(preparedFrame && JSON.stringify(preparedFrame.messages)!==JSON.stringify(frame.messages))this.commitRunTransition(chatId,state,draft=>{draft.frames.find(item=>item.id===frame.id)!.messages=preparedFrame!.messages;});
       this.save(chatId,state);
-      const input = {model:this.store.chatModels(chatId)[frame.role],messages,tools:publishedTools(frame.role,state.planOnly?'plan':'execute'),signal,maxTokens:this.config.maxOutputTokens,onDelta:(text:string)=>this.store.event(chatId,'delta',{role:frame.role,text})};
+      const deltas=nativeOutputBuffer(text=>this.store.event(chatId,'delta',{role:frame.role,text}));
+      const input = {model:this.store.chatModels(chatId)[frame.role],messages,tools:publishedTools(frame.role,state.planOnly?'plan':'execute'),signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
       this.commitRunTransition(chatId,state,()=>{const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
       this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...promptIdentity(messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
-      const completion = this.hooks.complete ? await this.hooks.complete(frame.role,input) : await this.provider.complete(input);
+      const completion = await (this.hooks.complete ? this.hooks.complete(frame.role,input) : this.provider.complete(input)).finally(()=>deltas.flush());
       signal.throwIfAborted();
       this.store.event(chatId,'provider_request',{role:frame.role,model:input.model,finishReason:completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
       if (completion.usage) this.store.event(chatId,'usage',{role:frame.role,...completion.usage});

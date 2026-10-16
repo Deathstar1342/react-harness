@@ -1,3 +1,4 @@
+import {assertNativePath,nativeStorageActive} from './native-storage.js';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,13 +8,15 @@ import { containerPaths } from './container-contract.js';
 
 export const storageReceiptSchema=z.object({version:z.literal(1),storageId:z.uuid(),profileId:z.uuid(),kind:z.literal('local-bind')}).strict();
 function directory(directory:string) {
+  assertNativePath(directory,false);
   const stat=lstatSync(directory);
-  if(!stat.isDirectory()||stat.isSymbolicLink()||realpathSync(directory)!==directory || process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode&0o077)!==0))throw new Error('Container storage directory identity or private ownership failed');
+  if(!stat.isDirectory()||stat.isSymbolicLink()||realpathSync(directory)!==directory || !nativeStorageActive() && process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode&0o077)!==0))throw new Error('Container storage directory identity or private ownership failed');
 }
 function read(filename:string) {
-  regularFile(filename);
+  assertNativePath(filename,false);
+  regularFile(filename,false);
   const stat=lstatSync(filename);
-  if(stat.size>4096 || process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode&0o077)!==0))throw new Error('Container storage metadata is not private or is too large');
+  if(stat.size>4096 || !nativeStorageActive() && process.platform!=='win32' && (stat.uid!==process.getuid!() || (stat.mode&0o077)!==0))throw new Error('Container storage metadata is not private or is too large');
   return readFileSync(filename,'utf8');
 }
 /** Read-only preflight: do not create anything before validating established mounts. */

@@ -8,7 +8,8 @@ const gateSchema=z.object({storageId:z.uuid(),launchId:z.uuid(),gateId:z.string(
 export class NativeStorageGate {
  private readonly context=new AsyncLocalStorage<z.infer<typeof gateSchema>>();
  private failed=false;
- constructor(private readonly policy:NativeBindPolicy,private readonly check:()=>Promise<unknown>,private readonly clock:()=>number=Date.now){}
+ poison(){if(this.failed)return;this.failed=true;this.onPoison();}
+ constructor(private readonly policy:NativeBindPolicy,private readonly check:()=>Promise<unknown>,private readonly clock:()=>number=Date.now,private readonly onPoison:()=>void=()=>{}){}
  async run<T>(operation:()=>Promise<T>|T):Promise<T>{
   if(this.failed)throw new Error('Native storage authority failed; explicit recovery required');
   let gate:z.infer<typeof gateSchema>;
@@ -16,15 +17,16 @@ export class NativeStorageGate {
    gate=gateSchema.parse(await this.check());const now=this.clock();
    if(gate.storageId!==this.policy.record.storageId||gate.launchId!==this.policy.record.launchId||gate.issuedAt>now||gate.expiresAt<now||gate.expiresAt<=gate.issuedAt||gate.expiresAt-gate.issuedAt>10000)throw new Error('Native storage freshness changed');
    this.policy.verifyRoots();
-  }catch(error){this.failed=true;throw error;}
+   if(this.failed)throw new Error('Native storage authority failed; explicit recovery required');
+  }catch(error){this.poison();throw error;}
   return this.context.run(gate,operation);
  }
  permits(filename:string,privateClass=true){
   const gate=this.context.getStore();
   const now=this.clock();
   if(this.failed||!gate)return false;
-  if(now<gate.issuedAt||now>gate.expiresAt){this.failed=true;return false;}
+  if(now<gate.issuedAt||now>gate.expiresAt){this.poison();return false;}
   try{this.policy.verifyRoots();return this.policy.permits(filename,privateClass);}
-  catch{this.failed=true;return false;}
+  catch{this.poison();return false;}
  }
 }

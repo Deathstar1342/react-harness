@@ -1,3 +1,5 @@
+import type {NativeObservation} from './native-state-check.js';
+import type {NativeBindPolicy} from './native-bind-policy.js';
 import {createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import {lstat,readFile} from 'node:fs/promises';
 import {connect} from 'node:net';
@@ -10,7 +12,9 @@ const identity=z.object({storageId:z.string().uuid(),projectId:hex,imageId:z.str
 export const preparedSchema=z.object({claimId:z.string().uuid(),binding:hex,sessionId:z.string().uuid(),identity,expiresAt:z.number().int().safe().positive()}).strict();
 export type WorkerBinding=z.infer<typeof preparedSchema>;
 export const workerResultSchema=z.object({exitCode:z.number().int().min(-255).max(255),timedOut:z.boolean(),truncated:z.boolean(),shellReset:z.boolean(),backgroundPids:z.array(z.number().int().positive()).max(256),cancelled:z.boolean().optional()}).strict();
-const descriptorSchema=z.object({protocol:z.literal(workerProtocol),sessionId:z.string().uuid(),key:hex,storageId:z.string().uuid(),socket:z.literal('/run/abyssus-broker/broker.sock')}).strict();
+export const unixDescriptorSchema=z.object({protocol:z.literal(workerProtocol),sessionId:z.string().uuid(),key:hex,storageId:z.string().uuid(),socket:z.literal('/run/abyssus-broker/broker.sock')}).strict();
+const tcpDescriptorSchema=z.object({protocol:z.literal(workerProtocol),sessionId:z.uuid(),key:hex,storageId:z.uuid(),launchId:z.uuid(),phase:z.enum(['initialize','controller']),transport:z.literal('tcp'),host:z.ipv4(),port:z.number().int().min(1024).max(65535)}).strict();
+const descriptorSchema=z.union([unixDescriptorSchema,tcpDescriptorSchema]);
 export function workerCanonical(value:unknown):string {
   const visit=(v:unknown):unknown=>{
     if(v===null||typeof v==='boolean')return v;
@@ -26,16 +30,30 @@ export const workerMac=(value:unknown,key:string)=>createHmac('sha256',key).upda
 export class WorkerError extends Error {constructor(readonly code:string){super(code);}}
 export interface WorkerTransport {request(op:string,body:unknown):Promise<unknown>;sessionId:string;storageId:string}
 export class WorkerClient implements WorkerTransport {
+  private static nativeClient:WorkerClient|undefined;
   private constructor(private descriptor:z.infer<typeof descriptorSchema>){}
+  nativeObservation():NativeObservation{if('socket' in this.descriptor)throw new WorkerError('NATIVE_SESSION_REQUIRED');return {...this.descriptor};}
   get sessionId(){return this.descriptor.sessionId;}
   get storageId(){return this.descriptor.storageId;}
   static async connect():Promise<WorkerClient> {
     if(process.platform!=='linux'||process.env.HARNESS_EXECUTION_MODE!=='container')throw new WorkerError('WORKER_UNAVAILABLE');
+    if(WorkerClient.nativeClient)return WorkerClient.nativeClient;
+    if(process.env.HARNESS_NATIVE_BIND_DIGEST)throw new WorkerError('NATIVE_SESSION_NOT_AUTHENTICATED');
     const file='/run/abyssus-broker/session.json',info=await lstat(file),parent=await lstat('/run/abyssus-broker');
     if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1||info.size>2048||info.uid!==process.getuid?.()||(info.mode&0o077)!==0||!parent.isDirectory()||parent.isSymbolicLink()||(parent.mode&0o077)!==0)throw new WorkerError('UNTRUSTED_WORKER_SESSION');
-    const descriptor=descriptorSchema.parse(parseNativeJSON(await readFile(file,'utf8')));
+    const descriptor=unixDescriptorSchema.parse(parseNativeJSON(await readFile(file,'utf8')));
     if(descriptor.storageId!==process.env.HARNESS_STORAGE_ID)throw new WorkerError('WORKER_STORAGE_MISMATCH');
     return new WorkerClient(descriptor);
+  }
+  static async connectNative(policy:NativeBindPolicy):Promise<WorkerClient>{
+    if(WorkerClient.nativeClient)throw new WorkerError('NATIVE_SESSION_ALREADY_INSTALLED');
+    policy.verifyRoots();const file='/run/abyssus-broker/session.json',info=await lstat(file);
+    if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1||info.size>2048||!policy.permits(file))throw new WorkerError('UNTRUSTED_NATIVE_SESSION');
+    const descriptor=tcpDescriptorSchema.parse(parseNativeJSON(await readFile(file,'utf8'))),record=policy.record;
+    if(descriptor.storageId!==record.storageId||descriptor.launchId!==record.launchId||descriptor.phase!==record.phase||descriptor.sessionId!==record.broker.sessionId||descriptor.host!==record.broker.host||descriptor.port!==record.broker.port)throw new WorkerError('NATIVE_SESSION_CHANGED');
+    const client=new WorkerClient(descriptor);
+    z.object({storageId:z.literal(record.storageId),launchId:z.literal(record.launchId),redeemed:z.literal(true)}).strict().parse(await client.request('redeem_storage',{proofId:record.proofId}));
+    policy.verifyRoots();WorkerClient.nativeClient=client;return client;
   }
   request(op:string,body:unknown):Promise<unknown> {
     const nonce=randomBytes(32).toString('hex');
@@ -43,7 +61,7 @@ export class WorkerClient implements WorkerTransport {
     const wire=workerCanonical({...unsigned,mac:workerMac(unsigned,this.descriptor.key)})+'\n';
     if(Buffer.byteLength(wire)>262144)throw new WorkerError('WORKER_REQUEST_LIMIT');
     return new Promise((resolve,reject)=>{
-      const socket=connect(this.descriptor.socket),parts:Buffer[]=[];let size=0,settled=false;
+      const socket='socket' in this.descriptor?connect(this.descriptor.socket):connect({host:this.descriptor.host,port:this.descriptor.port}),parts:Buffer[]=[];let size=0,settled=false;
       const finish=(error?:Error,value?:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);socket.destroy();error?reject(error):resolve(value);};
       const timer=setTimeout(()=>finish(new WorkerError('WORKER_REPLY_UNCERTAIN')),40000);
       socket.once('connect',()=>socket.write(wire));

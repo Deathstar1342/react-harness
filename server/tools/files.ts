@@ -1,3 +1,4 @@
+import {assertNativePath} from '../native-storage.js';
 import { constants } from 'node:fs';
 import { open, lstat, mkdir, rename, unlink, opendir } from 'node:fs/promises';
 import path from 'node:path';
@@ -110,9 +111,11 @@ export class WorkspaceFiles {
       // mkdir can partially create a chain before rejecting. Mark possible
       // directory effects first; never erase them during uncertain recovery.
       if(parentMissing)afterCreate?.();
+      assertNativePath(root,false);
       await mkdir(path.dirname(target.absolute), {recursive: true});
       await scoped(root,destination);
       for(const id of ids)this.checkLease(id);
+      assertNativePath(root,false);
       const handle = await open(target.absolute, 'wx', Number(identity.mode & 0o777n));
       let destinationIdentity;
       try { afterCreate?.(); await handle.writeFile(before.content, 'utf8'); await handle.sync(); destinationIdentity = await handle.stat({bigint:true}); } finally { await handle.close(); }
@@ -126,6 +129,7 @@ export class WorkspaceFiles {
         throw new ToolError('Rename changed after destination creation; outcome is uncertain. Inspect both paths; do not replay.', 'CONFLICT');
       }
       for (const id of ids) this.checkLease(id);
+      assertNativePath(root,false);
       await unlink(source.absolute);
       return {source: {path: source.relative, content: '', hash: null}, destination: {...before, path: target.relative}};
     });
@@ -140,7 +144,7 @@ export class WorkspaceFiles {
   }
   async save(root: string, input: string, content: string, baseHash: string | null, owner?: string, beforeMutation?: () => void, remove = false): Promise<FileSnapshot> {
     let claimed=false;
-    const claim=()=>{if(!claimed){beforeMutation?.();claimed=true;}};
+    const claim=()=>{assertNativePath(root,false);if(!claimed){beforeMutation?.();claimed=true;}};
     if (typeof content !== 'string' || Buffer.from(content).toString('utf8') !== content || content.includes('\0') || Buffer.byteLength(content) > this.options.maxFileBytes) throw new ToolError('Invalid content or file exceeds size limit.');
     if (baseHash !== null && !/^[a-f0-9]{64}$/.test(baseHash)) throw new ToolError('Expected SHA-256 baseHash or null for a new file.');
     const target = await scoped(root, input), id = key(target.absolute);
@@ -166,15 +170,18 @@ export class WorkspaceFiles {
         const current = await lstat(target.absolute,{bigint:true});
         if (identity.ino !== current.ino || identity.dev !== current.dev || identity.ctimeNs !== current.ctimeNs) throw new ToolError('File identity changed before removal.', 'CONFLICT');
         claim();
+        assertNativePath(root,false);
         await unlink(target.absolute);
         return { path: target.relative, content: '', hash: null };
       }
       const parentMissing=await lstat(path.dirname(target.absolute)).then(()=>false,error=>{if(error.code==='ENOENT')return true;throw error;});
       if(parentMissing)claim();
+      assertNativePath(root,false);
       await mkdir(path.dirname(target.absolute), { recursive: true });
       await scoped(root, input);
       temporary = path.join(path.dirname(target.absolute), `.rh-write-${randomUUID()}`);
       const info = await lstat(target.absolute).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+      assertNativePath(root,false);
       const handle = await open(temporary, 'wx', info ? info.mode & 0o777 : 0o600);
       try { await handle.writeFile(content, 'utf8'); await handle.sync(); } finally { await handle.close(); }
       // Approval-time snapshots are insufficient: compare again at the write boundary.
@@ -183,6 +190,7 @@ export class WorkspaceFiles {
       await scoped(root, input);
       this.checkLease(id, owner);
       claim();
+      assertNativePath(root,false);
       await rename(temporary, target.absolute);
       temporary = undefined;
       // Only the editor knows whether more keystrokes arrived during this save.

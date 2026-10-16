@@ -1,16 +1,21 @@
+import { NativeBindPolicy } from '../server/native-bind-policy.js';
+import { installNativeStorage,runNativeOperation } from '../server/native-storage.js';
+import { WorkerClient } from '../server/worker-client.js';
 import { readDesktopLaunch } from './desktop-session.js';
 import { startBackend } from '../server/bootstrap.js';
 
 process.umask(0o077);
 // Fixed trusted deployment config. Provider fields are read only from the private file.
 const env:NodeJS.ProcessEnv={PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/tmp',NODE_ENV:'production',
-  HARNESS_EXECUTION_MODE:'container',HARNESS_STORAGE_ID:process.env.HARNESS_STORAGE_ID,HARNESS_DESKTOP:process.env.HARNESS_DESKTOP,
+  HARNESS_EXECUTION_MODE:'container',HARNESS_STORAGE_ID:process.env.HARNESS_STORAGE_ID,HARNESS_DESKTOP:process.env.HARNESS_DESKTOP,HARNESS_NATIVE_BIND_DIGEST:process.env.HARNESS_NATIVE_BIND_DIGEST,HARNESS_LAUNCH_ID:process.env.HARNESS_LAUNCH_ID,
   HARNESS_HOME:'/abyssus',HARNESS_WORKSPACE_ROOT:'/workspace',HOST:'0.0.0.0',PORT:'3000'};
 for(const key of Object.keys(process.env))delete process.env[key];
 Object.assign(process.env,env);
 try {
+  const policy=NativeBindPolicy.load(env);
+  if(policy){if(policy.record.phase!=='controller')throw new Error('Wrong native storage phase');const client=await WorkerClient.connectNative(policy);installNativeStorage(policy,()=>client.request('storage_check',{}),client.nativeObservation());}
   const desktop=process.env.HARNESS_DESKTOP==='1';
-  const launch=desktop?readDesktopLaunch(env.HARNESS_STORAGE_ID??''):undefined;
+  const launch=await runNativeOperation(()=>desktop?readDesktopLaunch(env.HARNESS_STORAGE_ID??''):undefined);
   if(launch)env.HARNESS_LAUNCH_KEY=launch.key;
   const backend=await startBackend({env,desktop,transportToken:launch?.token});
   console.log('Container controller ready; host address http://127.0.0.1:3000');

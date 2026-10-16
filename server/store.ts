@@ -1,3 +1,5 @@
+import {nativeStateDatabase,nativeStateStore} from './native-state-database.js';
+import {nativePrivateUnit,nativePrivatePath} from './native-storage.js';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -31,8 +33,11 @@ export class Store {
     return models;
   }
   constructor(readonly filename: string) {
+    this.db=nativePrivateUnit(()=>{
+    if(filename!==':memory:')nativePrivatePath(filename,true);
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
     if(filename !== ':memory:' && existsSync(filename)) {
+      nativePrivatePath(filename);
       const existing = new DatabaseSync(filename,{readOnly:true});
       try {
         const tables=existing.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
@@ -42,8 +47,9 @@ export class Store {
         }
       } finally {existing.close();}
     }
-    this.db = new DatabaseSync(filename);
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+    if(filename!==':memory:')nativePrivatePath(filename,true);
+    const database=nativeStateDatabase(new DatabaseSync(filename),filename);
+    try{database.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
@@ -58,8 +64,12 @@ export class Store {
       CREATE TABLE IF NOT EXISTS install_requests (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, chat_id TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS installs_project ON install_requests(project_id);
     `);
-    this.setState('prototype:protocol','native-tools-v1');
+    database.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run('prototype:protocol',JSON.stringify('native-tools-v1'));
+    return database;
+    }catch(error){database.close();throw error;}
+    });
     this.changes.setMaxListeners(100);
+    return nativeStateStore(this);
   }
   transaction<T>(fn: () => T): T {
     // Nested domain transitions participate in the same atomic transaction.

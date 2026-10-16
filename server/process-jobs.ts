@@ -1,3 +1,4 @@
+import {nativeOutputBuffer} from './native-output-buffer.js';
 import {randomUUID} from 'node:crypto';
 import type {Action, ApprovalMode, ProcessJob, ToolContext, ToolResult, ToolService} from '../shared/types.js';
 import type {Store} from './store.js';
@@ -109,16 +110,17 @@ export class ProcessJobs {
   }
   private async run(record:ProcessRecord,live:{controller:AbortController;owner:symbol;release:()=>void}) {
     let acknowledged=false,cleanupConfirmed=false,result:ToolResult|undefined,persistenceFailed=false;
+    const outputBuffer=nativeOutputBuffer(output=>this.output(record.id,output));
     const context:ToolContext={projectRoot:this.store.project(record.projectId).path,chatId:record.chatId,agentId:record.id,signal:live.controller.signal,mutationOwner:live.owner,
       prepareCommand:async()=>{this.validate(record,live.owner);const instructions=await readProjectInstructions(this.tools,context.projectRoot,record.targets);if(instructions.hash!==record.instructionsHash)throw new Error('Applicable guidance changed before process dispatch.');await this.freshSkills?.(record.chatId);this.validate(record,live.owner);},
       beforeCommand:binding=>{this.store.transaction(()=>{this.validate(record,live.owner);const current=this.get(record.id);current.status='running';current.dispatched=true;if(binding)this.store.setState('worker-authorization:'+binding.claimId,{binding,processId:record.id,chatId:record.chatId,callId:record.callId,commandId:record.commandId});current.updatedAt=new Date().toISOString();this.store.setState(stateKey(record.id),current);});acknowledged=true;},
-      onOutput:output=>{if(persistenceFailed)return;try{this.output(record.id,output);}catch{persistenceFailed=true;live.controller.abort();}},
+      onOutput:output=>{if(persistenceFailed)return;try{outputBuffer.write(output);}catch{persistenceFailed=true;live.controller.abort();}},
     };
     try {
       result=await this.tools.execute(context,{name:'run_shell',args:{...record.action.args,timeoutMs:record.action.args.timeoutMs??600_000}});
     } catch {result={ok:false,output:'Process executor failed; inspect retained claim.',data:{uncertain:acknowledged}};}
     try {await this.tools.closeCommandContext!(context);cleanupConfirmed=true;}catch{ /* durable uncertainty below retains ownership */ }
-    if(!persistenceFailed)try{this.output(record.id,'',true);}catch{persistenceFailed=true;live.controller.abort();}
+    if(!persistenceFailed)try{outputBuffer.flush();this.output(record.id,'',true);}catch{persistenceFailed=true;live.controller.abort();}
     const current=this.get(record.id),data=result?.data as {exitCode?:number;cancelled?:boolean;timedOut?:boolean;uncertain?:boolean;shellReset?:boolean;backgroundPids?:number[];error?:string;truncated?:boolean}|undefined;
     const interrupted=!!(data?.cancelled||data?.timedOut||live.controller.signal.aborted);
     const uncertain=current.status==='uncertain'||persistenceFailed||!cleanupConfirmed||!acknowledged&&(result?.ok||Number.isInteger(data?.exitCode))||acknowledged&&(data?.uncertain||data?.backgroundPids?.length||data?.shellReset&&!interrupted||!Number.isInteger(data?.exitCode)&&!interrupted);
