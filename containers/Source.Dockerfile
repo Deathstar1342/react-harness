@@ -21,7 +21,6 @@ COPY desktop ./desktop
 COPY containers ./containers
 COPY helper/core.py helper/apt_adapter.py ./helper/
 COPY scripts/desktop-build.mjs scripts/stage-support-runtime.py scripts/stage-container-runtime.py scripts/source-payload.py ./scripts/
-COPY LICENSE ./LICENSE
 RUN npm run desktop:build
 # Desktop dependencies are pure JavaScript, installed from the same lock without hooks.
 RUN cp package.json package-lock.json /payload/app/ && cd /payload/app && npm ci --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
