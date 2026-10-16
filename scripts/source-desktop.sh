@@ -20,7 +20,7 @@ done
 for name in DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG DOCKER_API_VERSION; do [[ -z "${!name:-}" ]] || fail "Remove inherited $name before setup/start."; done
 for command in docker git tar realpath stat sha256sum timeout sed sync head; do command -v "$command" >/dev/null || fail "Missing $command. Nothing was installed; use your approved administrator."; done
 docker_cli="$(command -v docker)"
-d() { ( ulimit -f 65536; env -i HOME="$HOME" PATH="$PATH" TMPDIR="${runtime:-/tmp}" timeout --foreground 1800 "$docker_cli" "$@" ); }
+d() { ( env -i HOME="$HOME" PATH="$PATH" TMPDIR="${runtime:-/tmp}" timeout --foreground 1800 "$docker_cli" "$@" 2>&1 | head -c 67108865 ); }
 q() { local reply; reply="$(d "$@" | head -c 262145)"; (( ${#reply} <= 262144 )) || fail "Engine reply limit"; printf '%s' "$reply"; }
 g() { env -i HOME="$HOME" PATH="$PATH" git --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null "$@"; }
 context="$(q context show)"
@@ -112,10 +112,12 @@ else
     printf '%s\n' "build-$image" >> "$runtime_io/build-intent"
     sync -f "$runtime_io/build-intent"
     d --context "$context" buildx build --builder "$context" --load --iidfile "$runtime_io/$image.iid" -f "$runtime_io/snapshot/$dockerfile" "$runtime_io/snapshot" > "$runtime_io/logs/$image-build.log" 2>&1 || fail "Image build failed; inspect $runtime_io/logs/$image-build.log. Interrupted setup is retained."
+    (( $(stat -c %s "$runtime_io/logs/$image-build.log") <= 67108864 )) || fail "Build output limit; retained intent is uncertain"
   done
   printf 'build-export-payload\n' >> "$runtime_io/build-intent"
   sync -f "$runtime_io/build-intent"
   d --context "$context" buildx build --builder "$context" --build-arg TARGET_OS=linux --build-arg "SOURCE_COMMIT=$source" --build-arg "CONTROLLER_IMAGE=$(cat "$runtime_io/controller.iid")" --build-arg "WORKER_IMAGE=$(cat "$runtime_io/worker.iid")" --output "type=local,dest=$runtime_io/payload" -f "$runtime_io/snapshot/containers/Source.Dockerfile" "$runtime_io/snapshot" > "$runtime_io/logs/payload-build.log" 2>&1 || fail "Payload build failed; inspect $runtime_io/logs/payload-build.log. Nothing replayed or deleted."
+  (( $(stat -c %s "$runtime_io/logs/payload-build.log") <= 67108864 )) || fail "Payload output limit; retained intent is uncertain"
   printf '%s\n' linux "$source" "$context" "$endpoint" "$engine" "$(sha256sum "$runtime_io/payload/SHA256SUMS" | cut -d ' ' -f1)" > "$runtime_io/receipt"
   verify
 fi
