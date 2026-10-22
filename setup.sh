@@ -78,15 +78,19 @@ HOME_OWNER="$(stat -c '%u' "$HARNESS_HOME")"
   "HARNESS_HOME must be owned by $(id -un): $HARNESS_HOME"
 
 missing_prereqs=()
+
 command -v python3 >/dev/null 2>&1 || missing_prereqs+=(python3)
 command -v make >/dev/null 2>&1 || missing_prereqs+=(make)
 command -v g++ >/dev/null 2>&1 || missing_prereqs+=(g++)
+command -v bwrap >/dev/null 2>&1 || missing_prereqs+=(bubblewrap)
+command -v socat >/dev/null 2>&1 || missing_prereqs+=(socat)
+command -v unshare >/dev/null 2>&1 || missing_prereqs+=(util-linux)
 
 if ((${#missing_prereqs[@]})); then
-  echo "Missing Linux/WSL native build prerequisites: ${missing_prereqs[*]}"
+  echo "Missing Linux/WSL prerequisites: ${missing_prereqs[*]}"
 
   if (( ! INSTALL_PREREQS )) && [[ -t 0 ]]; then
-    read -r -p "Install python3, make, and build-essential with sudo apt? [y/N] " reply || true
+    read -r -p "Install required Linux/WSL packages with sudo apt? [y/N] " reply || true
     [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]] && INSTALL_PREREQS=1
   fi
 
@@ -97,8 +101,32 @@ if ((${#missing_prereqs[@]})); then
   require_command apt-get
 
   sudo apt-get update
-  sudo apt-get install -y python3 make build-essential
+  sudo apt-get install -y \
+    python3 \
+    make \
+    build-essential \
+    bubblewrap \
+    socat \
+    util-linux
 fi
+
+echo "Validating sandbox prerequisites..."
+
+require_command bwrap
+require_command socat
+require_command unshare
+
+unshare -Ur /usr/bin/true \
+  || die "This host blocks unprivileged user namespaces. Contact the Linux/WSL administrator; host execution remains disabled."
+
+bwrap \
+  --unshare-user \
+  --ro-bind / / \
+  --proc /proc \
+  /usr/bin/true \
+  || die "Bubblewrap is installed but cannot start an unprivileged sandbox."
+
+echo "Sandbox prerequisites are available."
 
 echo "Installing project dependencies..."
 npm install --include=optional
