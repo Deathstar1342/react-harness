@@ -20,6 +20,7 @@ import { Settings } from './settings.js';
 import { ProviderSettings, type ProviderSettingsFile } from './provider-settings.js';
 import { ConnectionDiagnostics } from './diagnostics.js';
 import { Changes } from './changes.js';
+import {Checkpoints,captureCheckpointInput,previewCheckpointInput,restoreCheckpointInput} from './checkpoints.js';
 import { Removal } from './removal.js';
 import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
@@ -50,6 +51,7 @@ export async function createApp(options: AppOptions) {
   const runtime = new Runtime(store,provider,tools,config,hooks,installs);
   const skillWrites=new SkillWrites(runtime);
   const changes = new Changes(store,tools,runtime);
+  const checkpoints=new Checkpoints(store,runtime);
   const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root),config.executionMode==='container');
   const settings = new Settings(store,config.approvalMode);
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
@@ -170,6 +172,7 @@ export async function createApp(options: AppOptions) {
     else if (route.startsWith('/api/chats/:id')) projectId=store.chat(params.id).projectId;
     else if (route.startsWith('/api/approvals/:id')) projectId=store.chat(store.getApproval(params.id).chatId).projectId;
     if (projectId) {
+      if(['POST','PUT','PATCH'].includes(request.method)&&!route.endsWith('/editor')&&!route.endsWith('/control'))store.assertCheckpointSafe(projectId);
       if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
       requests.set(request.id,projectId);
@@ -327,6 +330,16 @@ export async function createApp(options: AppOptions) {
   });
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
+  app.get('/api/projects/:id/checkpoints',async request=>checkpoints.list(paramId(request.params)));
+  app.post('/api/projects/:id/checkpoints',async(request,reply)=>reply.code(201).send(await checkpoints.capture(paramId(request.params),captureCheckpointInput.parse(request.body))));
+  app.post('/api/projects/:id/checkpoints/:checkpointId/preview',async request=>{
+    const {id,checkpointId}=z.strictObject({id:z.uuid(),checkpointId:z.uuid()}).parse(request.params);
+    return checkpoints.preview(id,checkpointId,previewCheckpointInput.parse(request.body));
+  });
+  app.post('/api/projects/:id/checkpoints/:checkpointId/restore',async request=>{
+    const {id,checkpointId}=z.strictObject({id:z.uuid(),checkpointId:z.uuid()}).parse(request.params);
+    return checkpoints.restore(id,checkpointId,restoreCheckpointInput.parse(request.body));
+  });
   app.get('/api/projects/:id/changes',async request=>changes.list(paramId(request.params)));
   app.get('/api/projects/:id/diff',async request=>{
     const {path} = z.object({path:z.string().min(1).max(4096)}).strict().parse(request.query);

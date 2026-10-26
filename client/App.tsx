@@ -2,6 +2,7 @@ import {TransferDialog} from './TransferDialog';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallHistory } from './InstallControls';
 import {RecoveryPanel} from './RecoveryPanel';
+import {CheckpointsPanel} from './CheckpointsPanel';
 import {
   ArrowDown,
   ArrowUp,
@@ -75,6 +76,7 @@ export function Conversation({
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [recoveryOpen,setRecoveryOpen]=useState(false);
+  const [checkpointsOpen,setCheckpointsOpen]=useState(false);
   const [recoveryInstall,setRecoveryInstall]=useState<string>();
   const [recoveryProcess,setRecoveryProcess]=useState<string>();
   const recoveryControl=useRef<HTMLButtonElement>(null);
@@ -236,8 +238,10 @@ export function Conversation({
           <button ref={recoveryControl} className="text-button" aria-expanded={recoveryOpen} aria-controls="chat-recovery" onClick={()=>setRecoveryOpen(open=>!open)}>Recovery</button>
           <button className="text-button" aria-expanded={skillsOpen} onClick={()=>setSkillsOpen(true)}>Skills</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
+          <button className="text-button" aria-expanded={checkpointsOpen} onClick={()=>setCheckpointsOpen(true)}>Checkpoints</button>
         </div>
       </header>
+      {checkpointsOpen&&<CheckpointsPanel key={chatId} projectId={project.id} chatId={chatId} revision={fileRevision} onClose={()=>setCheckpointsOpen(false)}/>}
       {recoveryOpen&&<RecoveryPanel detail={detail} connected={connection==='connected'} onClose={()=>{setRecoveryOpen(false);recoveryControl.current?.focus();}} onNavigate={navigateRecovery}/>}
       {planOpen && <section id="chat-plan" className="chat-plan" aria-label="Current plan" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){setPlanOpen(false);planControl.current?.focus();}}}>
         <div className="plan-toolbar">

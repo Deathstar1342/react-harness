@@ -52,7 +52,7 @@ export interface ModelProvider { complete(input: { model: string; messages: Mode
 export interface FileEntry { path: string; name: string; type: 'file' | 'directory'; size?: number }
 export interface FileSnapshot { path: string; content: string; hash: string | null }
 export type FileChangeStatus = 'recording' | 'confirmed' | 'rejected' | 'unknown' | 'undoing' | 'undone';
-export interface FileChange { id: string; projectId: string; chatId: string; path: string; createdAt: string; status: FileChangeStatus; before: FileSnapshot; after: FileSnapshot; destination?: {before: FileSnapshot; after: FileSnapshot} }
+export interface FileChange { source?:'agent'|'checkpoint';restoreId?:string; id: string; projectId: string; chatId: string; path: string; createdAt: string; status: FileChangeStatus; before: FileSnapshot; after: FileSnapshot; destination?: {before: FileSnapshot; after: FileSnapshot} }
 export type FileChangeSummary = Omit<FileChange, 'before' | 'after' | 'destination'> & {destinationPath?: string};
 export interface ProjectChanges { git: { status: string; path: string; originalPath?: string }[]; gitError?: string; history: FileChangeSummary[]; historyTruncated: boolean }
 export interface ChangePreview { change: FileChangeSummary; diff: string; undoDiff: string; expectedHash: string | null; previewToken?: string; reason?: string }
@@ -85,6 +85,7 @@ export interface ToolService {
   list(root: string, path?: string): Promise<FileEntry[]>;
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string): Promise<FileSnapshot>;
   setDirty(root: string, path: string, owner: string, dirty: boolean): void;
+  checkpointScope?<T>(root:string,operation:(access:CheckpointAccess)=>Promise<T>):Promise<T>;
   restore?(root: string, path: string, before: FileSnapshot, expectedHash: string | null, beforeMutation: () => void): Promise<FileSnapshot>;
   restoreMove?(root: string, change: FileChange, beforeMutation: () => void): Promise<void>;
   // Trusted lifecycle boundary; reject active operations/leases, await resource
@@ -172,3 +173,10 @@ export interface HostProjectTransferPicker {
   authorizeImport():Promise<{code:string}|null>;
   authorizeExport(managedFolder:string):Promise<{code:string}|null>;
 }
+
+/** Human-only project file recovery; never a native tool or execution authority. */
+export interface CheckpointSummary {id:string;projectId:string;chatId:string;label:string;createdAt:string;digest:string;files:number;bytes:number;excludedCount:number;excluded:{path:string;reason:string}[]}
+export interface CheckpointRestoreSummary {id:string;checkpointId:string;createdAt:string;status:'claiming'|'uncertain'|'done';files:number}
+export interface CheckpointList {items:CheckpointSummary[];restores:CheckpointRestoreSummary[];limits:{files:number;fileBytes:number;bytes:number;projectCount:number}}
+export interface CheckpointPreview {checkpoint:CheckpointSummary;previewToken:string;revision:string;expiresAt:number;changes:{path:string;kind:'add'|'remove'|'modify';diff:string}[];currentExcludedCount:number}
+export interface CheckpointAccess {read(root:string,input:string):Promise<FileSnapshot>;restore(root:string,file:FileSnapshot&{mode:number},expected:FileSnapshot,beforeMutation:()=>void):Promise<FileSnapshot>}

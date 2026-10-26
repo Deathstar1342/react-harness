@@ -10,7 +10,7 @@ function DiffText({text}: {text:string}) {
 export function ChangeReview({preview,busy,onUndo}: {preview:ChangePreview;busy:boolean;onUndo:()=>void}) {
   return <section aria-label="Recorded write preview">
     <h3>{preview.change.path}</h3>
-    <p>Recorded agent write · {preview.change.status} · {new Date(preview.change.createdAt).toLocaleString()}</p>
+    <p>Recorded {preview.change.source==='checkpoint'?'checkpoint restore':'agent write'} · {preview.change.status} · {new Date(preview.change.createdAt).toLocaleString()}</p>
     <p className="muted">Chat {preview.change.chatId}</p>
     <h4>Recorded write</h4><DiffText text={preview.diff || 'No textual difference.'} />
     <h4>Undo preview</h4><DiffText text={preview.undoDiff || 'No textual difference.'} />
@@ -69,8 +69,8 @@ export function ChangesPanel({projectId,revision,onClose}: {projectId:string;rev
         {data?.gitError && <p role="status">{data.gitError}</p>}
         {data?.git.map(item=><button className="change-file" disabled={busy} key={item.path} onClick={()=>void select('git',item.path)}><code>{item.status}</code> {item.originalPath ? `${item.originalPath} → ` : ''}{item.path}</button>)}
         {data && !data.git.length && !data.gitError && <p>No current Git changes.</p>}
-        <h3>Recorded agent writes</h3>
-        <p className="muted">Recorded file edits, deletions and moves. Changed or uncertain files cannot be undone.</p>
+        <h3>Recorded file changes</h3>
+        <p className="muted">Recorded agent and checkpoint file edits, deletions and moves. Changed or uncertain files cannot be undone.</p>
         {data?.history.map(item=><button className="change-file" disabled={busy} key={item.id} onClick={()=>void select('write',item.id)}>{item.path}{item.destinationPath ? ` → ${item.destinationPath}` : ''} <small>{item.status} · {new Date(item.createdAt).toLocaleString()}</small></button>)}
         {data && !data.history.length && <p>No recorded writes.</p>}
         {data?.historyTruncated && <p role="status">Showing the latest 100 records. Older history is not displayed.</p>}

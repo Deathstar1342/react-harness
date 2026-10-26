@@ -1,3 +1,4 @@
+import {checkpointCatalog,checkpointMetadata,checkpointJournalIntegrity,checkpointSaveJournal} from './checkpoint-state.js';
 import {nativeStateDatabase,nativeStateStore} from './native-state-database.js';
 import {nativePrivateUnit,nativePrivatePath} from './native-storage.js';
 import { DatabaseSync } from 'node:sqlite';
@@ -64,6 +65,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS install_requests (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, chat_id TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS installs_project ON install_requests(project_id);
     `);
+    // The new checkpoint SQL target participates in the exact native final-COMMIT gate too.
+    database.exec('BEGIN IMMEDIATE');
+    try {database.exec('CREATE TABLE IF NOT EXISTS checkpoint_effects (restore_id TEXT NOT NULL, ordinal INTEGER NOT NULL, change_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL, PRIMARY KEY(restore_id,ordinal))');database.exec('COMMIT');}
+    catch(error){database.exec('ROLLBACK');throw error;}
     database.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run('prototype:protocol',JSON.stringify('native-tools-v1'));
     return database;
     }catch(error){database.close();throw error;}
@@ -123,6 +128,7 @@ export class Store {
     this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(project),projectId);
   }
   private deleteChatRecords(chatId: string) {
+    this.assertCheckpointSafe(this.chat(chatId).projectId);
     this.assertSkillRemovalSafe(this.chat(chatId).projectId);
     for(const row of this.db.prepare("SELECT key,data FROM state WHERE key LIKE 'skills:write:%' AND json_extract(data,'$.chatId')=?").all(chatId)) {
       const claim=JSON.parse(String(row.data)) as {id:string};
@@ -144,15 +150,21 @@ export class Store {
   deleteProject(projectId: string) {
     this.project(projectId);
     this.assertInstallRemovalSafe(projectId);
+    this.assertCheckpointSafe(projectId);
     this.assertSkillRemovalSafe(projectId);
     this.transaction(()=>{
       for (const chat of this.chats(projectId)) this.deleteChatRecords(chat.id);
       this.db.prepare('DELETE FROM file_changes WHERE project_id=?').run(projectId);
+      this.db.prepare("DELETE FROM checkpoint_effects WHERE restore_id IN (SELECT json_extract(data,'$.id') FROM state WHERE key LIKE 'checkpoint-restore:v1:%' AND json_extract(data,'$.projectId')=?)").run(projectId);
+      this.db.prepare("DELETE FROM state WHERE (key LIKE 'checkpoint:v1:%' OR key LIKE 'checkpoint-meta:v1:%' OR key LIKE 'checkpoint-restore:v1:%') AND json_extract(data,'$.projectId')=?").run(projectId);
       this.db.prepare('DELETE FROM projects WHERE id=?').run(projectId);
     });
   }
   chats(projectId?: string): Chat[] {
     return (projectId ? this.db.prepare('SELECT data FROM chats WHERE project_id=?').all(projectId) : this.db.prepare('SELECT data FROM chats').all()).map(row => JSON.parse(String(row.data))).sort((a: Chat,b: Chat) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+  assertCheckpointSafe(projectId:string) {
+    if(checkpointMetadata(this).journals.some(j=>j.journal.projectId===projectId&&j.journal.status!=='done'))throw Object.assign(new Error('A checkpoint restore is uncertain. Retained file effects cannot be replayed or waived; inspect checkpoint history.'),{statusCode:409});
   }
   assertSkillRemovalSafe(projectId:string) {
     const unresolved=this.db.prepare("SELECT state.key FROM state JOIN chats ON chats.id=json_extract(state.data,'$.chatId') WHERE state.key LIKE 'skills:write:%' AND chats.project_id=? AND json_extract(state.data,'$.status') IN ('recording','unknown') LIMIT 1").get(projectId);
@@ -289,6 +301,13 @@ export class Store {
   recover():void {
     if(!this.transactionEvents)return this.transaction(()=>this.recover());
     recoverProcessJobs(this);
+    for(const {journal} of checkpointCatalog(this).journals)if(journal.status==='claiming') {
+      journal.status='uncertain';journal.integrity=checkpointJournalIntegrity(journal);checkpointSaveJournal(this,journal);
+      for(const chat of this.chats(journal.projectId)) {
+        const event=this.event(chat.id,'goal_uncertainty',{restoreId:journal.id,reason:'Checkpoint restore interrupted; retained file effects cannot be replayed or waived.'});
+        const goal=goalOf(this,chat.id);if(goal){addGoalUncertainty(this,chat.id,goal,[event.id]);goal.status='blocked';goal.reason='Checkpoint restore interrupted; inspect retained history.';saveGoal(this,chat.id,goal);}
+      }
+    }
     this.db.prepare("UPDATE file_changes SET status='unknown' WHERE status IN ('recording','undoing')").run();
     for (const chat of this.chats()) {
       const run = this.getState<RunState|null>(`run:${chat.id}`,null);

@@ -60,6 +60,7 @@ export class ProcessJobs {
     if(!record)throw new Error('Process handle is unavailable.');return record;
   }
   assertIdle(projectId:string,owner?:symbol) {
+    this.store.assertCheckpointSafe(projectId);
     const root=this.store.project(projectId).path;
     assertMutationIdle(root,owner);
     const blocker=processRecords(this.store,projectId).find(record=>processBlocking(record) && !(owner!==undefined && this.live.get(record.id)?.owner===owner));

@@ -9,7 +9,7 @@ const preview: ChangePreview={change:{id:'write',projectId:'p',chatId:'chat',pat
 it('labels current Git attribution separately from recorded writes and keeps undo behind selection',()=>{
   const html=renderToStaticMarkup(createElement(ChangesPanel,{projectId:'p',revision:0,onClose:()=>{}}));
   expect(html).toContain('Current project Git changes');expect(html).toContain('pre-existing work, manual edits and shell effects');
-  expect(html).toContain('Recorded agent writes');expect(html).toContain('Recorded file edits, deletions and moves');
+  expect(html).toContain('Recorded file changes');expect(html).toContain('Recorded agent and checkpoint file edits, deletions and moves');
   expect(html).not.toContain('Undo this change');
 });
 it('shows explicit forward and undo previews with escaped content and a human undo action',()=>{
@@ -30,4 +30,9 @@ it('keeps Changes closed by default and outside the mounted editor container',()
   expect(source).toContain('onChanges={() => setChanges(true)}');
   expect(source).toContain('{changes && project && <ChangesPanel');
   expect(source).toMatch(/<FilePanel\s+key=\{project.id\}/);
+});
+
+it('distinguishes explicit human checkpoint restores from agent writes in normal file history',()=>{
+ const html=renderToStaticMarkup(createElement(ChangeReview,{preview:{...preview,change:{...preview.change,source:'checkpoint',restoreId:'restore'}},busy:false,onUndo:()=>{}}));
+ expect(html).toContain('Recorded checkpoint restore');expect(html).not.toContain('Recorded agent write');
 });

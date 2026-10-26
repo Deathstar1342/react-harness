@@ -61,6 +61,15 @@ export class WorkspaceTools implements ToolService {
     this.removing.add(id);
     return cleanup.catch(error=>{this.quarantined.add(id);throw error;}).then(()=>{this.files.assertRemovable(root);return mutation();}).finally(()=>this.removing.delete(id));
   }
+  /** Same reservation, operation/dirty lease gate and confirmed worker drain as managed export.
+   * Callback receives only the existing guarded file service; no public capability escapes. */
+  checkpointScope<T>(root:string,operation:(access:import('../../shared/types.js').CheckpointAccess)=>Promise<T>):Promise<T> {
+    return this.mutate(root,async()=>await this.removeScopeInternal(root,undefined,async()=>{
+      this.sandbox.validateRoot(root);this.files.assertRemovable(root);
+      return operation({read:(base,input)=>{if(base!==root)throw new ToolError('Checkpoint root mismatch');return this.files.read(base,input);},
+        restore:(base,file,expected,claim)=>{if(base!==root)throw new ToolError('Checkpoint root mismatch');return this.files.restoreCheckpoint(base,file,expected,claim);}});
+    }));
+  }
   private maxOutputBytes: number;
   private maxReportBytes: number;
   constructor(options: WorkspaceToolsOptions = {}) {

@@ -2,7 +2,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {Worker} from 'node:worker_threads';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
-import {mkdtempSync,mkdirSync,lstatSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,lstatSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -93,3 +93,32 @@ it('invalid private selectors never reach the host and an unmapped private Store
  expect(()=>authority.nativePrivateUnit(()=>authority.nativePrivatePath(path.join(tmpdir(),'outside.sqlite'),true))).toThrow(/outside/);
  expect(()=>authority.nativePrivateUnit(()=>{})).toThrow(/recovery/);expect(Atomics.load(t.words,0)).toBe(0);
 });
+it.each(['capture','restore'])('checkpoint actual disk SQLite exact native target final COMMIT veto; phase=%s',async phase=>{
+ const t=await peer(),root=mkdtempSync(path.join(realpathSync(tmpdir()),'native-checkpoint-')),state=path.join(root,'state'),workspace=path.join(root,'workspace'),projectRoot=path.join(workspace,randomUUID());mkdirSync(state);mkdirSync(projectRoot,{recursive:true});
+ const dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(path.dirname.bind(path)):undefined,absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockImplementation(path.isAbsolute.bind(path)):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;
+ const authority=await import('../server/native-storage.js'),policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state,config:path.join(root,'config'),control:path.join(root,'control'),workspace},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
+ authority.installNativeStorage(policy,async()=>({...policy.record,gateId:'a'.repeat(64),issuedAt:Date.now(),expiresAt:Date.now()+10000}),t.descriptor);
+ const {Store}=await import('../server/store.js'),{Runtime}=await import('../server/runtime.js'),{WorkspaceTools}=await import('../server/tools/index.js'),{Checkpoints}=await import('../server/checkpoints.js'),{readConfig}=await import('../server/config.js'),fs=await import('node:fs/promises');
+ const filename=path.join(state,'state.sqlite'),store=new Store(filename),project=store.createProject('Native checkpoints',projectRoot),chat=store.createChat(project.id,'Human boundary','review'),tools=new WorkspaceTools(),runtime=new Runtime(store,{models:async()=>[],complete:async()=>{throw new Error('No provider');}},tools,readConfig({HARNESS_DATA_DIR:state,HARNESS_WORKSPACE_ROOT:workspace}),{instructions:()=>''}),service=new Checkpoints(store,runtime);
+ await new Promise(resolve=>setTimeout(resolve,30));
+ const requests:{body:{targets:{root:string;relative:string;kind:string;mode:string}[]}}[]=[];t.worker.on('message',value=>{if(value.request)requests.push(value.request);});await new Promise(resolve=>setTimeout(resolve,30));requests.length=0;
+ try{
+  await fs.writeFile(path.join(projectRoot,'a.ts'),'before');
+  let checkpoint:Awaited<ReturnType<typeof service.capture>>|undefined,preview:Awaited<ReturnType<typeof service.preview>>|undefined;
+  if(phase==='restore'){checkpoint=await service.capture(project.id,{chatId:chat.id,label:'Native original'});await fs.writeFile(path.join(projectRoot,'a.ts'),'after');preview=await service.preview(project.id,checkpoint.id,{chatId:chat.id});}
+  const original=store.transaction.bind(store);vi.spyOn(store,'transaction').mockImplementation(fn=>original(()=>{
+   const value=fn();
+   if(phase==='capture'||store.db.prepare("SELECT 1 FROM state WHERE key LIKE 'checkpoint-restore:v1:%' AND json_extract(data,'$.status')='done'").get())Atomics.store(t.words,1,Atomics.load(t.words,0)+1);
+   return value;
+  }));
+  if(phase==='capture')await expect(service.capture(project.id,{chatId:chat.id,label:'Veto'})).rejects.toThrow(/recovery/);
+  else await expect(service.restore(project.id,checkpoint!.id,{chatId:chat.id,previewToken:preview!.previewToken,revision:preview!.revision,confirmation:'restore-files'})).rejects.toThrow(/recovery/);
+  expect(await fs.readFile(path.join(projectRoot,'a.ts'),'utf8')).toBe('before');
+  const inspect=new DatabaseSync(filename,{readOnly:true});try{
+   if(phase==='capture')expect(inspect.prepare("SELECT 1 FROM state WHERE key LIKE 'checkpoint:v1:%'").get()).toBeUndefined();
+   else{const row=inspect.prepare("SELECT data FROM state WHERE key LIKE 'checkpoint-restore:v1:%'").get();expect(JSON.parse(String(row!.data)).status).toBe('claiming');expect(inspect.prepare("SELECT status FROM file_changes").get()!.status).toBe('recording');}
+  }finally{inspect.close();}
+  await new Promise(resolve=>setTimeout(resolve,30));expect(requests.length).toBeGreaterThan(1);for(const request of requests)expect(request.body.targets).toEqual([{root:'state',relative:'state.sqlite',kind:'sqlite',mode:'existing'}]);
+  expect(()=>store.setState('checkpoint:forbidden',true)).toThrow(/recovery/);
+ }finally{vi.restoreAllMocks();await runtime.close().catch(()=>{});await tools.dispose();store.close();dirname?.mockRestore();absolute?.mockRestore();normalize?.mockRestore();}
+},30000);
