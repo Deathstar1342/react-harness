@@ -1,5 +1,7 @@
 # Product improvements — M33–M37
 
+Delivery 2026-10-26: all five improvements are complete. M37 reviewed implementation main1eccc68c3b5fdb23f7ac3f468451bdf8bd6083e4 passed every required exact-main CI step and all9fresh source-bound artifact audits. [Current delivery status](docs/STATUS.md) and [M37 independent evidence](docs/reports/milestone-37-coordinator.md). The milestone heartbeat closes;M21 packaging remains paused/preserved,no M38 or release is authorized.
+
 Kickoff: 2026-10-26. The user cancelled the proposed native-local deployment simplification and explicitly requested five tangible improvements, milestones and the previous dedicated-chat/coordinator-review workflow. Keep the current Electron/container deployment. No local-deployment rewrite or unsandboxed host execution is authorized by this sequence.
 
 The reviewed M32 implementation remains the foundation. Baseline public main9cb3660232d8f0c38ddcabb748eceb0dc97a8b2b adds only the user's executable bit on setup.sh after the reviewed closeout; preserve that change. M21 packaging and all earlier worktrees/unreviewed source/notices changes remain paused and untouched. No release or M38.
