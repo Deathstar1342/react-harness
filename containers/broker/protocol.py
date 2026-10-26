@@ -83,7 +83,10 @@ def command_request(body):
     op = body['operation']
     require(type(op) is dict)
     if op.get('kind') == 'shell':
-        exact(op, ['kind', 'command'])
+        exact(op, ['kind', 'command'] + (['previewPort'] if 'previewPort' in op else []))
+        if 'previewPort' in op:
+            bounded_int(op['previewPort'], 1024, 65535)
+            require(op['previewPort'] != 3128, 'RESERVED_WORKER_PORT')
         require(type(op['command']) is str and 0 < len(op['command'].encode('utf-8')) <= 65536 and '\0' not in op['command'])
     else:
         exact(op, ['kind', 'args'])

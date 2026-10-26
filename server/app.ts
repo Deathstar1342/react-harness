@@ -30,6 +30,8 @@ import type { BackendLifecycle } from './lifecycle.js';
 import { InstallService, type InstallHelper } from './installs.js';
 import type { TransportAuth } from './transport-auth.js';
 import {ContainerInstallClient} from './container-installs.js';
+import {previewProject} from './preview-state.js';
+import {Previews,previewPath} from './previews.js';
 import {recoveryView} from './recovery.js';
 import {workerAvailable} from './worker-client.js';
 import { containerExecutionUnavailable } from './container-contract.js';
@@ -49,6 +51,7 @@ export async function createApp(options: AppOptions) {
   const managedComplete=hooks.complete ?? createManagedHooks(provider,store,config).complete!;
   const installs=new InstallService(store,config.models.critic,managedComplete,options.packageHelper,Date.now,20000,config.executionMode==='container'?{connect:(id,target)=>ContainerInstallClient.connect(store.project(id).path,target),available:workerAvailable}:undefined);
   const runtime = new Runtime(store,provider,tools,config,hooks,installs);
+  const previews=new Previews(store,runtime.processes,config.executionMode==='container');
   const skillWrites=new SkillWrites(runtime);
   const changes = new Changes(store,tools,runtime);
   const checkpoints=new Checkpoints(store,runtime);
@@ -163,6 +166,13 @@ export async function createApp(options: AppOptions) {
     const route=request.routeOptions.url ?? '';
     // This synchronous read validates bounded chat/project rows in its snapshot.
     if(route==='/api/chats/:id/recovery')return;
+    if(route.startsWith('/api/projects/:id/previews')){
+      const {id}=z.strictObject({id:z.uuid()}).passthrough().parse(request.params),project=previewProject(store,id);
+      if(request.method==='POST')store.assertCheckpointSafe(id);
+      if(resetting.has(id))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
+      if(project.removalError&&request.method==='POST')throw Object.assign(new Error('Project removal needs recovery'),{statusCode:409});
+      requests.set(request.id,id);return;
+    }
     if (request.method==='DELETE' || route.endsWith('/deletion-preview') || route.endsWith('/events')) return;
     if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { if(resetting.size)throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});requests.set(request.id,'*');return; }
     const params=request.params as {id?:string};
@@ -330,6 +340,18 @@ export async function createApp(options: AppOptions) {
   });
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
+  app.get('/api/projects/:id/previews',async request=>{z.strictObject({}).parse(request.query);return previews.list(paramId(request.params));});
+  app.post('/api/projects/:id/previews/:processId/open',async request=>{
+    const {id,processId}=z.strictObject({id:z.uuid(),processId:z.uuid()}).parse(request.params);z.strictObject({}).parse(request.body);return previews.open(id,processId);
+  });
+  app.post('/api/projects/:id/previews/:previewId/resource',async request=>{
+    const {id,previewId}=z.strictObject({id:z.uuid(),previewId:z.uuid()}).parse(request.params);const input=z.strictObject({path:previewPath}).parse(request.body);
+    const abort=new AbortController();const cancel=()=>abort.abort();request.raw.once('aborted',cancel);
+    try{return await previews.resource(id,previewId,input.path,abort.signal);}finally{request.raw.off('aborted',cancel);}
+  });
+  app.post('/api/projects/:id/previews/:previewId/close',async request=>{
+    const {id,previewId}=z.strictObject({id:z.uuid(),previewId:z.uuid()}).parse(request.params);z.strictObject({}).parse(request.body);return previews.close(id,previewId);
+  });
   app.get('/api/projects/:id/checkpoints',async request=>checkpoints.list(paramId(request.params)));
   app.post('/api/projects/:id/checkpoints',async(request,reply)=>reply.code(201).send(await checkpoints.capture(paramId(request.params),captureCheckpointInput.parse(request.body))));
   app.post('/api/projects/:id/checkpoints/:checkpointId/preview',async request=>{
@@ -398,7 +420,7 @@ export async function createApp(options: AppOptions) {
   }
   // Persist runtime/goal shutdown before an embedding owner's onClose hook can
   // close its supplied Store. Runtime.close is idempotent for the later hook.
-  app.addHook('preClose',async()=>{closing=true;installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
+  app.addHook('preClose',async()=>{closing=true;previews.shutdown();installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
   return {app,store,runtime,installs};
 }

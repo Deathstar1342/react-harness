@@ -6,7 +6,7 @@ COPY helper/core.py helper/apt_adapter.py /opt/abyssus-packages/
 COPY containers/container-apt.py /opt/abyssus-packages/container-apt.py
 COPY helper/apt.conf /usr/lib/abyssus-helper/apt.conf
 RUN mkdir -p /usr/lib/abyssus-helper/empty-apt-config /home/worker /cache && chmod 755 /opt/abyssus-packages && touch /var/lib/apt/extended_states
-COPY containers/worker-runner.py containers/worker-bridge.py /opt/abyssus-worker/
+COPY containers/worker-runner.py containers/worker-bridge.py containers/preview-http.py /opt/abyssus-worker/
 COPY containers/broker/egress.py /opt/abyssus-worker/broker/egress.py
 ENV HOME=/home/worker
 # Broker always overrides entrypoint/user/env and resolves the immutable image ID.

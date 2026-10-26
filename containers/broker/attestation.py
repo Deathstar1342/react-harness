@@ -97,7 +97,7 @@ class Attestor:
         self.expected_env = json.loads(docker.call(['image','inspect',docker.image]))[0]['Config'].get('Env',[])
         require(not any(item.split('=',1)[0] in ('LD_PRELOAD','LD_LIBRARY_PATH','PYTHONPATH','PYTHONHOME','BASH_ENV','ENV') for item in self.expected_env), 'IMAGE_ENV_INJECTION')
         self.base = self.inspect(docker.image)
-        for member,source in [('opt/abyssus-worker/worker-runner.py','containers/worker-runner.py'),('opt/abyssus-worker/worker-bridge.py','containers/worker-bridge.py'),('opt/abyssus-worker/broker/egress.py','containers/broker/egress.py'),('opt/abyssus-packages/apt_adapter.py','helper/apt_adapter.py'),('opt/abyssus-packages/core.py','helper/core.py'),('opt/abyssus-packages/container-apt.py','containers/container-apt.py')]:
+        for member,source in [('opt/abyssus-worker/preview-http.py','containers/preview-http.py'),('opt/abyssus-worker/worker-runner.py','containers/worker-runner.py'),('opt/abyssus-worker/worker-bridge.py','containers/worker-bridge.py'),('opt/abyssus-worker/broker/egress.py','containers/broker/egress.py'),('opt/abyssus-packages/apt_adapter.py','helper/apt_adapter.py'),('opt/abyssus-packages/core.py','helper/core.py'),('opt/abyssus-packages/container-apt.py','containers/container-apt.py')]:
             require(self.base.get(member,{}).get('sha256') == hashlib.sha256((docker.source / source).read_bytes()).hexdigest(), 'IMAGE_SOURCE_MISMATCH')
         self.base_digest = digest(self.base)
         self.verified = {docker.image: self.base_digest}

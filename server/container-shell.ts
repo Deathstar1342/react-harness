@@ -19,7 +19,7 @@ export class ContainerShellPool {
   private client(){return this.transport??=this.connect();}
   private id(context:ToolContext){return hash(JSON.stringify([context.projectRoot,context.chatId,context.agentId]));}
   run(context:ToolContext,command:string,timeoutMs=30000,beforeRun?:()=>Promise<void>,afterRun?:(result:CommandResult)=>Promise<void>):Promise<CommandResult> {
-    return this.execute(context,{kind:'shell',command},timeoutMs,1000000,beforeRun,afterRun);
+    return this.execute(context,{kind:'shell',command,...(context.previewPort===undefined?{}:{previewPort:context.previewPort})},timeoutMs,1000000,beforeRun,afterRun);
   }
   git(context:ToolContext,args:string[],limit:number):Promise<CommandResult> {
     return this.execute(context,{kind:'git',args},15000,limit);

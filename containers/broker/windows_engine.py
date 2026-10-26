@@ -144,6 +144,14 @@ class WindowsEngine(Docker):
             project_pin.verify();self.storage_barrier()
         project_id=digest([self.storage_id,project,identity['volume'],identity['fileId']])
         return root,masks,{'storageId':self.storage_id,'projectId':project_id,'imageId':self.images.get(project_id,self.image),'layout':digest(masks)}
+    def preview_project_id(self,project):
+        require(type(project) is str and UUID.fullmatch(project),'INVALID_MANAGED_PROJECT')
+        self.storage_barrier()
+        with PinnedPath(self.storage/'workspace'/project,directory=True) as pin:
+            identity=pin.identity
+            result=digest([self.storage_id,project,identity['volume'],identity['fileId']])
+            pin.verify()
+        return result
     def bind_project_mapping(self,binding,session,workspace):
         require(self.project_mapper is None,'PROJECT_MAPPING_ALREADY_BOUND')
         from project_identity import ProjectIdentity

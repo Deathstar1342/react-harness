@@ -159,6 +159,20 @@ class Docker:
         request.update(uid=self.uid, gid=self.gid, proofKey=proof_key)
         return process, (json.dumps(request, separators=(',', ':')) + '\n').encode()
 
+    def preview_project_id(self, project):
+        root=self.storage/'workspace'/project
+        require(root.is_dir() and not root.is_symlink() and root.resolve()==root,'PREVIEW_ROOT_CHANGED')
+        require((self.storage/'workspace/.storage-id').read_text().strip()==self.storage_id,'STORAGE_CHANGED')
+        info=root.stat()
+        return digest([self.storage_id,project,info.st_dev,info.st_ino])
+
+    def preview_verify(self, owned):
+        self.storage_barrier()
+        require(self.preview_project_id(owned['project'])==owned['identity']['projectId'],'PREVIEW_ROOT_CHANGED')
+        self.attestor.verify(owned['identity']['imageId'])
+        self.resources.verify(self.resources.find(owned['container']))
+        self.verify(owned)
+
     def close(self, context):
         owned = self.contexts.get(context)
         if not owned:
