@@ -39,6 +39,7 @@ export function readQueue(store:Store,projectId:string):QueueState{return native
  if(typeof p?.root!=='string'||typeof p.data!=='string')throw queueError('Project unavailable.',503);
  const original=z.strictObject({id:uuid,name:z.string().min(1).max(100),path:z.string().min(1).max(4096),createdAt:stamp,removalError:z.string().max(4000).optional()}).parse(parseNativeJSON(p.data,8192));if(original.id!==projectId||original.path!==p.root)throw queueError('Project identity unavailable.',503);
  const row=store.db.prepare("SELECT CASE WHEN typeof(data)='text' AND length(CAST(data AS BLOB))<=600000 THEN data END AS data FROM task_queues WHERE project_id=?").get(projectId);
+ if(!row&&store.db.prepare('SELECT 1 AS retained FROM queue_links WHERE project_id=? OR chat_id IN (SELECT id FROM chats WHERE project_id=?) LIMIT 1').get(projectId,projectId))throw queueError('Original queue envelope unavailable; retained claim links require inspection.',503);
  if(!row)return {schema:'queue-v1',projectId,root:p.root,rootIdentity:queueRoot(p.root),revision:0,status:'paused',reason:'Start explicitly to run the listed tasks.',session:null,policyDigest:null,scope:[],tasks:[]};
  if(typeof row.data!=='string')throw queueError('Queue storage unavailable.',503);
  let q:QueueState;try{q=validate(parseNativeJSON(row.data,600000));}catch{throw queueError('Queue storage unavailable.',503);}
