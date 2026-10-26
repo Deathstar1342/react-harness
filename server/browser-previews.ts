@@ -44,6 +44,7 @@ export class BrowserPreviews {
     const index=stages.indexOf(probe.stage);if(index<2){probe.stage=stages[index+1];probe.stageAt=this.now();probe.ticket=random();probe.nonce=probe.nonces[probe.stage];probe.used=false;return {step:this.step(probe)};}
     // Revocation of every probe document/host precedes a fresh distinct project host.
     probe.closed=true;this.previews.close(projectId,probe.sessionId);
+    if(this.probes.size+this.views.size>=8)throw new Error('Browser preview capability capacity reached; wait for retained probes to expire');
     const session=this.previews.open(projectId,probe.processId),view:View={id:session.id,projectId,principal,documentId:probe.documentId,host:random()+'.localhost',port:probe.port,ticket:random(),used:false,expiresAt:Math.min(session.expiresAt,this.now()+120000),probeId:probe.id,abort:new AbortController()};probe.viewId=view.id;this.views.set(view.id,view);
     return {view:{id:view.id,documentId:view.documentId,url:this.origin(view.host,view.port)+`/?__abyssus_boot=${view.ticket}`,expiresAt:view.expiresAt}};
   }

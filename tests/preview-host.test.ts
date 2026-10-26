@@ -45,3 +45,7 @@ it('late protected private hit revokes a granted linked view and all counters/ex
 it('refuses mismatched public Host port and reused/expired probe tickets without a worker read',async()=>{
  const t=await fixture();expect(()=>t.browser.start(t.projectId,t.processId,t.principal,t.documentId,{headers:{host:'127.0.0.1:7301'}} as never)).toThrow(/public port/);const step=t.start();expect((await t.get(step.url)).statusCode).toBe(200);expect((await t.get(step.url)).statusCode).toBe(403);t.advance(25001);expect((await t.get(step.url)).statusCode).toBe(410);expect(t.resources).toBe(0);
 });
+
+it('terminal proof cannot exceed the combined eight-record bound with retained probe tombstones',async()=>{
+ const t=await fixture();for(let n=0;n<7;n++)t.start();await expect(t.grant()).rejects.toThrow(/capacity/);expect((t.browser as any).probes.size).toBe(8);expect((t.browser as any).views.size).toBe(0);expect(t.resources).toBe(0);
+});
