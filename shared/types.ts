@@ -199,5 +199,5 @@ export interface InspectorView {
  schema:'inspector-v1';chatId:string;projectId:string;observedAt:string;revision:string;latestEventId:number;
  requests:({seq:number;request:InspectorRequest|null;unavailable:boolean})[];nextCursor:string|null;
  summary:{requests:number;reportedRequests:number;unknownRequests:number;conflictedRequests:number;inputTokens:number|null;outputTokens:number|null;elapsedMs:number|null;truncated:boolean;unavailable:number};
- links:InspectorLink[];linksUnavailable:number;legacy:boolean;limits:{page:number;summaryRows:number;summaryBytes:number};
+ links:InspectorLink[];linksUnavailable:number;legacy:boolean;legacyTruncated:boolean;legacyUnavailable:number;limits:{page:number;summaryRows:number;summaryBytes:number};
 }

@@ -40,8 +40,9 @@ function observe(store:Store,chatId:string,cursor?:string):InspectorView{
  // Fixed bounded legacy existence observation. Legacy rows are never backfilled.
  if(summary.requests===0)summary.elapsedMs=null;
  if(summary.reportedRequests===0){summary.inputTokens=null;summary.outputTokens=null;}
- const legacyRows=store.db.prepare("SELECT CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND type IN ('usage','provider_request') ORDER BY id DESC LIMIT 65").all(L.rowBytes,chatId);
- const legacy=legacyRows.length>64||legacyRows.slice(0,64).some(row=>{const d=parse(row.data);return !d||!identity.safeParse(d.inspectorRequestId).success;});
+ const legacyRows=store.db.prepare(`WITH usage_recent AS (SELECT id,data,length(CAST(data AS BLOB)) AS bytes FROM events WHERE chat_id=? AND type='usage' ORDER BY id DESC LIMIT 65),request_recent AS (SELECT id,data,length(CAST(data AS BLOB)) AS bytes FROM events WHERE chat_id=? AND type='provider_request' ORDER BY id DESC LIMIT 65),recent AS (SELECT * FROM (SELECT * FROM usage_recent UNION ALL SELECT * FROM request_recent) ORDER BY id DESC LIMIT 65),bounded AS (SELECT *,SUM(CASE WHEN bytes<=8192 THEN bytes ELSE 0 END) OVER(ORDER BY id DESC) AS total FROM recent) SELECT id,CASE WHEN bytes<=8192 AND total<=131072 THEN data END AS data FROM bounded ORDER BY id DESC`).all(chatId,chatId);
+ const legacyTruncated=legacyRows.length>64;let legacy=false,legacyUnavailable=0;
+ for(const row of legacyRows.slice(0,64)){const d=parse(row.data);if(!d){legacyUnavailable++;continue;}if(!identity.safeParse(d.inspectorRequestId).success||!store.db.prepare('SELECT 1 AS yes FROM inspector_requests WHERE id=? AND chat_id=? AND project_id=? AND start_event<?').get(String(d.inspectorRequestId),chatId,projectId,row.id))legacy=true;}
  const links:InspectorLink[]=[];let linksUnavailable=0;
  // Original evidence is bounded before parsing; no test bodies/frames/ledgers are fetched.
  const events=store.db.prepare(`WITH recent AS (SELECT id,type,data,length(CAST(data AS BLOB)) AS bytes FROM events WHERE chat_id=? AND type IN ('file_changed','tests','plan_progress') ORDER BY id DESC LIMIT ?),bounded AS (SELECT *,SUM(CASE WHEN bytes<=? THEN bytes ELSE 0 END) OVER(ORDER BY id DESC) AS total FROM recent) SELECT id,type,CASE WHEN bytes<=? AND total<=? THEN data END AS data FROM bounded ORDER BY id DESC`).all(chatId,L.evidenceRows,L.rowBytes,L.rowBytes,L.evidenceBytes);
@@ -53,5 +54,5 @@ function observe(store:Store,chatId:string,cursor?:string):InspectorView{
  else if(e.type==='plan_progress'){const step=d;if(step&&plan&&plan.id===step.planId&&plan.version===step.planVersion&&Array.isArray(plan.phases)&&plan.phases.some((v:any)=>v.id===step.phaseId&&Array.isArray(v.steps)&&v.steps.some((s:any)=>s.id===step.stepId))&&[step.planId,step.phaseId,step.stepId].every(v=>identity.safeParse(v).success))links.push({kind:'plan',id:String(step.stepId),eventId,planStep:{planId:String(step.planId),planVersion:Number(step.planVersion),phaseId:String(step.phaseId),stepId:String(step.stepId)}});else linksUnavailable++;}
  }
  const nextCursor=page.length>L.page?Buffer.from(JSON.stringify({v:1,chatId,revision,upper,before:requests.at(-1)!.seq})).toString('base64url'):null;
- return {schema:'inspector-v1',chatId,projectId,observedAt:new Date().toISOString(),revision,latestEventId,requests,nextCursor,summary,links,linksUnavailable,legacy,limits:{page:L.page,summaryRows:L.summaryRows,summaryBytes:L.summaryBytes}};
+ return {schema:'inspector-v1',chatId,projectId,observedAt:new Date().toISOString(),revision,latestEventId,requests,nextCursor,summary,links,linksUnavailable,legacy,legacyTruncated,legacyUnavailable,limits:{page:L.page,summaryRows:L.summaryRows,summaryBytes:L.summaryBytes}};
 }
