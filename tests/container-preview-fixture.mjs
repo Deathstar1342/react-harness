@@ -1,6 +1,6 @@
 // CI-only controller fixture mounted read-only into a disposable controller.
 // Uses production Store/Runtime/WorkspaceTools/WorkerClient/Previews with no mocks.
-import fs from 'node:fs/promises';
+import {publishFixtureInfo} from './fixture-info.mjs';
 import {randomUUID} from 'node:crypto';
 import {Store} from '/app/server/store.ts';
 import {WorkspaceTools} from '/app/server/tools/index.ts';
@@ -19,5 +19,5 @@ if(!chat){
 }else{processId=store.db.prepare("SELECT json_extract(data,'$.id') AS id FROM state WHERE key LIKE 'process-job:%' LIMIT 1").get().id;}
 app.get('/api/m35-fixture-status',async()=>({starts,providerCalls,processId}));
 await app.listen({host:'0.0.0.0',port:3000});
-await fs.writeFile(privateFile,JSON.stringify({source:process.env.M35_SOURCE,projectId:project.id,chatId:chat.id,processId,pairingCode:auth.pairingCode,starts,instance:randomUUID()}),{mode:0o600});
+await publishFixtureInfo(privateFile,{schema:'connected-preview-fixture-v1',owner:process.env.M35_FIXTURE_OWNER,source:process.env.M35_SOURCE,projectId:project.id,chatId:chat.id,processId,pairingCode:auth.pairingCode,starts,instance:randomUUID()});
 let closing;const close=()=>closing??=(async()=>{await app.close();store.close();process.exit(0);})();for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>void close().catch(()=>{console.error('Connected controller cleanup unverified');process.exitCode=1;}));

@@ -11,10 +11,11 @@ import sys
 import tempfile
 import time
 import uuid
+from fixture_info import read_fixture_info
 os.umask(0o077)
 ROOT=Path(__file__).resolve().parent.parent
 OUT=ROOT/'test-results/container/preview-connected';OUT.mkdir(parents=True,exist_ok=True)
-source=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip();storage=Path(tempfile.mkdtemp(prefix='m35-connected-',dir=os.environ.get('RUNNER_TEMP','/tmp')));storage_id=str(uuid.uuid4());project=str(uuid.uuid4());checks=[];broker=None;controller=None
+source=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip();storage=Path(tempfile.mkdtemp(prefix='m35-connected-',dir=os.environ.get('RUNNER_TEMP','/tmp')));storage_id=str(uuid.uuid4());fixture_owner=str(uuid.uuid4());project=str(uuid.uuid4());checks=[];broker=None;controller=None
 
 def run(args,*,timeout=120,env=None):
     result=subprocess.run(args,cwd=ROOT,capture_output=True,text=True,timeout=timeout,env=env)
@@ -43,25 +44,26 @@ const raw=req.url.split('?')[0],file=raw==='/'?'index.html':raw.slice(1);if(file
         assert broker.poll() is None and time.monotonic()<deadline,'owned broker did not start'
         time.sleep(.1)
     check('actual authenticated private Unix broker session published')
-    args=['docker','create','--init','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--user',f'{os.getuid()}:{os.getgid()}','--tmpfs','/tmp:size=128m,mode=1777','-p','127.0.0.1:3000:3000','-e','HARNESS_EXECUTION_MODE=container','-e','HARNESS_STORAGE_ID='+storage_id,'-e','HARNESS_HOME=/abyssus','-e','M35_PROJECT='+project,'-e','M35_SOURCE='+source]
-    for source_path,target,readonly in [(storage/'state','/abyssus',False),(storage/'config','/abyssus/profile/config',True),(storage/'workspace','/workspace',False),(storage/'runtime/control','/run/abyssus-broker',True),(ROOT/'tests/container-preview-fixture.mjs','/fixtures/main.mjs',True)]:args+=['--mount',f'type=bind,src={source_path},dst={target}'+(',readonly' if readonly else '')]
+    args=['docker','create','--init','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--user',f'{os.getuid()}:{os.getgid()}','--tmpfs','/tmp:size=128m,mode=1777','-p','127.0.0.1:3000:3000','-e','HARNESS_EXECUTION_MODE=container','-e','HARNESS_STORAGE_ID='+storage_id,'-e','HARNESS_HOME=/abyssus','-e','M35_PROJECT='+project,'-e','M35_SOURCE='+source,'-e','M35_FIXTURE_OWNER='+fixture_owner]
+    for source_path,target,readonly in [(storage/'state','/abyssus',False),(storage/'config','/abyssus/profile/config',True),(storage/'workspace','/workspace',False),(storage/'runtime/control','/run/abyssus-broker',True),(ROOT/'tests/container-preview-fixture.mjs','/fixtures/main.mjs',True),(ROOT/'tests/fixture-info.mjs','/fixtures/fixture-info.mjs',True)]:args+=['--mount',f'type=bind,src={source_path},dst={target}'+(',readonly' if readonly else '')]
     args += ['--entrypoint','node',image,'--import','tsx','/fixtures/main.mjs'];controller=run(args);check('only exact owned disposable controller created',bool(re.fullmatch('[a-f0-9]{64}',controller)));run(['docker','start',controller])
     mapping=json.loads(run(['docker','inspect',controller]))[0];check('actual existing public port matches trusted source binding',mapping['HostConfig']['PortBindings']=={'3000/tcp':[{'HostIp':'127.0.0.1','HostPort':'3000'}]} and mapping['NetworkSettings']['Ports']['3000/tcp']==[{'HostIp':'127.0.0.1','HostPort':'3000'}])
     info_file=storage/'state/m35-fixture.json';deadline=time.monotonic()+120
-    while not info_file.exists():
+    info=None
+    while info is None:
         assert time.monotonic()<deadline,'controller readiness deadline'
-        time.sleep(.1)
-    info=json.loads(info_file.read_text());old_instance=info['instance'];check('actual production ProcessJobs claim starts once',info['starts']==1)
+        info=read_fixture_info(info_file,source,fixture_owner,1)
+        if info is None:time.sleep(.1)
+    old_instance=info['instance'];check('actual production ProcessJobs claim starts once',info['starts']==1)
     env=dict(os.environ,M35_CONNECTED_INFO=str(info_file),M35_RECEIPTS=str(OUT),M35_CONNECTED_STAGE='running')
     result=subprocess.run(['node','tests/container-preview-browser.mjs'],cwd=ROOT,env=env,capture_output=True,text=True,timeout=160);(OUT/'browser-running.log').write_text(result.stdout+result.stderr);check('connected real controller API/wire/broker/worker/browser rendered and drained',result.returncode==0)
     run(['docker','stop','--time','90',controller],timeout=100);run(['docker','start',controller]);deadline=time.monotonic()+120
+    info=None
     while time.monotonic()<deadline:
-        try:
-            info=json.loads(info_file.read_text())
-            if info['instance']!=old_instance:break
-        except (FileNotFoundError,json.JSONDecodeError):pass
+        info=read_fixture_info(info_file,source,fixture_owner,0,old_instance)
+        if info is not None:break
         time.sleep(.1)
-    check('same persistent controller fixture restarted without new process',info['instance']!=old_instance and info['starts']==0)
+    check('same persistent controller fixture restarted without new process',info is not None and info['instance']!=old_instance and info['starts']==0)
     env['M35_CONNECTED_STAGE']='recovered';result=subprocess.run(['node','tests/container-preview-browser.mjs'],cwd=ROOT,env=env,capture_output=True,text=True,timeout=90);(OUT/'browser-recovered.log').write_text(result.stdout+result.stderr);check('actual browser recovery sees retained uncertainty and no auto preview/command',result.returncode==0)
     (OUT/'connected.json').write_text(json.dumps({'source':source,'mode':'actual disposable Linux connected production controller/Store/Runtime/WorkspaceTools/Previews/WorkerClient authenticated Unix wire/real broker/actual owned worker/Chrome','controllerImage':image,'workerImage':worker,'checks':checks,'privateStorage':str(storage)},indent=2))
 except BaseException as error:
