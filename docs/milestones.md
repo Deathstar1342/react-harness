@@ -20,6 +20,8 @@ Capture bounded project-code checkpoints and preview/restore coherent sets of fi
 
 ### M35 — Isolated live project preview
 
+Original projection faults now independently refused by the mutable correction (module hash/receipts in coordinator report);valid control still accepted. Child continues native hostile-view tests and separate unresolved browser support contract. Coherent committed source/full final evidence remain required;no delivery or successor.
+
 Core checkpoint `a85ed3c` independently reviewed in a detached physical-D checkout:33 portable process/container and10 controlled HTTP/doubled-broker tests pass. Private-state fault repro found source key-ID, original duplicate-JSON and registered-root consistency gaps;child owns corrections and native hostile-view tests before coherent freeze. Browser interactive support remains unresolved/disabled,not accepted by native evidence. No final handoff/integration/M36. [Current review](reports/milestone-35-coordinator.md).
 
 Dispatched to dedicated Milestone 35 chat `01a17857-0358-7b71-8a37-61f09bc966e3`,isolated physical-D `codex/milestone-35` from published kickoff `d1d0a392378fcf77fc16bf7b8e28b09a17bb7087` after M34 exact-main delivery. Clean identity/commonGit verified before/after dispatch and active initial progress explicitly observed. Before substantial interfaces,review exact owned process/worker/server/port/transport/route/origin/session/network/CSP/secret/lifecycle/freshness/cleanup contract. [Coordinator kickoff](reports/milestone-35-coordinator.md).
