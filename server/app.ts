@@ -1,3 +1,5 @@
+import {BrowserPreviews} from './browser-previews.js';
+import {browserProbeResult} from '../shared/browser-preview.js';
 import {registerNativeStorageScope} from './native-storage.js';
 import {ProjectTransfers,transferCode} from './project-transfers.js';
 import Fastify from 'fastify';
@@ -37,7 +39,7 @@ import {workerAvailable} from './worker-client.js';
 import { containerExecutionUnavailable } from './container-contract.js';
 
 const approvalMode = z.enum(['autonomous','balanced','review']);
-export interface AppOptions { config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
+export interface AppOptions { browserPreview?:'direct'|'source-fixed-3000'; config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
@@ -60,6 +62,8 @@ export async function createApp(options: AppOptions) {
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
+  const browserPreviews=new BrowserPreviews(previews,()=>{if(!options.transportAuth?.browserPairingEnabled)return;const address=app.server.address();if(!address||typeof address==='string')return;if(options.browserPreview==='direct'&&address.address==='127.0.0.1')return address.port;if(options.browserPreview==='source-fixed-3000'&&config.executionMode==='container'&&config.host==='0.0.0.0'&&config.port===3000&&address.port===3000)return 3000;});
+  browserPreviews.register(app);
   const watchers = new Map<string,FSWatcher>();
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
   const recentWrites = new Map<string,{hash:string|null;at:number}>();
@@ -340,14 +344,23 @@ export async function createApp(options: AppOptions) {
   });
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
-  app.get('/api/projects/:id/previews',async request=>{z.strictObject({}).parse(request.query);return previews.list(paramId(request.params));});
+  app.get('/api/projects/:id/previews',async request=>{z.strictObject({}).parse(request.query);return {...previews.list(paramId(request.params)),browserSupported:browserPreviews.supported()};});
+  app.post('/api/projects/:id/previews/:processId/browser-probe',{bodyLimit:2048},async request=>{
+    const {id,processId}=z.strictObject({id:z.uuid(),processId:z.uuid()}).parse(request.params),{documentId}=z.strictObject({documentId:z.uuid()}).parse(request.body);if(!options.transportAuth)throw new Error('Paired browser required');return browserPreviews.start(id,processId,options.transportAuth.browserPrincipal(request),documentId,request);
+  });
+  app.post('/api/projects/:id/previews/browser-advance',{bodyLimit:2048},async request=>{
+    const {id}=z.strictObject({id:z.uuid()}).parse(request.params),input=z.strictObject({documentId:z.uuid(),result:browserProbeResult}).parse(request.body);if(!options.transportAuth)throw new Error('Paired browser required');return browserPreviews.advance(id,options.transportAuth.browserPrincipal(request),input);
+  });
+  app.post('/api/projects/:id/previews/:browserId/browser-close',{bodyLimit:2048},async request=>{
+    const {id,browserId}=z.strictObject({id:z.uuid(),browserId:z.uuid()}).parse(request.params),{documentId}=z.strictObject({documentId:z.uuid()}).parse(request.body);if(!options.transportAuth)throw new Error('Paired browser required');return browserPreviews.close(id,options.transportAuth.browserPrincipal(request),documentId,browserId);
+  });
   app.post('/api/projects/:id/previews/:processId/open',async request=>{
     const {id,processId}=z.strictObject({id:z.uuid(),processId:z.uuid()}).parse(request.params);z.strictObject({}).parse(request.body);return previews.open(id,processId);
   });
-  app.post('/api/projects/:id/previews/:previewId/resource',async request=>{
+  app.post('/api/projects/:id/previews/:previewId/resource',async(request,reply)=>{
     const {id,previewId}=z.strictObject({id:z.uuid(),previewId:z.uuid()}).parse(request.params);const input=z.strictObject({path:previewPath}).parse(request.body);
-    const abort=new AbortController();const cancel=()=>abort.abort();request.raw.once('aborted',cancel);
-    try{return await previews.resource(id,previewId,input.path,abort.signal);}finally{request.raw.off('aborted',cancel);}
+    const abort=new AbortController();const cancel=()=>abort.abort();request.raw.once('aborted',cancel);const close=()=>{if(!reply.raw.writableEnded)abort.abort();};reply.raw.once('close',close);
+    try{return await previews.resource(id,previewId,input.path,abort.signal);}finally{request.raw.off('aborted',cancel);reply.raw.off('close',close);}
   });
   app.post('/api/projects/:id/previews/:previewId/close',async request=>{
     const {id,previewId}=z.strictObject({id:z.uuid(),previewId:z.uuid()}).parse(request.params);z.strictObject({}).parse(request.body);return previews.close(id,previewId);
@@ -420,7 +433,7 @@ export async function createApp(options: AppOptions) {
   }
   // Persist runtime/goal shutdown before an embedding owner's onClose hook can
   // close its supplied Store. Runtime.close is idempotent for the later hook.
-  app.addHook('preClose',async()=>{closing=true;previews.shutdown();installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
+  app.addHook('preClose',async()=>{closing=true;browserPreviews.shutdown();previews.shutdown();installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
-  return {app,store,runtime,installs};
+  return {app,store,runtime,installs,previews,browserPreviews};
 }

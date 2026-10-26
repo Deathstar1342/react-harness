@@ -1,0 +1,29 @@
+// Actual Chrome -> production controller API/Previews -> authenticated WorkerClient
+// -> trusted Docker broker -> actual owned worker/Node React UI. CI only.
+import {chromium,expect} from '@playwright/test';
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import path from 'node:path';
+const infoPath=process.env.M35_CONNECTED_INFO,out=process.env.M35_RECEIPTS,stage=process.env.M35_CONNECTED_STAGE??'running';
+if(!infoPath||!out)throw new Error('Explicit private fixture info/receipt paths required');const info=JSON.parse(await readFile(infoPath,'utf8'));await mkdir(out,{recursive:true});
+const browser=await chromium.launch({channel:'chrome',headless:true});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',error=>errors.push(error.message));await page.goto('http://127.0.0.1:3000');
+ await page.evaluate(async code=>{const result=await fetch('/api/auth/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});if(!result.ok)throw new Error('Fixture pairing failed');},info.pairingCode);await page.reload();
+ await page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:/^Connected preview task/}).click();await page.getByRole('button',{name:'Preview',exact:true}).click();const panel=page.getByRole('region',{name:'Live project preview'});
+ const status=await page.evaluate(async()=>{const result=await fetch('/api/m35-fixture-status');return result.json()});expect(status.starts).toBe(stage==='running'?1:0);expect(status.providerCalls).toBe(0);
+ if(stage==='running'){
+  await expect(panel.getByRole('button',{name:'Open preview',exact:true})).toBeEnabled();await panel.getByRole('button',{name:'Open preview',exact:true}).click();const frame=page.frameLocator('iframe[title="Isolated project preview"]');
+  await expect(frame.getByRole('button',{name:'Count 0',exact:true})).toBeVisible({timeout:45000});await frame.getByRole('button',{name:'Count 0',exact:true}).click();await expect(frame.getByRole('button',{name:'Count 1',exact:true})).toBeVisible();
+  const child=page.frames().find(frame=>frame.url().includes('__abyssus_boot'));
+  const environment=await child.evaluate(async()=>{const value=await fetch(location.origin+'/environment');return value.json()});expect(JSON.stringify(environment)).not.toContain('M35_SYNTHETIC_PRIVATE_PROVIDER');expect(environment.HARNESS_EXECUTION_MODE).toBeUndefined();expect(environment.HARNESS_STORAGE_ID).toBeUndefined();
+  const checkpoint=await page.evaluate(async({projectId,chatId})=>{const result=await fetch(`/api/projects/${projectId}/checkpoints`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId,label:'Must block while owned server writes'})});return {status:result.status,body:await result.text()};},info);expect(checkpoint.status).toBeGreaterThanOrEqual(400);
+  const binding=await page.evaluate(async projectId=>{const result=await fetch(`/api/projects/${projectId}/previews`);return result.json()},info.projectId);expect(binding.entries[0].status).toBe('ready');expect(JSON.stringify(binding)).not.toMatch(/workerBinding|claimId|storageId|sha256:/);
+  await page.screenshot({path:path.join(out,'connected-browser-react.png')});const oldURL=child.url();await panel.getByRole('button',{name:'Close view',exact:true}).click();await expect(page.locator('iframe')).toHaveCount(0);const response=await page.request.get(oldURL);expect(response.status()).toBe(421);
+  await panel.getByRole('button',{name:'Open preview',exact:true}).click();await expect(page.frameLocator('iframe[title="Isolated project preview"]').getByRole('button',{name:'Count 0',exact:true})).toBeVisible({timeout:45000});await panel.getByRole('button',{name:'Stop server',exact:true}).click();await expect(page.locator('iframe')).toHaveCount(0);await expect(panel.getByRole('button',{name:'Open preview',exact:true})).toBeDisabled({timeout:45000});
+  const final=await page.evaluate(async()=>{const result=await fetch('/api/m35-fixture-status');return result.json()});expect(final.starts).toBe(1);expect(final.providerCalls).toBe(0);
+  await writeFile(path.join(out,'connected-browser-running.json'),JSON.stringify({source:info.source,mode:'actual disposable Linux controller API/Previews/authenticated worker wire/real broker/actual owned worker Node React server/actual Chrome gated browser',checks:['real paired app UI','three-stage compatibility before project bytes','root-relative React/CSS/modules and interactive counter','worker lacks controller/provider env','checkpoint blocked while actual writer active','private binding omitted','close revokes old host','fresh checked reopen','exact owned stop and no replay'],checkpointStatus:checkpoint.status,starts:final.starts,providerCalls:final.providerCalls,browser:browser.version(),errors},null,2));
+ }else{
+  await expect(panel.getByRole('button',{name:'Open preview',exact:true})).toBeDisabled();await expect(panel.getByText(/uncertain|interrupted|stopped/).first()).toBeVisible();expect(await page.locator('iframe').count()).toBe(0);await writeFile(path.join(out,'connected-browser-recovered.json'),JSON.stringify({source:info.source,mode:'actual same disposable controller restart/SQLite retained process state/Chrome UI',starts:status.starts,providerCalls:status.providerCalls,checks:['backend restart starts no command/provider/probe/view','old owned process remains observed interrupted/uncertain','no automatic adoption/replay']},null,2));
+ }
+ console.log('PASS M35 connected actual controller/worker/browser:',stage);
+}catch(error){await writeFile(path.join(out,`connected-browser-${stage}-failed.txt`),String(error));throw error;}finally{await browser.close();}

@@ -122,3 +122,21 @@ it.each(['capture','restore'])('checkpoint actual disk SQLite exact native targe
   expect(()=>store.setState('checkpoint:forbidden',true)).toThrow(/recovery/);
  }finally{vi.restoreAllMocks();await runtime.close().catch(()=>{});await tools.dispose();store.close();dirname?.mockRestore();absolute?.mockRestore();normalize?.mockRestore();}
 },30000);
+
+
+it.each(['projection','commit'])('M35 bounded preview uses exact private observer and retains poison after %s fault',async phase=>{
+ const t=await peer(),root=mkdtempSync(path.join(realpathSync(tmpdir()),'native-preview-')),state=path.join(root,'state'),workspace=path.join(root,'workspace'),projectRoot=path.join(workspace,randomUUID());mkdirSync(state);mkdirSync(projectRoot,{recursive:true});
+ const dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(path.dirname.bind(path)):undefined,absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockImplementation(path.isAbsolute.bind(path)):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;
+ const authority=await import('../server/native-storage.js'),policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state,config:path.join(root,'config'),control:path.join(root,'control'),workspace},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
+ authority.installNativeStorage(policy,async()=>({...policy.record,gateId:'c'.repeat(64),issuedAt:Date.now(),expiresAt:Date.now()+10000}),t.descriptor);
+ const {Store}=await import('../server/store.js'),{previewAuthority}=await import('../server/preview-state.js'),filename=path.join(state,'state.sqlite'),store=new Store(filename),project=store.createProject('Native preview',projectRoot),chat=store.createChat(project.id,'Native bound reader','autonomous'),id=randomUUID();store.initializePlanning();
+ const binding={claimId:randomUUID(),binding:'a'.repeat(64),sessionId:randomUUID(),expiresAt:Date.now()+30000,identity:{storageId:t.descriptor.storageId,projectId:'b'.repeat(64),imageId:'sha256:'+'c'.repeat(64),layout:'d'.repeat(64)}};
+ const record={id,projectId:project.id,chatId:chat.id,frameId:'coder',taskId:'architect',generation:0,modeVersion:0,approvalMode:'autonomous',instructionsHash:null,rootIdentity:projectRoot,status:'running',dispatched:true,workerBinding:binding,action:{name:'start_process',args:{command:'controlled native projection fixture',previewPort:3001}}};
+ store.setState('run:'+chat.id,{generation:0,planOnly:false,steering:[],instructionsHash:null,frames:[{id:'architect'},{id:'coder'}]});store.setState('process-job:'+id,record);
+ try{
+  expect(previewAuthority(store,project.id,id).record.id).toBe(id);
+  if(phase==='projection'){Atomics.store(t.words,1,Atomics.load(t.words,0)+1);expect(()=>previewAuthority(store,project.id,id)).toThrow(/recovery/);}
+  else{const missing=randomUUID();Atomics.store(t.words,1,Atomics.load(t.words,0)+2);expect(()=>store.transaction(()=>store.setState('process-job:'+missing,{...record,id:missing}))).toThrow(/recovery/);const inspect=new DatabaseSync(filename,{readOnly:true});try{expect(inspect.prepare('SELECT data FROM state WHERE key=?').get('process-job:'+missing)).toBeUndefined();}finally{inspect.close();}}
+  expect(()=>previewAuthority(store,project.id,id)).toThrow(/recovery/);expect(()=>authority.assertNativeDispatch('preview_read')).toThrow(/recovery/);expect(()=>authority.assertNativeDispatch('preview_close')).toThrow(/recovery/);
+ }finally{store.close();dirname?.mockRestore();absolute?.mockRestore();normalize?.mockRestore();}
+});

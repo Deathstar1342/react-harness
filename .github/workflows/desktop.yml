@@ -53,6 +53,39 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:M34_ELECTRON='1'
           node --import tsx tests/milestone-34-browser.ts
+      - name: Actual gated browser and isolated native project preview (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 6
+        run: |
+          export M35_APP_ROOT="$GITHUB_WORKSPACE/build/app"
+          export M35_UI_OUTPUT="$RUNNER_TEMP/m35-project-ui"
+          export M35_SOURCE="$GITHUB_SHA"
+          export M35_RECEIPTS="$GITHUB_WORKSPACE/test-results/preview/native"
+          export PYTHONPYCACHEPREFIX="$RUNNER_TEMP/m35-python-cache"
+          node node_modules/vite/bin/vite.js build --config tests/preview-vite.config.ts
+          xvfb-run -a node --import tsx tests/milestone-35-native.ts
+          M35_RECEIPTS="$GITHUB_WORKSPACE/test-results/preview/browser" M35_BROWSER_BIND=1 M35_BROWSER_ONLY=1 xvfb-run -a node --import tsx tests/milestone-35-native.ts
+      - name: Actual gated browser and isolated native project preview (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 6
+        run: |
+          $env:M35_APP_ROOT=Join-Path $env:GITHUB_WORKSPACE 'build/app'
+          $env:M35_UI_OUTPUT=Join-Path $env:RUNNER_TEMP 'm35-project-ui'
+          $env:M35_SOURCE=$env:GITHUB_SHA
+          $env:M35_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/preview/native'
+          $env:TEMP=Join-Path $env:RUNNER_TEMP 'm35-temp'
+          New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+          $env:TMP=$env:TEMP
+          $env:TMPDIR=$env:TEMP
+          $env:PYTHONPYCACHEPREFIX=Join-Path $env:RUNNER_TEMP 'm35-python-cache'
+          node node_modules/vite/bin/vite.js build --config tests/preview-vite.config.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --import tsx tests/milestone-35-native.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:M35_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/preview/browser'
+          $env:M35_BROWSER_BIND='1'
+          $env:M35_BROWSER_ONLY='1'
+          node --import tsx tests/milestone-35-native.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -60,3 +93,4 @@ jobs:
           path: |
             test-results/electron-*.png
             test-results/checkpoints/
+            test-results/preview/

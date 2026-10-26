@@ -6,12 +6,8 @@ import {ProcessJobs} from './process-jobs.js';
 import {WorkerClient,type WorkerTransport} from './worker-client.js';
 import type {PreviewEntry,PreviewSession} from '../shared/types.js';
 
-export const previewPath=z.string().min(1).max(2048).refine(value=>{
-  if(!value.startsWith('/')||/[^\x21-\x7e]|[\\#]/.test(value)||/%(?![0-9A-F]{2})/.test(value))return false;
-  const [pathname,query='']=value.split('?',2);
-  if(pathname.includes('//'))return false;
-  try{const decoded=decodeURIComponent(pathname);return !/[\\%?#\x00-\x1f\x7f]/.test(decoded)&&!decoded.split('/').some(part=>part==='.'||part==='..'||/^(?:\.env|\.git|\.ssh|\.aws|\.config)/i.test(part)||part==='@fs'||part==='@id')&&!/%(?:0[0-9A-F]|1[0-9A-F]|7F|25|5C)/.test(query);}catch{return false;}
-},'Canonical bounded preview request target required');
+export {previewPath} from '../shared/preview-policy.js';
+import {previewPath} from '../shared/preview-policy.js';
 const metadata=z.strictObject({handle:z.uuid(),status:z.number().int().min(200).max(599).refine(code=>code<300||code>=400),contentType:z.string().max(128),totalBytes:z.number().int().min(0).max(4*1024*1024)});
 const page=z.strictObject({handle:z.uuid(),offset:z.number().int().nonnegative(),nextOffset:z.number().int().nonnegative(),totalBytes:z.number().int().nonnegative().max(4*1024*1024),data:z.string().max(44000)});
 const media=/^(?:text\/(?:html|plain|css|javascript)|application\/(?:javascript|json|wasm|font-woff)|image\/(?:png|jpeg|gif|webp|svg\+xml|x-icon)|font\/(?:woff2?|ttf|otf))(?:; charset=utf-8)?$/;
@@ -38,8 +34,10 @@ export class Previews {
     const view:PreviewSession={id:randomUUID(),projectId,processId,chatId:record.chatId,generation:record.generation,expiresAt:this.now()+5*60_000};
     this.sessions.set(view.id,{view,binding:binding.binding,workerSession:binding.sessionId,status:'starting',reason:'Waiting for a bounded HTTP response.',active:0,closed:false});return view;
   }
+  assertSession(projectId:string,id:string){this.prune();const entry=this.sessions.get(id);if(!entry||entry.closed||entry.view.projectId!==projectId)throw new Error('Preview session is stale');const {record,binding}=this.bound(projectId,entry.view.processId);if(record.generation!==entry.view.generation||binding.binding!==entry.binding||binding.sessionId!==entry.workerSession)throw new Error('Preview session binding changed');}
   close(projectId:string,id:string){const entry=this.sessions.get(id);if(!entry||entry.view.projectId!==projectId)throw new Error('Preview session is stale');entry.closed=true;this.sessions.delete(id);return {closed:true};}
   async resource(projectId:string,id:string,target:string,signal?:AbortSignal) {
+    signal=AbortSignal.any([AbortSignal.timeout(25000),...(signal?[signal]:[])]);
     target=previewPath.parse(target);this.prune();const entry=this.sessions.get(id);
     if(!entry||entry.view.projectId!==projectId)throw new Error('Preview session is stale');
     const current=()=>{
@@ -53,11 +51,11 @@ export class Previews {
     const token={claimId:binding.claimId,binding:binding.binding};
     try {
       client=await this.connect();current();if(client.sessionId!==binding.sessionId||client.storageId!==binding.identity.storageId)throw new Error('Preview broker session changed');
-      const result=metadata.parse(await client.request('preview_open',{...token,path:target}));handle=result.handle;current();
+      const result=metadata.parse(await client.request('preview_open',{...token,path:target},signal));handle=result.handle;current();
       if(!media.test(result.contentType))throw new Error('Preview response type refused');
       let offset=0;const parts:Buffer[]=[];
       while(offset<result.totalBytes){
-        const item=page.parse(await client.request('preview_read',{...token,handle,offset}));current();
+        const item=page.parse(await client.request('preview_read',{...token,handle,offset},signal));current();
         const bytes=Buffer.from(item.data,'base64');
         if(item.handle!==handle||item.offset!==offset||item.totalBytes!==result.totalBytes||bytes.length===0||bytes.length>32768||bytes.toString('base64')!==item.data||item.nextOffset!==offset+bytes.length||item.nextOffset>result.totalBytes)throw new Error('Preview response sequence refused');
         parts.push(bytes);offset=item.nextOffset;
@@ -65,7 +63,7 @@ export class Previews {
       current();if(target==='/'){entry.status=result.status>=200&&result.status<300?'ready':'failed';entry.reason=entry.status==='ready'?'Current owned server response loaded. Reload explicitly to observe changes.':'Server returned an HTTP failure; its process remains tracked.';}
       return {status:result.status,contentType:result.contentType,body:Buffer.concat(parts,result.totalBytes).toString('base64')};
     }catch{if(!entry.closed){entry.status='failed';entry.reason='Preview response failed or binding changed. Server process remains tracked; no start or replay occurred.';}throw new Error('Preview response unavailable; inspect the owned process and reload deliberately.');}
-    finally{entry.active--;if(client&&handle)try{await client.request('preview_close',{...token,handle});}catch{/* bounded observation buffer expires; never retry execution or clear ownership */}}
+    finally{entry.active--;if(client&&handle)try{await client.request('preview_close',{...token,handle},AbortSignal.timeout(2000));}catch{/* bounded observation buffer expires; never retry execution or clear ownership */}}
   }
   shutdown(){this.closing=true;for(const entry of this.sessions.values())entry.closed=true;this.sessions.clear();}
 }

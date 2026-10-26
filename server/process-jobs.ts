@@ -29,6 +29,8 @@ export interface ProcessRecord extends ProcessJob, ProcessOrigin {
 const nonterminal=(job:ProcessJob)=>job.status==='starting'||job.status==='running';
 export const processBlocking=(job:ProcessJob)=>nonterminal(job)||job.status==='uncertain';
 const rootIdentity=(root:string)=>{const canonical=rootPathSync(root),info=lstatSync(canonical,{bigint:true});if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Managed project identity changed');return `${canonical}:${info.dev}:${info.ino}:${info.birthtimeNs}`;};
+interface LiveProcess {controller:AbortController;promise:Promise<void>;owner:symbol;release:()=>void;preview?:{binding:WorkerBinding;identity:string}}
+const previewIdentity=(record:{id:string;projectId:string;chatId:string;frameId:string;taskId:string;generation:number;modeVersion:number;approvalMode:ApprovalMode;instructionsHash:string|null;skillsHash?:string|null;rootIdentity?:string|null},port:unknown)=>JSON.stringify([record.id,record.projectId,record.chatId,record.frameId,record.taskId,record.generation,record.modeVersion,record.approvalMode,record.instructionsHash,record.skillsHash??null,record.rootIdentity??null,port]);
 const stateKey=(id:string)=>`process-job:${id}`;
 export function processRecords(store:Store,projectId?:string,chatId?:string):ProcessRecord[] {
   return store.db.prepare("SELECT data FROM state WHERE key LIKE 'process-job:%' AND (? IS NULL OR json_extract(data,'$.projectId')=?) AND (? IS NULL OR json_extract(data,'$.chatId')=?) ORDER BY rowid").all(projectId??null,projectId??null,chatId??null,chatId??null).map(row=>JSON.parse(String(row.data)));
@@ -57,7 +59,7 @@ export function recoverProcessJobs(store:Store) {
 /** Owns only authorized sandbox jobs. Completion callbacks store observations;
  * they never schedule models or mutate another frame's pending/native calls. */
 export class ProcessJobs {
-  private live=new Map<string,{controller:AbortController;promise:Promise<void>;owner:symbol;release:()=>void}>();
+  private live=new Map<string,LiveProcess>();
   private closing=false;
   private outputCarry=new Map<string,string>();
   constructor(private store:Store,private tools:ToolService,private secrets:()=>string[]=()=>[],private freshSkills?:(chatId:string)=>Promise<void>,private skillBinding?:(chatId:string)=>string) {}
@@ -109,7 +111,7 @@ export class ProcessJobs {
     const record:ProcessRecord={...origin,id,action,rootIdentity:identity,status:'starting',createdAt:now,updatedAt:now,output:'',baseOffset:0,endOffset:0,truncated:false,outputEvents:0,dispatched:false};
     try {this.store.transaction(()=>{this.assertIdle(origin.projectId,reservation.owner);this.store.setState(stateKey(id),record);lifecycle(this.store,record);});}
     catch(error){reservation.release();throw error;}
-    const live={controller,owner:reservation.owner,release:reservation.release,promise:Promise.resolve()};
+    const live:LiveProcess={controller,owner:reservation.owner,release:reservation.release,promise:Promise.resolve()};
     this.live.set(id,live);
     // Start after publication of the private capability; never before claim COMMIT.
     live.promise=Promise.resolve().then(()=>this.run(record,live));
@@ -119,14 +121,15 @@ export class ProcessJobs {
   previewBinding(projectId:string,id:string) {
     const {record,project}=previewAuthority(this.store,projectId,id),live=this.live.get(id);
     if(this.closing||record.status!=='running'||record.dispatched!==1||record.cancellationRequested===1||!live||live.controller.signal.aborted||!record.workerBinding||!record.rootIdentity||record.rootIdentity!==rootIdentity(project.path)||record.port===null)throw new Error('Preview process binding is stale or unavailable');
+    if(!live.preview||JSON.stringify(record.workerBinding)!==JSON.stringify(live.preview.binding)||previewIdentity(record,record.port)!==live.preview.identity)throw new Error('Preview durable/live binding changed');
     return {record,binding:preparedSchema.parse(record.workerBinding),port:record.port};
   }
-  private async run(record:ProcessRecord,live:{controller:AbortController;owner:symbol;release:()=>void}) {
+  private async run(record:ProcessRecord,live:LiveProcess) {
     let acknowledged=false,cleanupConfirmed=false,result:ToolResult|undefined,persistenceFailed=false;
     const outputBuffer=nativeOutputBuffer(output=>this.output(record.id,output));
     const context:ToolContext={projectRoot:this.store.project(record.projectId).path,chatId:record.chatId,agentId:record.id,signal:live.controller.signal,mutationOwner:live.owner,previewPort:record.action.args.previewPort as number|undefined,
       prepareCommand:async()=>{this.validate(record,live.owner);const instructions=await readProjectInstructions(this.tools,context.projectRoot,record.targets);if(instructions.hash!==record.instructionsHash)throw new Error('Applicable guidance changed before process dispatch.');await this.freshSkills?.(record.chatId);this.validate(record,live.owner);},
-      beforeCommand:binding=>{this.store.transaction(()=>{this.validate(record,live.owner);const current=this.get(record.id);current.status='running';current.dispatched=true;if(binding)current.workerBinding=preparedSchema.parse(binding);if(current.rootIdentity!==rootIdentity(context.projectRoot))throw new Error('Managed project identity changed before dispatch');if(binding)this.store.setState('worker-authorization:'+binding.claimId,{binding,processId:record.id,chatId:record.chatId,callId:record.callId,commandId:record.commandId});current.updatedAt=new Date().toISOString();this.store.setState(stateKey(record.id),current);});acknowledged=true;},
+      beforeCommand:binding=>{this.store.transaction(()=>{this.validate(record,live.owner);const current=this.get(record.id);current.status='running';current.dispatched=true;if(binding)current.workerBinding=preparedSchema.parse(binding);if(current.rootIdentity!==rootIdentity(context.projectRoot))throw new Error('Managed project identity changed before dispatch');if(binding)this.store.setState('worker-authorization:'+binding.claimId,{binding,processId:record.id,chatId:record.chatId,callId:record.callId,commandId:record.commandId});current.updatedAt=new Date().toISOString();this.store.setState(stateKey(record.id),current);});if(binding)live.preview={binding:preparedSchema.parse(binding),identity:previewIdentity(record,record.action.args.previewPort)};acknowledged=true;},
       onOutput:output=>{if(persistenceFailed)return;try{outputBuffer.write(output);}catch{persistenceFailed=true;live.controller.abort();}},
     };
     try {

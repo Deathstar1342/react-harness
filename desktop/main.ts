@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, realpathSync, lstatSync, readdirSync } from 'node:fs';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
+import {NativePreview,previewScheme} from './preview.js';
 import { DocumentGuard } from './document-guard.js';
 import { ContainerDesktopController } from './container-controller.js';
 import { hostStoragePath } from '../server/container-contract.js';
@@ -13,10 +14,11 @@ const appRoot=fileURLToPath(new URL('../',import.meta.url));
 app.setName('abysSUS');
 nativeTheme.themeSource='dark';
 app.enableSandbox();
-protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}}]);
+protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}},previewScheme]);
 let window:BrowserWindow|undefined,quitting=false,closing=false;
 const documents=new DocumentGuard();
 const controller=new ContainerDesktopController(appRoot);
+const previews=new NativePreview(()=>window,()=>controller.target(),()=>documents.sessionId);
 let picked:{id:string;path:string;storageId:string;mode:'existing'|'initialize'}|undefined;
 const selectionSchema=z.object({path:z.string().max(4096),storageId:z.uuid()}).strict();
 if(!app.requestSingleInstanceLock())app.quit();
@@ -68,9 +70,9 @@ else {
     window.webContents.on('will-redirect',event=>event.preventDefault());
     window.webContents.on('will-attach-webview',event=>event.preventDefault());
     window.webContents.on('will-prevent-unload',()=>{}); // dirty editor veto remains effective
-    window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame)documents.documentChanged();});
+    window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame){documents.documentChanged();void previews.drain().catch(()=>{});}});
     window.webContents.on('render-process-gone',()=>{
-      documents.documentChanged();documents.edited(true); // Unsaved text may have been lost.
+      void previews.drain().catch(()=>{});documents.documentChanged();documents.edited(true); // Unsaved text may have been lost.
       const crashedWindow=window!;
       void dialog.showMessageBox(crashedWindow,{type:'warning',title:'Window stopped',message:'The window stopped. Backend work remains tracked.',detail:'Unsaved editor text may have been lost. Reopen the window to inspect recorded state; actions are not replayed.',buttons:['Keep open','Reopen window'],defaultId:0,cancelId:0}).then(result=>{if(result.response===1&&window===crashedWindow&&!quitting){documents.edited(false);crashedWindow.destroy();createWindow();}});
     });
@@ -84,12 +86,16 @@ else {
     try {
       const result=await dialog.showMessageBox(window,{type:'question',title:'Close abysSUS?',message:documents.dirty?'Unsaved editor changes will be lost.':'Close abysSUS and stop its backend?',detail:'Active tools and system-install calls must finish local cleanup. System changes are not rolled back. Recorded uncertain outcomes remain for review.',buttons:['Keep open','Close and wait'],defaultId:0,cancelId:0});
       if(result.response!==1)return;
-      documents.check(ticket);thaw=await freezeWindow(ticket);
+      documents.check(ticket);thaw=await freezeWindow(ticket);await previews.drain();
       await controller.stop();documents.check(ticket);quitting=true;window.destroy();app.quit();
     }catch{await dialog.showMessageBox(window,{type:'error',message:'Close was not completed. The window is preserved.',detail:'Editor changes or failed/unverified backend cleanup require review. Ownership remains while the backend is alive. Inspect recovery, then deliberately retry the close check; nothing was killed or replayed.'});}
     finally{thaw?.();documents.end(ticket);closing=false;}
   }
   const handler=(channel:string,fn:(input:unknown)=>unknown)=>ipcMain.handle(channel,(event,input)=>{validateSender(event,window?.webContents);return fn(input);});
+  handler('desktop:preview-open',input=>{if(documents.busy)throw new Error('Wait for the current transition');return previews.open(input);});
+  handler('desktop:preview-bounds',input=>previews.move(input));
+  handler('desktop:preview-reload',input=>{if(documents.busy)throw new Error('Wait for the current transition');return previews.reload(input);});
+  handler('desktop:preview-close',input=>previews.close(input));
   handler('desktop:status',()=>documents.status(controller.state));
   handler('desktop:dirty',input=>{documents.edited(z.boolean().parse(input));});
   handler('desktop:container-check',async()=>{if(documents.busy)throw new Error('Wait for the current transition.');return controller.inventory();});
@@ -117,7 +123,7 @@ else {
     try {
       const result=await dialog.showMessageBox(window!,{type:'question',title:'Open persistent storage',message:selected.mode==='initialize'?'Initialize this empty app storage folder?':'Open this existing app storage?',detail:selected.path+'\nProjects, chats, settings and dependencies stay here. Docker images and engine cache use separate engine storage; this choice does not relocate them.',buttons:['Cancel','Open workspace'],defaultId:0,cancelId:0});
       if(result.response!==1)return documents.status(controller.state);
-      documents.check(ticket);thaw=await freezeWindow(ticket);
+      documents.check(ticket);thaw=await freezeWindow(ticket);await previews.drain();
       // Persist the deliberate selection before launch, preserving partial setup for recovery.
       mkdirSync(path.dirname(selectionFile),{recursive:true});
       const temporary=selectionFile+'.tmp';writeFileSync(temporary,JSON.stringify({path:selected.path,storageId:selected.storageId}),{mode:0o600});renameSync(temporary,selectionFile);
@@ -134,7 +140,7 @@ else {
       if(!controller.selection)throw new Error('Open storage first.');
       const answer=await dialog.showMessageBox(window!,{type:'question',message:'Restart the owned runtime?',detail:'Waits for active work and installs to drain. Persistent data remains; goals and uncertain work do not replay.',buttons:['Cancel','Restart'],defaultId:0,cancelId:0});
       if(answer.response!==1)return documents.status(controller.state);
-      documents.check(ticket);thaw=await freezeWindow(ticket);await controller.stop();documents.check(ticket);
+      documents.check(ticket);thaw=await freezeWindow(ticket);await previews.drain();await controller.stop();documents.check(ticket);
       const status=await controller.start(controller.selection,'existing');started=true;documents.check(ticket);documents.publish(status);window!.destroy();createWindow();return status;
     }catch(error){if(started)await controller.stop();throw error;}finally{thaw?.();documents.end(ticket);}
   });

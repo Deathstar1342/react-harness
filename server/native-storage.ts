@@ -57,7 +57,8 @@ export function nativePrivatePath(filename:string,creating=false){
 
 /** Final native worker wire check; observing/cleaning up never renews a scope. */
 export function assertNativeDispatch(op:string){
- if(['redeem_storage','storage_check','hello','desktop_hello','observe','install_status','transfer_observe','cancel','close','shutdown','transfer_cancel','transfer_release','preview_read','preview_close'].includes(op))return;
+ if(op==='preview_read'||op==='preview_close'){const active=current();active?.state?.assertHealthy();return;}
+ if(['redeem_storage','storage_check','hello','desktop_hello','observe','install_status','transfer_observe','cancel','close','shutdown','transfer_cancel','transfer_release'].includes(op))return;
  if(!['prepare','activate','install_hello','install_prepare','install_authorize','install_execute','install_reconcile','transfer_begin','transfer_receipt','reset','preview_open'].includes(op))throw new Error('Unknown native worker operation');
  const active=current();if(!active)throw new Error('Native storage authority is not authenticated');
  active.state?.assertHealthy();

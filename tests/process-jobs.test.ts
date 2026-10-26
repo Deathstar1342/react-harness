@@ -1,5 +1,5 @@
 import {Previews} from '../server/previews.js';
-import {previewRecords,previewAuthority} from '../server/preview-state.js';
+import {previewRecord,previewRecords,previewProject,previewAuthority} from '../server/preview-state.js';
 import {randomUUID} from 'node:crypto';
 import {rename} from 'node:fs/promises';
 import {validateAction} from '../server/tool-registry.js';
@@ -57,7 +57,7 @@ describe('durable owned process lifecycle (portable synthetic executor)',()=>{
     expect(()=>t.jobs.start(t.origin,{name:'start_process',args:{command:'second'}})).toThrow('mutation');
     t.setup.resolve();await t.started.promise;
     expect(processRecords(t.store,t.project.id)[0].status).toBe('running');
-    t.context!.onOutput!('Ã©'.repeat(40000));
+    t.context!.onOutput!('é'.repeat(40000));
     const output=await t.jobs.observe(handle.id,t.chat.id,['coder'],0,8);
     expect(Buffer.byteLength(output.output)).toBe(8);expect(output.endOffset).toBe(64000);expect(output.truncated).toBe(true);
     await expect(t.jobs.observe(handle.id,t.chat.id,['other'])).rejects.toThrow('belong');
@@ -157,6 +157,24 @@ describe('M35 exact preview process admission (portable disk SQLite and doubled 
     }
     t.store.setState('process-job:'+handle.id,record);
     t.store.setState('run:'+t.chat.id,{...t.state,padding:'x'.repeat(2097153)});expect(()=>previewAuthority(t.store,t.project.id,handle.id)).toThrow();t.store.setState('run:'+t.chat.id,run);
+  });
+  it('rejects source-key/embedded IDs, registered root disagreement and duplicates in original private JSON',async()=>{
+    const t=await fixture([],3001),handle=t.start();t.setup.resolve();await t.started.promise;
+    const processKey='process-job:'+handle.id,runKey='run:'+t.chat.id;
+    const processRaw=String(t.store.db.prepare('SELECT data FROM state WHERE key=?').get(processKey)!.data),runRaw=String(t.store.db.prepare('SELECT data FROM state WHERE key=?').get(runKey)!.data);
+    const chatRaw=String(t.store.db.prepare('SELECT data FROM chats WHERE id=?').get(t.chat.id)!.data),projectRaw=String(t.store.db.prepare('SELECT data FROM projects WHERE id=?').get(t.project.id)!.data);
+    const substituted=JSON.parse(processRaw);substituted.id=randomUUID();t.store.setState(processKey,substituted);expect(()=>previewRecord(t.store,handle.id)).toThrow(/key/);expect(()=>previewRecords(t.store,t.project.id)).toThrow(/identity/);
+    for(const raw of [processRaw.replace('"generation":0','"generation":0,"generation":1'),processRaw.replace('"previewPort":3001','"previewPort":3001,"previewPort":3128'),processRaw.replace('"storageId":','"layout":"e", "storageId":')]){
+      t.store.db.prepare('UPDATE state SET data=? WHERE key=?').run(raw,processKey);expect(()=>previewRecord(t.store,handle.id)).toThrow();expect(()=>previewRecords(t.store,t.project.id)).toThrow();
+    }
+    t.store.db.prepare('UPDATE state SET data=? WHERE key=?').run(processRaw,processKey);
+    for(const raw of [runRaw.replace('"generation":0','"generation":0,"generation":1'),runRaw.replace('"id":"coder"','"id":"coder","id":"foreign"'),runRaw.replace('"messages":[]','"messages":[],"messages":[{"content":"hidden"}]')]){
+      t.store.db.prepare('UPDATE state SET data=? WHERE key=?').run(raw,runKey);expect(()=>previewAuthority(t.store,t.project.id,handle.id)).toThrow();
+    }
+    t.store.db.prepare('UPDATE state SET data=? WHERE key=?').run(runRaw,runKey);
+    t.store.db.prepare('UPDATE chats SET data=? WHERE id=?').run(chatRaw.replace('"modeVersion":0','"modeVersion":0,"modeVersion":1'),t.chat.id);expect(()=>previewAuthority(t.store,t.project.id,handle.id)).toThrow();t.store.db.prepare('UPDATE chats SET data=? WHERE id=?').run(chatRaw,t.chat.id);
+    t.store.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify({...JSON.parse(projectRaw),path:t.root}),t.project.id);expect(()=>previewProject(t.store,t.project.id)).toThrow();
+    t.store.db.prepare('UPDATE projects SET data=? WHERE id=?').run(projectRaw.replace('"id":','"path":"substituted","id":'),t.project.id);expect(()=>previewProject(t.store,t.project.id)).toThrow();t.store.db.prepare('UPDATE projects SET data=? WHERE id=?').run(projectRaw,t.project.id);
   });
   it('bounds and closes exact response pages, exposes no capability and never retries a lost open',async()=>{
     const t=await fixture([],3001),handle=t.start();t.setup.resolve();await t.started.promise;const ops:string[]=[];

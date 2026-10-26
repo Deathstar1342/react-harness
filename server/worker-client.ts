@@ -29,7 +29,7 @@ export function workerCanonical(value:unknown):string {
 }
 export const workerMac=(value:unknown,key:string)=>createHmac('sha256',key).update(workerCanonical(value)).digest('hex');
 export class WorkerError extends Error {constructor(readonly code:string){super(code);}}
-export interface WorkerTransport {request(op:string,body:unknown):Promise<unknown>;sessionId:string;storageId:string}
+export interface WorkerTransport {request(op:string,body:unknown,signal?:AbortSignal):Promise<unknown>;sessionId:string;storageId:string}
 export class WorkerClient implements WorkerTransport {
   private static nativeClient:WorkerClient|undefined;
   private constructor(private descriptor:z.infer<typeof descriptorSchema>){}
@@ -56,17 +56,20 @@ export class WorkerClient implements WorkerTransport {
     z.object({storageId:z.literal(record.storageId),launchId:z.literal(record.launchId),redeemed:z.literal(true)}).strict().parse(await client.request('redeem_storage',{proofId:record.proofId}));
     policy.verifyRoots();WorkerClient.nativeClient=client;return client;
   }
-  request(op:string,body:unknown):Promise<unknown> {
+  request(op:string,body:unknown,signal?:AbortSignal):Promise<unknown> {
     if(!('socket' in this.descriptor))assertNativeDispatch(op);
+    signal?.throwIfAborted();
     const nonce=randomBytes(32).toString('hex');
     const unsigned={protocol:workerProtocol,sessionId:this.sessionId,nonce,expiresAt:Date.now()+30000,op,body};
     const wire=workerCanonical({...unsigned,mac:workerMac(unsigned,this.descriptor.key)})+'\n';
     if(Buffer.byteLength(wire)>262144)throw new WorkerError('WORKER_REQUEST_LIMIT');
     return new Promise((resolve,reject)=>{
       const socket='socket' in this.descriptor?connect(this.descriptor.socket):connect({host:this.descriptor.host,port:this.descriptor.port}),parts:Buffer[]=[];let size=0,settled=false;
-      const finish=(error?:Error,value?:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);socket.destroy();error?reject(error):resolve(value);};
+      const finish=(error?:Error,value?:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',cancel);socket.destroy();error?reject(error):resolve(value);};
+      const cancel=()=>finish(new WorkerError('WORKER_REPLY_UNCERTAIN'));
       const timer=setTimeout(()=>finish(new WorkerError('WORKER_REPLY_UNCERTAIN')),40000);
-      socket.once('connect',()=>{try{if(!('socket' in this.descriptor))assertNativeDispatch(op);socket.write(wire);}catch(error){finish(error instanceof Error?error:new WorkerError('NATIVE_DISPATCH_REFUSED'));}});
+      signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted){cancel();return;}
+      socket.once('connect',()=>{if(settled)return;try{if(!('socket' in this.descriptor))assertNativeDispatch(op);socket.write(wire);}catch(error){finish(error instanceof Error?error:new WorkerError('NATIVE_DISPATCH_REFUSED'));}});
       socket.on('data',(chunk:Buffer)=>{
         size+=chunk.length;if(size>262144)return finish(new WorkerError('WORKER_REPLY_LIMIT'));parts.push(chunk);
         if(!chunk.includes(10))return;
