@@ -1,5 +1,31 @@
 # Delivery milestones
 
+## Active M33–M37 product improvements — kickoff 2026-10-26
+
+User authorization: cancel the native-local deployment redesign, keep current deployment, identify five concrete improvements and continue the previous dedicated-chat/coordinator-review/15-minute workflow. [Full contracts and acceptance](../PRODUCT_IMPROVEMENTS.md). Run sequentially from independently reviewed published main; no M38 or final release. M21 remains paused and preserved. All code, Git metadata, builds and fixtures stay on physical D.
+
+### M33 — Recovery dashboard
+
+Unify interrupted/finished/not-started/running/uncertain work in a bounded authenticated view, with links to existing checked recovery actions. Preserve original evidence and all no-replay/approval/goal gates; no generic uncertainty waiver. Real SQLite/Runtime restart plus UI acceptance required.
+
+### M34 — Task file checkpoints
+
+Capture bounded project-code checkpoints and preview/restore coherent sets of files under current hashes, leases, idle-project admission and durable restore journals. Never imply command/install/external-effect rollback or overwrite later edits. Preserve history, private evidence and partial-restore uncertainty.
+
+### M35 — Isolated live project preview
+
+Show the exact owned project's running development UI in a separate isolated origin/session with no app bridge, controller tokens or private network access. Existing approvals authorize starts; fixed project-bound transport and exact cleanup only. Actual disposable worker/browser/Electron and hostile-page checks required.
+
+### M36 — Run and usage inspector
+
+Expose a bounded factual task timeline with changed-file/test/plan links, role/model requests, elapsed time and reported token usage. Unknown stays unknown; optional money estimates require configured rates. No hidden prompt/private evidence/provider credential exposure.
+
+### M37 — Sequential task queue
+
+Persist human-authored project tasks and deliberately run one at a time. Existing runtime acceptance admits the next; approval/failure/uncertainty/user pause stops progression. Revision-bound durable admission prevents replay and stale reorder/cancel races. Restart restores paused, never auto-runs. Finish integrated M33–M36 evaluation, validate exact main and pause the heartbeat; no automatic M21 resumption.
+
+Each child owns its feature implementation/tests/API docs/report, not coordinator STATUS/milestone/dispatch records. Propose concrete interfaces before substantial changes. Coordinator reviews/corrects/tests/integrates/pushes and verifies every applicable exact CI job/step and fresh receipt before a dedicated isolated successor. Notify only meaningful delivery/failure/required action; pause on genuine user assistance after independent work. Work-only STARK remains deferred without credential polling.
+
 ## M28–M32 container backend sequence — delivered 2026-10-16
 
 The user approved implementation of the [container plan](../CONTAINERIZATION.md), one-time copy-on-import, persistent workspace and the previous dedicated-chat/coordinator-review workflow. This supersedes historical no-Docker/no-M28/no-successor restrictions for this sequence only. Run **M28 -> M29 -> M30 -> M31 -> M32** sequentially in **Milestone x** chats and isolated `codex/milestone-x` branches/worktrees from reviewed published main. Coordinator owns routine decisions, independent review, corrections, integration/push and every applicable exact-main CI step before successor dispatch. Resume the existing 15-minute check-in; pause immediately for genuine user assistance. User push/messaging authorization persists. M21 packaging remains paused; no final release or M33 is authorized.
