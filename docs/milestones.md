@@ -6,6 +6,8 @@ User authorization: cancel the native-local deployment redesign, keep current de
 
 ### M33 — Recovery dashboard
 
+Implementation independently reviewed/integrated/published as main `371601602b31fdebe7533f5d09cb8a6103ab70e4` from report-only `fd13ed4` / tested `e14d763`. Coordinator1040Windows tests/46skips,typecheck/build/actualChrome+Electron and155integration checks pass;every applicable source six-workflow step/all9archives independently audited. Delivery remains pending every exact-main Validate `40305577223`,Desktop `40305577348`,support `40305577335`,helper `40305577182`,Container `40305577288`,Source `40305577241` step/fresh evidence. No M34 until those gates pass. [Review](reports/milestone-33-coordinator.md).
+
 Unify interrupted/finished/not-started/running/uncertain work in a bounded authenticated view, with links to existing checked recovery actions. Preserve original evidence and all no-replay/approval/goal gates; no generic uncertainty waiver. Real SQLite/Runtime restart plus UI acceptance required.
 
 ### M34 — Task file checkpoints
