@@ -72,7 +72,7 @@ export class ProcessJobs {
     const root=this.store.project(projectId).path;
     assertMutationIdle(root,owner);
     const blocker=processRecords(this.store,projectId).find(record=>processBlocking(record) && !(owner!==undefined && this.live.get(record.id)?.owner===owner));
-    if(blocker)throw new Error(`Project process ${blocker.id} is ${blocker.status}; wait or inspect its recorded outcome before further mutation or completion.`);
+    if(blocker)throw Object.assign(new Error(`Project process ${blocker.id} is ${blocker.status}; wait or inspect its recorded outcome before further mutation or completion.`),{code:'PROCESS_BUSY'});
   }
   assertQuiescent(projectId:string) {
     assertMutationIdle(this.store.project(projectId).path);

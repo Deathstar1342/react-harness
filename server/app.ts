@@ -152,7 +152,7 @@ export async function createApp(options: AppOptions) {
   app.setErrorHandler((error,request,reply)=> {
     if (error instanceof z.ZodError) return reply.code(400).send({error:error.issues.map(issue=>`${issue.path.join('.')}: ${issue.message}`).join('; ')});
     const e = error as Error & {statusCode?:number;code?:string};
-    const conflict = /stale|conflict|changed since|dirty|unsaved|version mismatch/i.test(e.message);
+    const conflict = /stale|conflict|changed since|dirty|unsaved|version mismatch/i.test(e.message)||queueRoutes.has(request.routeOptions.url??'')&&['CONFLICT','PROCESS_BUSY'].includes(e.code??'');
     const statusCode = conflict ? 409 : e.statusCode ?? (e.code === 'ENOENT' ? 404 : 400);
     reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({error:e.message.replaceAll(config.apiKey || '\u0000','[redacted]')});
   });
