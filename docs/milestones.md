@@ -20,7 +20,7 @@ Capture bounded project-code checkpoints and preview/restore coherent sets of fi
 
 ### M35 — Isolated live project preview
 
-Dedicated isolated D kickoff authorized after M34 exact-main delivery. Before substantial interfaces,review exact owned process/worker/server/port/transport/route/origin/session/network/CSP/secret/lifecycle/freshness/cleanup contract. [Coordinator kickoff](reports/milestone-35-coordinator.md).
+Dispatched to dedicated Milestone 35 chat `01a17857-0358-7b71-8a37-61f09bc966e3`,isolated physical-D `codex/milestone-35` from published kickoff `d1d0a392378fcf77fc16bf7b8e28b09a17bb7087` after M34 exact-main delivery. Clean identity/commonGit verified before/after dispatch and active initial progress explicitly observed. Before substantial interfaces,review exact owned process/worker/server/port/transport/route/origin/session/network/CSP/secret/lifecycle/freshness/cleanup contract. [Coordinator kickoff](reports/milestone-35-coordinator.md).
 
 Show the exact owned project's running development UI in a separate isolated origin/session with no app bridge, controller tokens or private network access. Existing approvals authorize starts; fixed project-bound transport and exact cleanup only. Actual disposable worker/browser/Electron and hostile-page checks required.
 

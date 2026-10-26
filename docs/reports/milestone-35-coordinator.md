@@ -1,6 +1,10 @@
 # Milestone 35 — Coordinator kickoff and review
 
-Status: kickoff approved after independently accepted M34 implementation main `6d000263659f86f02df23f3b951a6ab24f8ce181`. A dedicated isolated physical-D child chat/branch will be dispatched from the published docs-only kickoff. No implementation or accepted interface yet. M34 and all earlier worktrees/receipts remain preserved; M21 packaging stays paused.
+Status: dispatched in dedicated Milestone 35 chat `01a17857-0358-7b71-8a37-61f09bc966e3`,hostlocal,assigned isolated `D:/CodexData/.codex/worktrees/milestone-35-donly/REACT harness`,branch `codex/milestone-35`,from exact published docs-only kickoff `d1d0a392378fcf77fc16bf7b8e28b09a17bb7087` after independently accepted M34 implementation main `6d000263659f86f02df23f3b951a6ab24f8ce181`. No implementation or accepted interface yet. M34 and all earlier worktrees/receipts remain preserved; M21 packaging stays paused.
+
+Coordinator independently verified clean branch/base and physical-D common Git metadata before/after dispatch;source is a real D directory,not a C alias. The saved local-project chat pattern avoids old full-C managed worktree metadata;displayed C cwd is NOT source. Explicitly waited for active initial progress,cursor `6821740b-96da-4841-97d0-fb2979e77994:1`;child confirmed assigned-D verification/read and early concrete contract before interfaces. No model override,duplicate source work or workstation provisioning.
+
+Early contract request includes exact owned project/process/run/generation/worker/context/container/image/server/port binding,fixed host/broker operations and bounded HTTP/WebSocket/HMR transport,Electron and browser origin/session/network/CSP/secret behavior,lifecycle/freshness/cleanup and evidence plan. Additional concrete guidance:measure cross-port app-cookie leakage,Origin/Host/auth stripping,service-worker/cache/session reuse,redirects/navigation/popups and hostile private-control requests. A separate port,CORS rejection or unreadable response alone is not proof no private request occurred. Native/browser support limits must remain explicit. Child owns proposal/report and feature source;coordinator will review before substantial interfaces.
 
 ## Authorized product scope and ownership
 
