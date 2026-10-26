@@ -12,6 +12,8 @@ Unify interrupted/finished/not-started/running/uncertain work in a bounded authe
 
 ### M34 — Task file checkpoints
 
+Reviewed implementation integrated/pushed as GitHub main `6d000263659f86f02df23f3b951a6ab24f8ce181` from report-only `3675388` / tested `bb59b51`. Coordinator1083Windows/47skips,typecheck/build/actualChrome+Electron/sourceall6CI/all9fresharchives and merged200affected/3skips pass. Product matches tested source outside docs. Exact-main Validate `40326197190`,Desktop `40326197185`,support `40326197187`,helper `40326197197`,Container `40326197196`,Source `40326197222` and all fresh source-bound artifacts remain pending;no delivery/M35dispatch until independently verified. Child idle/clean,preserve worktree/failures;M21 remains held. [Review](reports/milestone-34-coordinator.md).
+
 Dedicated isolated D kickoff authorized after M33 exact-main delivery; concrete bounded storage/exclusions/integrity/retention/capture/preview/partial-restore journal contract required before substantial interfaces. [Coordinator kickoff](reports/milestone-34-coordinator.md).
 
 Capture bounded project-code checkpoints and preview/restore coherent sets of files under current hashes, leases, idle-project admission and durable restore journals. Never imply command/install/external-effect rollback or overwrite later edits. Preserve history, private evidence and partial-restore uncertainty.
