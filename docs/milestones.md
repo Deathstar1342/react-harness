@@ -20,6 +20,8 @@ Capture bounded project-code checkpoints and preview/restore coherent sets of fi
 
 ### M35 — Isolated live project preview
 
+Reviewed report-only browser proposal `cf17475`;same-listener random-host/trusted compatibility probe scaffold conditionally approved with direct public-port binding,exclusive all-path routing,strict native scope,bounded staged counters/actual-channel proof before any project bytes and fail-closed unsupported/mapping/stale results. Native controlled UI/network receipt reviewed;actual frozen browser/container/full CI acceptance pending. No deployment rewrite or successor.
+
 Original projection faults now independently refused by the mutable correction (module hash/receipts in coordinator report);valid control still accepted. Child continues native hostile-view tests and separate unresolved browser support contract. Coherent committed source/full final evidence remain required;no delivery or successor.
 
 Core checkpoint `a85ed3c` independently reviewed in a detached physical-D checkout:33 portable process/container and10 controlled HTTP/doubled-broker tests pass. Private-state fault repro found source key-ID, original duplicate-JSON and registered-root consistency gaps;child owns corrections and native hostile-view tests before coherent freeze. Browser interactive support remains unresolved/disabled,not accepted by native evidence. No final handoff/integration/M36. [Current review](reports/milestone-35-coordinator.md).
