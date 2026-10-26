@@ -89,8 +89,21 @@ def run(root,storage,controller,start_output):
     source2=base/'m30-another-original';source2.mkdir()
     (source/'ordinary.txt').write_text('committed content\n')
     env={'PATH':'/usr/bin:/bin','HOME':str(base),'GIT_CONFIG_NOSYSTEM':'1'}
+    # Only this fixture's init/add/commit commands are controlled. No persisted
+    # config or original-tree exclusions: asynchronous Git writers must not race
+    # the complete bytes/mtime/mode preservation baseline.
+    fixture_git_policy=['-c','maintenance.auto=false','-c','gc.auto=0','-c','maintenance.autoDetach=false','-c','gc.autoDetach=false']
+    fixture_trace=root/'test-results/container/m30-fixture-git-trace.jsonl'
+    fixture_trace.parent.mkdir(parents=True,exist_ok=True)
+    assert not fixture_trace.exists(),'preserve prior fixture trace; use fresh disposable CI output'
+    env['GIT_TRACE2_EVENT']=str(fixture_trace)
     for args in (['init','--initial-branch=main'],['add','ordinary.txt'],['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','safe fixture']):
-        subprocess.run(['git',*args],cwd=source,env=env,check=True,capture_output=True)
+        subprocess.run(['git',*fixture_git_policy,*args],cwd=source,env=env,check=True,capture_output=True,timeout=10)
+    assert fixture_trace.stat().st_size<=512*1024,'fixture Git trace exceeds bound'
+    fixture_events=[json.loads(line) for line in fixture_trace.read_text().splitlines() if line.strip()]
+    fixture_maintenance=[event for event in fixture_events if event.get('event') in ('start','child_start') and 'maintenance' in event.get('argv',[])]
+    (root/'test-results/container/m30-fixture-git-quiescence.json').write_text(json.dumps({'gitVersion':subprocess.run(['git','--version'],env=env,capture_output=True,text=True,check=True,timeout=5).stdout.strip(),'commandLocalPolicy':fixture_git_policy,'maintenanceStarts':fixture_maintenance,'maintenanceLockBeforeSnapshot':(source/'.git/objects/maintenance.lock').exists()},indent=2))
+    check('fixture Git has no background maintenance before complete source snapshot',not fixture_maintenance and not (source/'.git/objects/maintenance.lock').exists())
     (source/'ordinary.txt').write_text('dirty working bytes\n')
     (source/'README.md').write_text('Example: OPENAI_API_KEY=your-key\n')
     (source/'.env').write_text('ordinary-project-secret=excluded\n')
