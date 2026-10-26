@@ -1,5 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
-import {mkdtemp,mkdir,writeFile,readFile,rm,rename,symlink,link,chmod,lstat} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,rename,symlink,link,chmod,lstat,realpath} from 'node:fs/promises';
 import path from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
@@ -19,7 +19,7 @@ import type {CheckpointPreview} from '../shared/types.js';
 const cleanup:(()=>Promise<void>)[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const close of cleanup.splice(0).reverse())await close();});
 async function fixture(){
- const base=await mkdtemp(path.join(tmpdir(),'m34-')),workspace=path.join(base,'workspace'),root=path.join(workspace,randomUUID());await mkdir(root,{recursive:true});
+ const base=await mkdtemp(path.join(await realpath(tmpdir()),'m34-')),workspace=path.join(base,'workspace'),root=path.join(workspace,randomUUID());await mkdir(root,{recursive:true});
  const filename=path.join(base,'state.sqlite');let store=new Store(filename),tools=new WorkspaceTools();
  const config=readConfig({HARNESS_DATA_DIR:path.join(base,'data'),HARNESS_WORKSPACE_ROOT:workspace});
  const provider={models:async()=>[],complete:async()=>{throw new Error('Checkpoints never call providers');}};
@@ -31,7 +31,7 @@ async function fixture(){
  const restore=(p:CheckpointPreview)=>service.restore(project.id,p.checkpoint.id,{chatId:chat.id,previewToken:p.previewToken,revision:p.revision,confirmation:'restore-files'});
  const close=async()=>{await runtime.close();await tools.dispose();store.close();};
  const reopen=async()=>{await close();store=new Store(filename);store.recover();tools=new WorkspaceTools();runtime=new Runtime(store,provider,tools,config,{instructions:()=>''});service=new Checkpoints(store,runtime);};
- cleanup.push(async()=>{await close();if(path.dirname(base)!==path.resolve(tmpdir())||!path.basename(base).startsWith('m34-'))throw new Error('Fixture cleanup identity mismatch');await rm(base,{recursive:true,force:true});});
+ cleanup.push(async()=>{await close();if(path.dirname(base)!==await realpath(tmpdir())||!path.basename(base).startsWith('m34-'))throw new Error('Fixture cleanup identity mismatch');await rm(base,{recursive:true,force:true});});
  return {base,root,filename,config,project,chat,write,capture,preview,restore,reopen,get store(){return store;},get runtime(){return runtime;},get tools(){return tools;},get service(){return service;}};
 }
 it.each([false,true])('actual disk capture and coherent add/delete/move/multifile restore; Git=%s',async git=>{

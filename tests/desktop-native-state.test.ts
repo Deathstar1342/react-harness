@@ -2,7 +2,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {Worker} from 'node:worker_threads';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
-import {mkdtempSync,mkdirSync,lstatSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,lstatSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -94,7 +94,7 @@ it('invalid private selectors never reach the host and an unmapped private Store
  expect(()=>authority.nativePrivateUnit(()=>{})).toThrow(/recovery/);expect(Atomics.load(t.words,0)).toBe(0);
 });
 it.each(['capture','restore'])('checkpoint actual disk SQLite exact native target final COMMIT veto; phase=%s',async phase=>{
- const t=await peer(),root=mkdtempSync(path.join(tmpdir(),'native-checkpoint-')),state=path.join(root,'state'),workspace=path.join(root,'workspace'),projectRoot=path.join(workspace,randomUUID());mkdirSync(state);mkdirSync(projectRoot,{recursive:true});
+ const t=await peer(),root=mkdtempSync(path.join(realpathSync(tmpdir()),'native-checkpoint-')),state=path.join(root,'state'),workspace=path.join(root,'workspace'),projectRoot=path.join(workspace,randomUUID());mkdirSync(state);mkdirSync(projectRoot,{recursive:true});
  const dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(path.dirname.bind(path)):undefined,absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockImplementation(path.isAbsolute.bind(path)):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;
  const authority=await import('../server/native-storage.js'),policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state,config:path.join(root,'config'),control:path.join(root,'control'),workspace},verifyRoots:()=>{},permits:()=>true} as unknown as NativeBindPolicy;
  authority.installNativeStorage(policy,async()=>({...policy.record,gateId:'a'.repeat(64),issuedAt:Date.now(),expiresAt:Date.now()+10000}),t.descriptor);

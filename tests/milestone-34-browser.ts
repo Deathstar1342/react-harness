@@ -1,7 +1,7 @@
 // Real authenticated HTTP + disk SQLite/guarded project files in Chrome or sandboxed Electron.
 // Fixture provider; no worker, shell, Docker/device, installed-package, human or live-provider acceptance.
 import path from 'node:path';
-import {mkdir,mkdtemp,writeFile,readFile,rename,rm} from 'node:fs/promises';
+import {mkdir,mkdtemp,writeFile,readFile,rename,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {chromium,_electron,expect,type Page} from '@playwright/test';
@@ -11,7 +11,7 @@ import {readConfig} from '../server/config.js';
 import {createApp} from '../server/app.js';
 import {TransportAuth} from '../server/transport-auth.js';
 const receipts=process.env.M34_RECEIPTS;if(!receipts||!path.isAbsolute(receipts))throw new Error('Explicit external receipt root required');await mkdir(receipts,{recursive:true});
-const base=await mkdtemp(path.join(tmpdir(),'m34-ui-')),workspace=path.join(base,'workspace'),root=path.join(workspace,randomUUID()),home=path.join(base,'app');await mkdir(root,{recursive:true});await mkdir(home);
+const base=await mkdtemp(path.join(await realpath(tmpdir()),'m34-ui-')),workspace=path.join(base,'workspace'),root=path.join(workspace,randomUUID()),home=path.join(base,'app');await mkdir(root,{recursive:true});await mkdir(home);
 await writeFile(path.join(root,'a.ts'),'Original a\n');await writeFile(path.join(root,'b.ts'),'Original b\n');await writeFile(path.join(root,'.env'),'PRIVATE_CHECKPOINT_SENTINEL');await writeFile(path.join(root,'photo.png'),Buffer.from([0,255,0]));
 const store=new Store(path.join(home,'state.sqlite')),tools=new WorkspaceTools(),project=store.createProject('Checkpoint fixture',root),chat=store.createChat(project.id,'Task boundary','review'),auth=new TransportAuth('m34-ui');let providerCalls=0;
 const config=readConfig({HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'state'),HARNESS_WORKSPACE_ROOT:workspace,STARK_BASE_URL:'http://127.0.0.1:1/private-endpoint',STARK_API_KEY:'PRIVATE_PROVIDER_SENTINEL'});
