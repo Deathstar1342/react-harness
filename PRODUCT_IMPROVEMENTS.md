@@ -2,7 +2,7 @@
 
 Kickoff: 2026-10-26. The user cancelled the proposed native-local deployment simplification and explicitly requested five tangible improvements, milestones and the previous dedicated-chat/coordinator-review workflow. Keep the current Electron/container deployment. No local-deployment rewrite or unsandboxed host execution is authorized by this sequence.
 
-The reviewed M32 implementation remains the foundation. Current public main9cb3660232d8f0c38ddcabb748eceb0dc97a8b2b adds only the user's executable bit on setup.sh after the reviewed closeout; preserve that change. M21 packaging and all earlier worktrees/unreviewed source/notices changes remain paused and untouched. No release or M38.
+The reviewed M32 implementation remains the foundation. Baseline public main9cb3660232d8f0c38ddcabb748eceb0dc97a8b2b adds only the user's executable bit on setup.sh after the reviewed closeout; preserve that change. M21 packaging and all earlier worktrees/unreviewed source/notices changes remain paused and untouched. No release or M38.
 
 ## The five improvements
 
