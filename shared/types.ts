@@ -103,6 +103,24 @@ export interface CommandEvent {
 }
 export interface CommandOutput { agentId: string; commandId?: string; sessionId?: string; output: string; truncated?: boolean }
 export interface ChatDetail { chat: Chat; messages: Message[]; plan: Plan; goal?: Goal; approvals: Approval[]; events: RunEvent[]; eventsTruncated?: boolean; tests: TestReport[] }
+/** Observations only. Neither revision nor destinations authorize execution. */
+export type RecoveryStatus = 'completed'|'failed'|'not_started'|'running'|'uncertain'|'interrupted'|'unknown';
+export type RecoveryDestination = 'controls'|'approvals'|'terminal'|'installs'|'plan';
+export interface RecoveryEntry {
+  id:string; kind:'command'|'tool'|'process'|'install'|'plan'|'unknown'; label:string; status:RecoveryStatus;
+  reason:string; updatedAt:string|null; frameId?:string; commandId?:string; callId?:string; processId?:string; installId?:string;
+  generation?:number; planStep?:PlanStepRef; destination:RecoveryDestination;
+  evidence:{eventId:number;at:string|null}[]; evidenceTruncated:boolean;
+  outputTruncated?:boolean;
+}
+export interface RecoveryView {
+  schema:'recovery-v1'; chatId:string; projectId:string; observedAt:string; revision:string; latestEventId:number;
+  chat:{status:ChatStatus|'unknown';mode:ChatMode|'unknown';modeVersion:number|null;updatedAt:string|null};
+  goal?:{id:string;revision:number;status:GoalStatus;humanMessageId:string|null;updatedAt:string|null;uncertainEventIds:number[];truncated:boolean;eventId:number|null};
+  plan?:{id:string;version:number}; humanMessageIds:string[];
+  entries:RecoveryEntry[];
+  coverage:{source:string;limit:number;truncated:boolean;unavailable:number}[];
+}
 export interface PublicSettings { executionMode?:'direct'|'container'; executionAvailable?:boolean; limitSource?:'application-budget'; providerLimits?:'unknown'; configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
 /** Private launcher protocol; keys and provider secrets are never included. */
 export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; profileId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }

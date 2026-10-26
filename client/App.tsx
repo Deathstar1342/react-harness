@@ -1,6 +1,7 @@
 import {TransferDialog} from './TransferDialog';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallHistory } from './InstallControls';
+import {RecoveryPanel} from './RecoveryPanel';
 import {
   ArrowDown,
   ArrowUp,
@@ -27,6 +28,7 @@ import type {
   Chat,
   Project,
   PublicSettings,
+  RecoveryDestination,RecoveryEntry,
 } from "../shared/types";
 import { errorText, formatTime, id, post, request } from "./api";
 import { FilePanel } from "./FilePanel";
@@ -72,6 +74,10 @@ export function Conversation({
   const [busy, setBusy] = useState("");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [recoveryOpen,setRecoveryOpen]=useState(false);
+  const [recoveryInstall,setRecoveryInstall]=useState<string>();
+  const [recoveryProcess,setRecoveryProcess]=useState<string>();
+  const recoveryControl=useRef<HTMLButtonElement>(null);
   const [skillsOpen,setSkillsOpen]=useState(false);
   const planControl = useRef<HTMLButtonElement>(null);
   const [actionError, setActionError] = useState("");
@@ -133,6 +139,14 @@ export function Conversation({
       </main>
     );
   const chat = detail.chat;
+  const navigateRecovery=(destination:RecoveryDestination,entry?:RecoveryEntry)=>{
+    setRecoveryOpen(false);
+    if(destination==='plan')setPlanOpen(true);
+    if(destination==='terminal'){setTerminalOpen(true);setRecoveryProcess(entry?.processId);}
+    if(destination==='installs')setRecoveryInstall(entry?.installId);
+    const target={controls:'recovery-chat-controls',approvals:'recovery-approvals',terminal:'command-terminal',installs:'recovery-install-history',plan:'chat-plan'}[destination];
+    requestAnimationFrame(()=>{const element=document.getElementById(target);element?.scrollIntoView({block:'nearest'});element?.focus();});
+  };
   const running = chat.status === "running";
   const pending = detail.approvals.filter(
     (approval) => approval.status === "pending",
@@ -219,11 +233,13 @@ export function Conversation({
           </button>
           <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>{detail.goal ? `Goal · ${detail.goal.status.replaceAll('_',' ')} · ${detail.plan.phases.filter(phase=>phase.steps.length && phase.steps.every(step=>step.status==='done' && detail.goal!.reviews.some(review=>review.planStep.planId===detail.plan.id && review.planStep.planVersion===detail.plan.version && review.planStep.phaseId===phase.id && review.planStep.stepId===step.id))).length}/${detail.plan.phases.length} phases` : 'Plan'}</button>
           <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
+          <button ref={recoveryControl} className="text-button" aria-expanded={recoveryOpen} aria-controls="chat-recovery" onClick={()=>setRecoveryOpen(open=>!open)}>Recovery</button>
           <button className="text-button" aria-expanded={skillsOpen} onClick={()=>setSkillsOpen(true)}>Skills</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
         </div>
       </header>
-      {planOpen && <section id="chat-plan" className="chat-plan" aria-label="Current plan" onKeyDown={event=>{if(event.key==='Escape'){setPlanOpen(false);planControl.current?.focus();}}}>
+      {recoveryOpen&&<RecoveryPanel detail={detail} connected={connection==='connected'} onClose={()=>{setRecoveryOpen(false);recoveryControl.current?.focus();}} onNavigate={navigateRecovery}/>}
+      {planOpen && <section id="chat-plan" className="chat-plan" aria-label="Current plan" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){setPlanOpen(false);planControl.current?.focus();}}}>
         <div className="plan-toolbar">
           <span>{chat.mode === 'plan' ? 'Planning only' : 'Execution enabled'}</span>
           {chat.mode === 'plan' && <button className="button primary" disabled={!!busy || !configured || !detail.plan.id || !detail.plan.phases.some(p=>p.steps.length)} onClick={()=>void act('build',()=>post(`/chats/${id(chatId)}/start-building`,{planId:detail.plan.id,planVersion:detail.plan.version,modeVersion:chat.modeVersion}))}>Start building</button>}
@@ -325,14 +341,14 @@ export function Conversation({
               })}
             </div>
           )}
-          {pending.map((approval) => (
+          <div id="recovery-approvals" tabIndex={-1}>{pending.map((approval) => (
             <ApprovalCard
               key={approval.id}
               approval={approval}
               refresh={refresh}
             />
-          ))}
-          <InstallHistory key={detail.chat.id} chatId={detail.chat.id}/>
+          ))}</div>
+          <InstallHistory key={detail.chat.id} chatId={detail.chat.id} selectedId={recoveryInstall}/>
           {detail.approvals.some(
             (approval) => approval.status !== "pending",
           ) && (
@@ -512,7 +528,7 @@ export function Conversation({
             </button>
           </div>
         </form>
-        <div className="conversation-controls">
+        <div className="conversation-controls" id="recovery-chat-controls" tabIndex={-1}>
           <div className="run-controls">
             <span className={`status-dot ${chat.status}`} />
             <span className="run-status">
@@ -565,7 +581,7 @@ export function Conversation({
           </div>
         </div>
       </div>
-      {terminalOpen && <TerminalPanel detail={detail} connected={connection === 'connected'} onClose={()=>setTerminalOpen(false)} />}
+      {terminalOpen && <TerminalPanel detail={detail} connected={connection === 'connected'} selectedProcessId={recoveryProcess} onClose={()=>setTerminalOpen(false)} />}
       {skillsOpen&&<SkillsPanel chatId={chatId} projectId={project.id} planOnly={detail.chat.mode==='plan'} onClose={()=>setSkillsOpen(false)} onChange={()=>void refresh()} onDirty={onSkillsDirty}/>}
       <ActivityDrawer events={detail.events} tests={detail.tests} debug={debug} />
     </main>

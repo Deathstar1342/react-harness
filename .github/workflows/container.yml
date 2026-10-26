@@ -8,6 +8,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Bounded fixture Git maintenance lifecycle diagnostic
+        timeout-minutes: 3
+        run: python3 tests/git-fixture-maintenance.py
       - name: Real Linux controller build and storage boundary checks
         run: python3 tests/container-linux.py
       - name: Portable broker protocol and egress checks
