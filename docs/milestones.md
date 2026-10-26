@@ -38,6 +38,8 @@ Expose a bounded factual task timeline with changed-file/test/plan links, role/m
 
 ### M37 — Sequential task queue
 
+Corrected CI readiness source d013/report-only53a1aa3 independently accepted:full1205/47skips/type/build/bothactualUIs,deterministic publication6checks/Pythonreader,and all6sourceworkflows/10jobs/every applicable step/ALL9fresh archives pass. Reintegration typechecks/195affected1skip/publication6checks/Pythonreader pass;then EVERYfresh exact-main gate required. Original694failure remains retained,exacthistoricalbytes/cause unproven. No delivery/M21 resumption. [Review](reports/milestone-37-coordinator.md).
+
 Exact-main694b3d7 delivery gate remains open:Container connected fixture initial readiness consumed unparsable JSON before browser/queue assertions. All other5required workflows green. Child reopened only CI fixture atomic-publication/interleaving correction;original failure retained and exact timeouts/assertions unchanged. Fresh corrected source and every exact-main gate remain required;M21 held. [Review](reports/milestone-37-coordinator.md).
 
 Source accepted for integration from report-only6088664/tested4cabb:independent1205Windows/47skips/typecheck/build/actualChrome+Electron and all6sourceworkflows/10jobs/every applicable ordered step/ALL9fresh archives pass. Complete Windows10403members/ALL10402hashes/42Git copied sources;actual connected running+recovered queue409/nochat/noadoption verified. Integration typecheck/195affected checks/1skip passed;EVERY fresh exact-main gate/artifact remains required before delivery. M21 and all device/human/live-provider/release limits remain held. [Review](reports/milestone-37-coordinator.md).

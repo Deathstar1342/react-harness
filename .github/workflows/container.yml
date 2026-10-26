@@ -39,6 +39,7 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         run: |
+          M35_PUBLICATION_RECEIPT=test-results/container/fixture-info-publication.json node tests/fixture-info-publication.mjs
           npm ci
           export M35_UI_OUTPUT="$RUNNER_TEMP/m35-connected-ui"
           node node_modules/vite/bin/vite.js build --config tests/preview-vite.config.ts
