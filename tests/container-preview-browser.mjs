@@ -7,7 +7,7 @@ const infoPath=process.env.M35_CONNECTED_INFO,out=process.env.M35_RECEIPTS,stage
 if(!infoPath||!out)throw new Error('Explicit private fixture info/receipt paths required');const info=JSON.parse(await readFile(infoPath,'utf8'));await mkdir(out,{recursive:true});
 const browser=await chromium.launch({channel:'chrome',headless:true});
 try{
- const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',error=>errors.push(error.message));await page.goto('http://127.0.0.1:3000');
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',error=>errors.push(error.stack??error.message));await page.goto('http://127.0.0.1:3000');
  await page.evaluate(async code=>{const result=await fetch('/api/auth/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});if(!result.ok)throw new Error('Fixture pairing failed');},info.pairingCode);await page.reload();
  await page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:/^Connected preview task/}).click();await page.getByRole('button',{name:'Preview',exact:true}).click();const panel=page.getByRole('region',{name:'Live project preview'});
  const status=await page.evaluate(async()=>{const result=await fetch('/api/m35-fixture-status');return result.json()});expect(status.starts).toBe(stage==='running'?1:0);expect(status.providerCalls).toBe(0);
@@ -25,5 +25,5 @@ try{
  }else{
   await expect(panel.getByRole('button',{name:'Open preview',exact:true})).toBeDisabled();await expect(panel.getByRole('status').filter({hasText:/^(uncertain|interrupted|stopped):/}).first()).toBeVisible();const retained=await page.evaluate(async projectId=>{const result=await fetch(`/api/projects/${projectId}/previews`);return result.json();},info.projectId);expect(retained.entries).toHaveLength(1);expect(retained.entries[0].processId).toBe(info.processId);expect(['uncertain','interrupted','stopped']).toContain(retained.entries[0].status);expect(await page.locator('iframe').count()).toBe(0);await writeFile(path.join(out,'connected-browser-recovered.json'),JSON.stringify({source:info.source,mode:'actual same disposable controller restart/SQLite retained process state/Chrome UI',starts:status.starts,providerCalls:status.providerCalls,checks:['backend restart starts no command/provider/probe/view','old owned process remains observed interrupted/uncertain','no automatic adoption/replay']},null,2));
  }
- console.log('PASS M35 connected actual controller/worker/browser:',stage);
+ expect(errors).toEqual([]);console.log('PASS M35 connected actual controller/worker/browser:',stage);
 }catch(error){await writeFile(path.join(out,`connected-browser-${stage}-failed.txt`),String(error));throw error;}finally{await browser.close();}

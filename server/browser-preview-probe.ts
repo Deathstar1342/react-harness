@@ -14,8 +14,8 @@ export function probeDocument(step:BrowserProbeStep,origin:string,sentinel:strin
   await deadline(new Promise(resolve=>{try{const socket=new WebSocket(input.sentinel.replace('http:','ws:')+'/ws/'+input.nonce);socket.onerror=()=>{socket.close();resolve()};socket.onopen=()=>{socket.close();resolve()};}catch{resolve();}}),2000);
   await deadline(fetch(input.origin+'/redirect/'+input.stage,{credentials:'omit'}).catch(()=>{}),2000);
   let remote=false;const pendingA=[],pendingB=[];const channel=a.createDataChannel('bounded-preview-proof');
-  a.onicecandidate=event=>{if(event.candidate){if(remote)b.addIceCandidate(event.candidate).catch(()=>{});else pendingB.push(event.candidate)}};
-  b.onicecandidate=event=>{if(event.candidate){if(remote)a.addIceCandidate(event.candidate).catch(()=>{});else pendingA.push(event.candidate)}};
+  a.onicecandidate=event=>{if(event.candidate){if(remote)Promise.resolve(b.addIceCandidate(event.candidate)).catch(()=>{});else pendingB.push(event.candidate)}};
+  b.onicecandidate=event=>{if(event.candidate){if(remote)Promise.resolve(a.addIceCandidate(event.candidate)).catch(()=>{});else pendingA.push(event.candidate)}};
   b.ondatachannel=event=>{event.channel.onmessage=message=>{if(message.data==='fixed-preview-proof')result.peerDelivered=true}};
   channel.onopen=()=>{result.peerOpened=true;channel.send('fixed-preview-proof')};
   await deadline((async()=>{await a.setLocalDescription(await a.createOffer());await b.setRemoteDescription(a.localDescription);await b.setLocalDescription(await b.createAnswer());await a.setRemoteDescription(b.localDescription);remote=true;await Promise.allSettled([...pendingA.map(candidate=>a.addIceCandidate(candidate)),...pendingB.map(candidate=>b.addIceCandidate(candidate))]);})(),3000);
