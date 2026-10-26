@@ -1,5 +1,11 @@
 # Milestone 37 coordinator — sequential task queue
 
+## Superseded36dcc Desktop source CI read
+
+Compact cursor0efd9680-69cb-46f0-b89a-f525798fda31:8 confirms ACTIVE correction work after36dcc,not handoff. Authenticated exact-source run40385943420/head36dcc jobs/log independently read:Linux121794096267 failed ONLY new M37 browser count assertion expected3/received2,original M35/M36 gates green. Windows121794095730 every applicable substantive step green but job concluded cancelled,therefore excluded final acceptance. Original failed Linux artifact12681031681/publishedSHA6471c8e3eeb9ddafb839ece026f781861ef9e4b77e832e1f493f48c96d01a2d1 retained by child;own source-bound job metadata/bounded raw log excerpt in frozen-36dcc66/desktop-original-failure-metadata.json. No infrastructure/production-failure inference.
+
+Child current narrow UI diff moves existing stopped-task observation BEFORE unchanged paused/count3 assertions,preventing prior paused screen satisfying wait before Start finishes;no timeout/count/assertion/sandbox waiver. Read-only restart reason now explicitly states consumed outcome/no adoption/no replay. Two independently reproduced raw claim scalar/missing-envelope findings remain pending child correction/coherent successor;root does not rerun broad UI against known superseded36dcc. Full1200/47/typecheck component results and all original failures remain preserved. No user blocker/main product integration/delivery or M21 resumption.
+
 ## Frozen36dcc independent component tests and two original-source faults
 
 First coherent feature `36dcc66d926cc3cd9c6096b477328cd474317ebc` / tree `b9f420e88e92eb563208e5d786f929b8ddef1700` independently verified clean/published on assigned child branch,25scoped files from kickoffd2feb2a. Own new clean detached physical-D m28-review/m37-independent/commonGit/matching D development closure verified. Independent full1200Windows tests/47platform skips(86passedfiles/3skipped,164.94s) and both typechecks pass. External runner changes ONLY receipt base and existing verified short D temp;all resolved path/lock/source/clean receipts in m37-validation/frozen-36dcc66. Preserve earlier worktrees. Source CI/expanded UIs/archives still child-owned and no handoff/main integration/delivery;known narrow findings make36dcc component evidence,not acceptance.
