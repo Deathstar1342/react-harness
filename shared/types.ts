@@ -47,8 +47,9 @@ export type ModelMessage = { role: 'system' | 'user'; content: string } |
   { role: 'tool'; tool_call_id: string; content: string };
 export interface ModelCatalogEntry { id: string; metadata: Record<string, unknown>; capabilities: { ordinary: 'unknown'; native: 'unknown'; streaming: 'unknown' } }
 export interface ModelUsage { inputTokens: number; outputTokens: number }
-export interface CompletionResult { text: string; toolCalls?: NativeToolCall[]; usage?: ModelUsage; finishReason?: string; requestId?: string }
-export interface ModelProvider { complete(input: { model: string; messages: ModelMessage[]; tools?: NativeToolDefinition[]; toolChoice?: 'auto' | 'required' | 'none'; streaming?: boolean; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number; noRetry?: boolean }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]>; catalog?(signal?: AbortSignal): Promise<ModelCatalogEntry[]> }
+export interface CompletionResult { inspectorRequestId?:string; text: string; toolCalls?: NativeToolCall[]; usage?: ModelUsage; finishReason?: string; requestId?: string }
+export type ProviderObservation = {type:"invoked"}|{type:"attempt";attempt:number}|{type:"usage";usage:ModelUsage};
+export interface ModelProvider { complete(input: { onObservation?: (observation:ProviderObservation)=>void; model: string; messages: ModelMessage[]; tools?: NativeToolDefinition[]; toolChoice?: 'auto' | 'required' | 'none'; streaming?: boolean; signal?: AbortSignal; onDelta?: (delta: string) => void; maxTokens?: number; noRetry?: boolean }): Promise<CompletionResult>; models(signal?: AbortSignal): Promise<string[]>; catalog?(signal?: AbortSignal): Promise<ModelCatalogEntry[]> }
 export interface FileEntry { path: string; name: string; type: 'file' | 'directory'; size?: number }
 export interface FileSnapshot { path: string; content: string; hash: string | null }
 export type FileChangeStatus = 'recording' | 'confirmed' | 'rejected' | 'unknown' | 'undoing' | 'undone';
@@ -184,3 +185,19 @@ export interface CheckpointRestoreSummary {id:string;checkpointId:string;created
 export interface CheckpointList {items:CheckpointSummary[];restores:CheckpointRestoreSummary[];limits:{files:number;fileBytes:number;bytes:number;projectCount:number}}
 export interface CheckpointPreview {checkpoint:CheckpointSummary;previewToken:string;revision:string;expiresAt:number;changes:{path:string;kind:'add'|'remove'|'modify';diff:string}[];currentExcludedCount:number}
 export interface CheckpointAccess {read(root:string,input:string):Promise<FileSnapshot>;restore(root:string,file:FileSnapshot&{mode:number},expected:FileSnapshot,beforeMutation:()=>void):Promise<FileSnapshot>}
+
+/** Bounded observations only; no execution, billing or acceptance authority. */
+export interface InspectorRequest {
+ id:string;projectId:string;chatId:string;runId:string;taskId:string;generation:number;ordinal:number;role:AgentRole;model:string;purpose:'conversation'|'compaction';
+ humanMessageIds:string[];referencesOmitted:boolean;planStep?:PlanStepRef;callIds:string[];eventIds:number[];
+ startedAt:string;endedAt:string|null;elapsedMs:number|null;stage:'queued'|'invoked'|'response';attempts:number;
+ outcome:'pending'|'returned'|'cancelled'|'refusal'|'truncated'|'timeout'|'http'|'transport'|'malformed'|'failed';
+ usage:ModelUsage|null;usageSource:'adapter'|'result'|null;usageState:'unknown'|'reported'|'incomplete'|'conflicted';observations:number;overflow:boolean;
+}
+export interface InspectorLink {kind:'files'|'tests'|'plan';id:string;eventId:number;path?:string;planStep?:PlanStepRef}
+export interface InspectorView {
+ schema:'inspector-v1';chatId:string;projectId:string;observedAt:string;revision:string;latestEventId:number;
+ requests:({seq:number;request:InspectorRequest|null;unavailable:boolean})[];nextCursor:string|null;
+ summary:{requests:number;reportedRequests:number;unknownRequests:number;conflictedRequests:number;inputTokens:number|null;outputTokens:number|null;elapsedMs:number|null;truncated:boolean;unavailable:number};
+ links:InspectorLink[];linksUnavailable:number;legacy:boolean;legacyTruncated:boolean;legacyUnavailable:number;limits:{page:number;summaryRows:number;summaryBytes:number};
+}

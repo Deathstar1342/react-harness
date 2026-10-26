@@ -1,3 +1,4 @@
+import {observeRequest} from './inspector-records.js';
 import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
@@ -33,6 +34,7 @@ export interface RunState {
   instructionTargets?: string[];
 }
 export interface RuntimeHooks {
+  scheduled?:boolean;
   instructions(role: AgentRole): string;
   prepareMessages?: (chatId: string, frame: Frame, messages: ModelMessage[], signal: AbortSignal) => Promise<ModelMessage[]>;
   complete?: (role: AgentRole, input: Parameters<ModelProvider['complete']>[0]) => Promise<CompletionResult>;
@@ -844,10 +846,10 @@ export class Runtime {
       const input = {model:this.store.chatModels(chatId)[frame.role],messages,tools:publishedTools(frame.role,state.planOnly?'plan':'execute'),signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
       this.commitRunTransition(chatId,state,()=>{const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
       this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...promptIdentity(messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
-      const completion = await (this.hooks.complete ? this.hooks.complete(frame.role,input) : this.provider.complete(input)).finally(()=>deltas.flush());
+      const completion = await observeRequest(this.store,{chatId,projectId:this.store.chat(chatId).projectId,runId:state.frames[0].id,taskId:frame.id,generation,ordinal:state.steps,role:frame.role,humanMessageIds:state.humanMessageIds??[],...(frame.planStep?{planStep:frame.planStep}:{})},input,observed=>this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed),this.hooks.scheduled??false).finally(()=>deltas.flush());
       signal.throwIfAborted();
-      this.store.event(chatId,'provider_request',{role:frame.role,model:input.model,finishReason:completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
-      if (completion.usage) this.store.event(chatId,'usage',{role:frame.role,...completion.usage});
+      this.store.event(chatId,'provider_request',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,model:input.model,finishReason:completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
+      if (completion.usage) this.store.event(chatId,'usage',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,...completion.usage});
       await this.refreshInstructions(chatId,state,signal);
       if (state.generation !== generation) { this.deliverSteering(chatId,state); continue; }
       const calls = validateNativeCalls(completion.toolCalls);
@@ -1442,10 +1444,11 @@ export class Runtime {
           for (const affected of this.store.chats(projectId)) {
             this.store.event(affected.id, 'file_changed', {
               path: filename,
+              changeId:pending.id,
               source: 'agent',
               hash: snapshot?.hash,
             });
-            if (typeof pending.action.args.destination === 'string') this.store.event(affected.id,'file_changed',{path: pending.action.args.destination,source:'agent'});
+            if (typeof pending.action.args.destination === 'string') this.store.event(affected.id,'file_changed',{path: pending.action.args.destination,source:'agent',changeId:pending.id});
           }
         }
 

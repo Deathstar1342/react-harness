@@ -140,3 +140,15 @@ it.each(['projection','commit'])('M35 bounded preview uses exact private observe
   expect(()=>previewAuthority(store,project.id,id)).toThrow(/recovery/);expect(()=>authority.assertNativeDispatch('preview_read')).toThrow(/recovery/);expect(()=>authority.assertNativeDispatch('preview_close')).toThrow(/recovery/);
  }finally{store.close();dirname?.mockRestore();absolute?.mockRestore();normalize?.mockRestore();}
 });
+
+it.each(['start','after-response'])('inspector actual native final COMMIT veto prevents continuation, phase=%s',async phase=>{
+ const t=await peer(),root=mkdtempSync(path.join(tmpdir(),'native-inspector-')),filename=path.join(root,'state.sqlite');
+ const authority=await import('../server/native-storage.js');const policy={record:{storageId:t.descriptor.storageId,launchId:t.descriptor.launchId},roots:{state:root,config:path.join(root,'config'),control:path.join(root,'control'),workspace:path.join(root,'workspace')},verifyRoots:()=>{},permits:(file:string)=>file===root||file.startsWith(root+path.sep)} as unknown as NativeBindPolicy;
+ authority.installNativeStorage(policy,async()=>{throw Error('No workspace authority');},t.descriptor);
+ const {Store}=await import('../server/store.js'),{observeRequest}=await import('../server/inspector-records.js'),{inspectorView}=await import('../server/inspector.js');const store=new Store(filename),project=store.createProject('Inspector',root),chat=store.createChat(project.id,'Inspector','review');let invocations=0;
+ try{if(phase==='start')Atomics.store(t.words,1,Atomics.load(t.words,0)+2);
+ await expect(observeRequest(store,{chatId:chat.id,projectId:project.id,runId:'root',taskId:'frame',generation:0,ordinal:1,role:'architect',humanMessageIds:[]},{model:'model',messages:[]},async()=>{invocations++;Atomics.store(t.words,1,Atomics.load(t.words,0)+2);return {text:'Observed response',finishReason:'stop',usage:{inputTokens:7,outputTokens:2}};})).rejects.toThrow(/recovery/);
+ expect(invocations).toBe(phase==='start'?0:1);expect(()=>inspectorView(store,chat.id)).toThrow(/recovery/);
+ const inspect=new DatabaseSync(filename,{readOnly:true});try{const rows=inspect.prepare('SELECT data FROM inspector_requests').all();expect(rows).toHaveLength(phase==='start'?0:1);if(rows.length)expect(JSON.parse(String(rows[0].data))).toMatchObject({outcome:'pending',stage:'invoked',endedAt:null,usage:null});}finally{inspect.close();}
+ }finally{store.close();}
+});

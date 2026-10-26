@@ -1,3 +1,4 @@
+import {InspectorPanel} from './InspectorPanel';
 import {PreviewPanel} from './PreviewPanel';
 import {TransferDialog} from './TransferDialog';
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -53,6 +54,7 @@ export function Conversation({
   debug,
   onChange,
   onFiles,
+  onInspectFile,
   onChanges,
   onFileRevision,
   onSkillsDirty,
@@ -65,6 +67,7 @@ export function Conversation({
   debug: boolean;
   onChange: () => void;
   onFiles: () => void;
+  onInspectFile:(path:string)=>void;
   onChanges: () => void;
   onFileRevision: (revision: number) => void;
   onSkillsDirty:(dirty:boolean)=>void;
@@ -77,6 +80,9 @@ export function Conversation({
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [recoveryOpen,setRecoveryOpen]=useState(false);
+  const [inspectorOpen,setInspectorOpen]=useState(false);
+  const [inspectorReport,setInspectorReport]=useState<{id:string;nonce:number}>();
+  const inspectorControl=useRef<HTMLButtonElement>(null);
   const [checkpointsOpen,setCheckpointsOpen]=useState(false);
   const [previewOpen,setPreviewOpen]=useState(false);
   const [recoveryInstall,setRecoveryInstall]=useState<string>();
@@ -238,6 +244,7 @@ export function Conversation({
           <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>{detail.goal ? `Goal · ${detail.goal.status.replaceAll('_',' ')} · ${detail.plan.phases.filter(phase=>phase.steps.length && phase.steps.every(step=>step.status==='done' && detail.goal!.reviews.some(review=>review.planStep.planId===detail.plan.id && review.planStep.planVersion===detail.plan.version && review.planStep.phaseId===phase.id && review.planStep.stepId===step.id))).length}/${detail.plan.phases.length} phases` : 'Plan'}</button>
           <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
           <button className="text-button" aria-expanded={previewOpen} onClick={()=>setPreviewOpen(open=>!open)}>Preview</button>
+          <button ref={inspectorControl} className="text-button" aria-expanded={inspectorOpen} aria-controls="chat-inspector" onClick={()=>setInspectorOpen(open=>!open)}>Run and usage</button>
           <button ref={recoveryControl} className="text-button" aria-expanded={recoveryOpen} aria-controls="chat-recovery" onClick={()=>setRecoveryOpen(open=>!open)}>Recovery</button>
           <button className="text-button" aria-expanded={skillsOpen} onClick={()=>setSkillsOpen(true)}>Skills</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
@@ -246,6 +253,7 @@ export function Conversation({
       </header>
       {previewOpen&&<PreviewPanel key={project.id+chatId} projectId={project.id} revision={detail.events.filter(event=>event.type==='command').at(-1)?.id??0} connected={connection==='connected'} onClose={()=>setPreviewOpen(false)}/>}
       {checkpointsOpen&&<CheckpointsPanel key={chatId} projectId={project.id} chatId={chatId} revision={fileRevision} onClose={()=>setCheckpointsOpen(false)}/>}
+      {inspectorOpen&&<InspectorPanel detail={detail} connected={connection==='connected'} onClose={()=>{setInspectorOpen(false);inspectorControl.current?.focus();}} onNavigate={link=>{if(link.kind==='files'&&link.path)onInspectFile(link.path);else if(link.kind==='plan')navigateRecovery('plan');else if(link.kind==='tests'&&detail.tests.some(report=>report.id===link.id)){setInspectorReport({id:link.id,nonce:Date.now()});setInspectorOpen(false);}}}/>}
       {recoveryOpen&&<RecoveryPanel detail={detail} connected={connection==='connected'} onClose={()=>{setRecoveryOpen(false);recoveryControl.current?.focus();}} onNavigate={navigateRecovery}/>}
       {planOpen && <section id="chat-plan" className="chat-plan" aria-label="Current plan" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){setPlanOpen(false);planControl.current?.focus();}}}>
         <div className="plan-toolbar">
@@ -591,7 +599,7 @@ export function Conversation({
       </div>
       {terminalOpen && <TerminalPanel detail={detail} connected={connection === 'connected'} selectedProcessId={recoveryProcess} onClose={()=>setTerminalOpen(false)} />}
       {skillsOpen&&<SkillsPanel chatId={chatId} projectId={project.id} planOnly={detail.chat.mode==='plan'} onClose={()=>setSkillsOpen(false)} onChange={()=>void refresh()} onDirty={onSkillsDirty}/>}
-      <ActivityDrawer events={detail.events} tests={detail.tests} debug={debug} />
+      <ActivityDrawer selectedReportId={inspectorReport} events={detail.events} tests={detail.tests} debug={debug} />
     </main>
   );
 }
@@ -608,6 +616,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [sidebar, setSidebar] = useState(false);
   const [files, setFiles] = useState(false);
+  const [inspectFile,setInspectFile]=useState<{projectId:string;path:string;nonce:number}>();
   const [changes, setChanges] = useState(false);
   const editorLayout = useEditorLayout();
   const [dirty, setDirty] = useState(false);
@@ -898,6 +907,7 @@ export function App() {
               configured={!!settings?.configured}
               debug={preferences?.debugMode ?? false}
               onChange={() => void refreshChats()}
+              onInspectFile={path=>{setInspectFile({projectId:project.id,path,nonce:Date.now()});setFiles(true);}}
               onFiles={() => setFiles((old) => !old)}
               onChanges={() => setChanges(true)}
               onFileRevision={updateFileRevision}
@@ -960,6 +970,7 @@ export function App() {
               <FilePanel
                 key={project.id}
                 projectId={project.id}
+                requestedFile={inspectFile?.projectId===project.id?inspectFile:undefined}
                 revision={fileRevision}
                 onDirty={fileDirty}
                 onClose={() => setFiles(false)}

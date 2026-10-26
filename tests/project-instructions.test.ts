@@ -27,7 +27,7 @@ async function fixture(replies: Reply[] = [], mode: 'review' | 'autonomous' = 'r
   const project = store.createProject('Instructions', root), chat = store.createChat(project.id, 'Test', mode);
   const requests: Parameters<ModelProvider['complete']>[0][] = [];
   const provider: ModelProvider = { models: async () => ['test'], complete: vi.fn(async input => {
-    requests.push(structuredClone({ ...input, signal: undefined, onDelta: undefined }));
+    requests.push(structuredClone({ ...input, signal: undefined, onDelta: undefined, onObservation:undefined }));
     const reply = replies.shift();
     if (!reply) throw new Error('Unexpected model request');
     return (typeof reply === 'function' ? await reply(input) : reply);

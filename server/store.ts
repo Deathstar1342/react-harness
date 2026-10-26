@@ -1,3 +1,4 @@
+import {installInspector} from './inspector-records.js';
 import {checkpointCatalog,checkpointMetadata,checkpointJournalIntegrity,checkpointSaveJournal} from './checkpoint-state.js';
 import {nativeStateDatabase,nativeStateStore} from './native-state-database.js';
 import {nativePrivateUnit,nativePrivatePath} from './native-storage.js';
@@ -69,6 +70,8 @@ export class Store {
     database.exec('BEGIN IMMEDIATE');
     try {database.exec('CREATE TABLE IF NOT EXISTS checkpoint_effects (restore_id TEXT NOT NULL, ordinal INTEGER NOT NULL, change_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL, PRIMARY KEY(restore_id,ordinal))');database.exec('COMMIT');}
     catch(error){database.exec('ROLLBACK');throw error;}
+    database.exec('BEGIN IMMEDIATE');
+    try {installInspector({db:database} as Store);database.exec('COMMIT');}catch(error){database.exec('ROLLBACK');throw error;}
     database.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run('prototype:protocol',JSON.stringify('native-tools-v1'));
     return database;
     }catch(error){database.close();throw error;}
@@ -134,7 +137,7 @@ export class Store {
       const claim=JSON.parse(String(row.data)) as {id:string};
       this.db.prepare('DELETE FROM state WHERE key=? OR key=?').run(row.key,`skills:uncertain-event:${claim.id}`);
     }
-    for (const table of ['messages','events','approvals','test_reports']) this.db.prepare(`DELETE FROM ${table} WHERE chat_id=?`).run(chatId);
+    for (const table of ['messages','events','approvals','test_reports','inspector_requests']) this.db.prepare(`DELETE FROM ${table} WHERE chat_id=?`).run(chatId);
     this.db.prepare("DELETE FROM file_changes WHERE json_extract(summary,'$.chatId')=?").run(chatId);
     // Run, plan, summary and archived context keys are scoped by exact chat ID.
     for (const row of this.db.prepare('SELECT key FROM state').all()) {

@@ -1,3 +1,4 @@
+import {inspectorView} from './inspector.js';
 import {BrowserPreviews} from './browser-previews.js';
 import {browserProbeResult} from '../shared/browser-preview.js';
 import {registerNativeStorageScope} from './native-storage.js';
@@ -149,6 +150,7 @@ export async function createApp(options: AppOptions) {
   registerNativeStorageScope(app);
   options.lifecycle?.identity.register(app,options.lifecycle.close);
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
+  app.get('/api/chats/:id/inspector',async(request,reply)=>{const query=z.object({cursor:z.string().max(1024).optional()}).strict().parse(request.query);reply.header('Cache-Control','no-store');return inspectorView(store,paramId(request.params),query.cursor);});
   app.get('/api/chats/:id/recovery',async(request,reply)=>{
     z.object({}).strict().parse(request.query);
     reply.header('Cache-Control','no-store');return recoveryView(store,paramId(request.params));
@@ -169,7 +171,7 @@ export async function createApp(options: AppOptions) {
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';
     // This synchronous read validates bounded chat/project rows in its snapshot.
-    if(route==='/api/chats/:id/recovery')return;
+    if(route==='/api/chats/:id/recovery'||route==='/api/chats/:id/inspector')return;
     if(route.startsWith('/api/projects/:id/previews')){
       const {id}=z.strictObject({id:z.uuid()}).passthrough().parse(request.params),project=previewProject(store,id);
       if(request.method==='POST')store.assertCheckpointSafe(id);

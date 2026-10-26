@@ -228,7 +228,7 @@ export function TestRun({ report }: { report: TestReport }) {
   const counts = { passed: 0, failed: 0, skipped: 0, error: 0 };
   report.tests.forEach((test) => counts[test.status]++);
   return (
-    <details className="test-run" open={report.status !== "passed"}>
+    <details id={"test-report-"+report.id} tabIndex={-1} className="test-run" open={report.status !== "passed"}>
       <summary>
         <TestStatusIcon status={report.status} />
         <strong>{report.runner}</strong>
@@ -294,17 +294,20 @@ export function TestReports({ reports }: { reports: TestReport[] }) {
 }
 
 export function ActivityDrawer({
+  selectedReportId,
   events,
   tests,
   debug = false,
 }: {
   events: RunEvent[];
+  selectedReportId?:{id:string;nonce:number};
   tests: TestReport[];
   debug?: boolean;
 }) {
   const [selectedTab, setTab] = useState<"terminal" | "tests">("tests");
   const tab = debug ? selectedTab : 'tests';
   const [open, setOpen] = useState(false);
+  useEffect(()=>{if(selectedReportId){setTab("tests");setOpen(true);const t=setTimeout(()=>{const node=document.getElementById("test-report-"+selectedReportId.id) as HTMLDetailsElement|null;if(node){node.open=true;let parent=node.parentElement;while(parent){if(parent.tagName==='DETAILS')(parent as HTMLDetailsElement).open=true;parent=parent.parentElement;}node.focus();node.scrollIntoView({block:"nearest"});}},0);return()=>clearTimeout(t);}},[selectedReportId]);
   const output = terminalEvents(events);
   return (
     <section
