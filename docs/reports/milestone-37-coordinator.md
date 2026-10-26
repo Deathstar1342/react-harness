@@ -1,5 +1,13 @@
 # Milestone 37 coordinator — sequential task queue
 
+## Exact457 source CI — connected queue barrier failure retained
+
+Compact cursor0efd9680-69cb-46f0-b89a-f525798fda31:10 remains active. Fresh authenticated exact457 workflow/job review:Validate40390198134/job121808883114,Desktop40390198010 Ubuntu121808883076/Windows121808883457,support40390198062 Ubuntu121808882813/Windows121808883202,helper40390198019/job121808882955 green. Source40390198057 Ubuntu24job121808882838/22job121808883319 green,downstreamWindows121812613296 still active at query;Installer40390206415 separateheldM21. No source CI acceptance yet.
+
+Container40390198032/job121808883723 FAILED required connected step11 after original build/broker/real worker/source/supervisor gates passed. Independent authenticated fresh failed archive12683865513/published54173B/SHA9d2333453060423e1c047dc62dbe98c0bacf1f7e70b6aea852923cd675162052 downloaded,paths/no links/collisions/privacy/CRC/source audited. Retain frozen-4570cf2/source-failed-container ZIP/archive-audit.log/metadata.json accepted=false. Original browser-running.log line20 reports queue Start expected409/received400. connected-failure.json source457 retains exact immutable source images/authenticated broker/owned controller/public binding/actual ProcessJobs owned worker start;full browser/drain/restart clean connected acceptance did not complete.
+
+Current fixture discards queue Start response body,so400 cause not established from original receipt. Sent child bounded safe GET/PATCH/Start status/body/schema/scope diagnostics in disposable CI,keeping exact409/pending/nochat/unchangedstarts-provider and every original control;generic400 is not proof of the owned-worker barrier. No >=400 waiver,blind unchanged retry,workstation Docker/WSL/provisioning or user blocker. Root local1204/47/typecheck/build/UI/replays remain independently green but do not substitute for this required actual-worker gate. Child owns diagnosis/correction/new coherent exact-source gates/artifacts as needed. No main product integration/delivery,M21 held.
+
 ## Corrected457 independent local acceptance and original fault replays
 
 HTTP-corrected clean published `4570cf2bb89aa249362060da7f09e7ba6ef7727c` / tree `2f7df0b65086d1a6e93ca81ab6f0d80e12e907be` independently reviewed:four narrow app/queue-project/regression/report files beyond658. Exact queue route templates now select bounded queueProject/reset/removal/checkpoint/closing guards before generic project loads. Nonqueue JSON delegates the original configured Fastify default parser;exact queue raw duplicate scan precedes that same parser,query substrings do not select stricter limits. Own clean physical-D m37-independent advanced457;all previous commits/receipts preserved.
