@@ -12,15 +12,16 @@ export function InstallPreview({preview}: {preview:PackageHelperPreview}) {
   </div>;
 }
 
-export function InstallHistory({chatId}: {chatId?:string}) {
+export function InstallHistory({chatId,selectedId}: {chatId?:string;selectedId?:string}) {
   const [open,setOpen]=useState(false), [items,setItems]=useState<InstallRecord[]>([]), [error,setError]=useState(''), [busy,setBusy]=useState(false), [truncated,setTruncated]=useState(false);
   const load=async()=>{const data=await request<{items:InstallRecord[];truncated:boolean}>('/system-installs/history');setItems(data.items.filter(i=>!chatId||i.chatId===chatId));setTruncated(data.truncated);};
   const action=async(item:InstallRecord,kind:string)=>{setBusy(true);setError('');try{await post(`/system-installs/${id(item.id)}/${kind}`,{});await load();}catch(e){setError(errorText(e));}finally{setBusy(false);}};
-  return <details className="approval-history" open={open} onToggle={event=>{const expanded=event.currentTarget.open;setOpen(expanded);if(expanded)void load().catch(e=>setError(errorText(e)));}}>
+  return <details id={chatId?'recovery-install-history':undefined} tabIndex={-1} className="approval-history" open={open} onToggle={event=>{const expanded=event.currentTarget.open;setOpen(expanded);if(expanded)void load().catch(e=>setError(errorText(e)));}}>
     <summary>System install history</summary>
+    {selectedId&&<p role="status">Selected install: {selectedId}. {open&&!items.some(item=>item.id===selectedId)?'This exact record is outside the latest profile history. Recovery retains its outcome; no recovery action is offered for a different record.':'Open this history and inspect the matching record before using its checked recovery controls.'}</p>}
     {open && <><button className="text-button" onClick={()=>void load().catch(e=>setError(errorText(e)))}>Refresh outcomes</button>
       {!items.length&&<p>No system install requests recorded.</p>}{truncated&&<p>Latest 100 profile records shown. Earlier records remain in the backend.</p>}
-      {items.map(item=><article key={item.id} className="install-history-item"><strong>{item.recommendation.packages.map(p=>p.name).join(', ')} · {item.state}</strong><p>{item.code} · {item.decision ? `${item.decision.source}: ${item.decision.outcome} — ${item.decision.reason}`:'No approval decision'}</p>
+      {items.map(item=><article key={item.id} className="install-history-item" aria-label={item.id===selectedId?'Selected install recovery':undefined}><strong>{item.recommendation.packages.map(p=>p.name).join(', ')} · {item.state}</strong><p>Install {item.id}</p><p>{item.code} · {item.decision ? `${item.decision.source}: ${item.decision.outcome} — ${item.decision.reason}`:'No approval decision'}</p>
         <p>{item.recommendation.reason}</p><p className="field-help">{new Date(item.createdAt).toLocaleString()} · {item.settings.target?`${item.settings.target.distribution} ${item.settings.target.release}`:'Target unavailable'}</p>
         {item.recoveryRequired&&<p role="status">Outcome needs recovery. Cancellation does not undo package effects. Installation will not be replayed.</p>}
         {item.reconciliation&&<p>Observed package versions {item.reconciliation.matches?'match':'do not all match'}; package manager {item.reconciliation.healthy?'healthy':'needs repair'}. Original outcome remains {item.state}.</p>}

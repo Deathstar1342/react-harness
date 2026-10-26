@@ -4,13 +4,14 @@ import {post,id,errorText} from './api';
 import type { ChatDetail } from '../shared/types';
 import { commandLabel, consoleText, terminalHistory } from './terminal';
 
-export function TerminalPanel({detail,connected,onClose}: {detail:ChatDetail; connected:boolean; onClose:()=>void}) {
+export function TerminalPanel({detail,connected,onClose,selectedProcessId}: {detail:ChatDetail; connected:boolean; onClose:()=>void;selectedProcessId?:string}) {
   const [cancelling,setCancelling]=useState<string|null>(null),[error,setError]=useState('');
   const cancel=async(processId:string)=>{setCancelling(processId);setError('');try{await post(`/chats/${id(detail.chat.id)}/processes/${id(processId)}/cancel`,{});}catch(error){setError(errorText(error));}finally{setCancelling(null);}};
   const history = terminalHistory(detail.events,detail.chat.id);
-  return <section id="command-terminal" className="command-terminal" aria-label="Command output">
+  return <section id="command-terminal" className="command-terminal" aria-label="Command output" tabIndex={-1}>
     <header><strong>Terminal</strong><span className="muted">Read-only command evidence</span><button className="icon-button" onClick={onClose} aria-label="Close terminal"><X size={15}/></button></header>
     <div className="command-scroll">
+      {selectedProcessId&&<p role="status">Selected owned process: {selectedProcessId}. {history.commands.some(entry=>entry.lifecycle?.processId===selectedProcessId)?'Inspect its original command below.':'Its command is outside the retained terminal window; Recovery retains the recorded status. Missing history does not authorize replay or cancellation.'}</p>}
       {error&&<p role="alert">{error}</p>}
       {!connected && <p role="status">Reconnecting. These are last recorded outcomes; command activity may have changed.</p>}
       {detail.eventsTruncated && <p role="status">Earlier history is omitted. Starts, output, or outcomes may be missing from this view.</p>}

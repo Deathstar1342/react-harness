@@ -2076,3 +2076,17 @@ option {
 .skills-actions { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
 .skill-diff { max-height:240px; overflow:auto; white-space:pre-wrap; }
 @media(max-width:650px) { .skills-columns { grid-template-columns:1fr; } }
+.chat-recovery { flex: 0 1 auto; min-height: 180px; max-height: 58vh; margin: 0 24px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel, #18191c); overflow: hidden; display: flex; flex-direction: column; }
+.chat-recovery > header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.chat-recovery h2 { font-size: 15px; margin: 0 auto 0 0; }
+.recovery-scroll { overflow: auto; min-height: 0; padding: 4px 16px 14px; font-size: 13px; }
+.recovery-entries { list-style: none; margin: 14px 0; padding: 0; }
+.recovery-entry { border-top: 1px solid var(--border); padding: 12px 0; overflow-wrap: anywhere; }
+.recovery-entry p { margin: 5px 0; }
+.recovery-entry strong { margin-right: 12px; }
+.recovery-uncertain strong, .recovery-interrupted strong { color: #edb66f; }
+.recovery-entry dl { margin: 6px 0; }
+.recovery-entry dl > div { display: flex; gap: 12px; }
+.recovery-entry dt { min-width: 85px; color: var(--muted); }
+.recovery-entry dd { margin: 0; }
+@media (max-width: 720px) { .chat-recovery { margin: 0 10px 8px; max-height: 52vh; } .chat-recovery > header { gap: 5px; padding: 8px; } }

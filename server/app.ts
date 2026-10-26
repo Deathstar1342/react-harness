@@ -29,6 +29,7 @@ import type { BackendLifecycle } from './lifecycle.js';
 import { InstallService, type InstallHelper } from './installs.js';
 import type { TransportAuth } from './transport-auth.js';
 import {ContainerInstallClient} from './container-installs.js';
+import {recoveryView} from './recovery.js';
 import {workerAvailable} from './worker-client.js';
 import { containerExecutionUnavailable } from './container-contract.js';
 
@@ -139,6 +140,10 @@ export async function createApp(options: AppOptions) {
   registerNativeStorageScope(app);
   options.lifecycle?.identity.register(app,options.lifecycle.close);
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
+  app.get('/api/chats/:id/recovery',async(request,reply)=>{
+    z.object({}).strict().parse(request.query);
+    reply.header('Cache-Control','no-store');return recoveryView(store,paramId(request.params));
+  });
   app.get('/api/chats/:id/skills',async request=>{await runtime.checkSkills(paramId(request.params));return {catalog:await runtime.skills.files(paramId(request.params)).catalog(),selection:runtime.skills.view(paramId(request.params)),drafts:runtime.skills.drafts(paramId(request.params))};});
   app.get('/api/chats/:id/skills/document',async request=>{const input=skillIdentity.parse(request.query);return runtime.skills.files(paramId(request.params)).load(input.scope,input.name);});
   app.post('/api/chats/:id/skills/draft',async request=>store.transaction(()=>runtime.skills.draft(paramId(request.params),skillDraftInput.parse(request.body),'human')));
@@ -154,6 +159,8 @@ export async function createApp(options: AppOptions) {
   // Track complete request lifetimes, including awaits before a save or registration.
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';
+    // This synchronous read validates bounded chat/project rows in its snapshot.
+    if(route==='/api/chats/:id/recovery')return;
     if (request.method==='DELETE' || route.endsWith('/deletion-preview') || route.endsWith('/events')) return;
     if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { if(resetting.size)throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});requests.set(request.id,'*');return; }
     const params=request.params as {id?:string};
