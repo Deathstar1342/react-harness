@@ -3,6 +3,7 @@ import type {Store} from './store.js';
 import type {RecoveryEntry,RecoveryStatus,RecoveryView,ChatStatus,GoalStatus,PlanStepRef} from '../shared/types.js';
 import {toolRegistry,parseToolArguments} from './tool-registry.js';
 import {helperCanonical} from './package-helper.js';
+import {parseNativeJSON} from './native-json.js';
 
 export const RECOVERY_LIMITS={events:500,installs:100,processes:64,calls:100,steps:100,entries:200,evidence:8,
   eventBytes:131072,recordBytes:131072,runBytes:2097152,sourceBytes:4194304} as const;
@@ -29,7 +30,7 @@ const nonDispatchStatus=(result:Obj):RecoveryStatus=>{
 const ref=(value:unknown):PlanStepRef|undefined=>{const v=object(value),planId=identity(v.planId),phaseId=identity(v.phaseId),stepId=identity(v.stepId),planVersion=integer(v.planVersion);return planId&&phaseId&&stepId&&planVersion?{planId,phaseId,stepId,planVersion}:undefined;};
 const parse=(value:unknown,max:number):Obj|undefined=>{
   if(typeof value!=='string'||Buffer.byteLength(value)>max)return;
-  try{const result=JSON.parse(value);return result&&typeof result==='object'&&!Array.isArray(result)?result:undefined;}catch{return;}
+  try{const result=parseNativeJSON(value,max);return result&&typeof result==='object'&&!Array.isArray(result)?result as Obj:undefined;}catch{return;}
 };
 const missing=()=>Object.assign(new Error('Recovery evidence is unavailable for this chat.'),{statusCode:404});
 
@@ -139,7 +140,10 @@ function observe(store:Store,chatId:string):RecoveryView {
   legacyCoverage.unavailable=legacyRows.slice(0,RECOVERY_LIMITS.events).filter(row=>row.correlated!==1).length;
   const run=state(`run:${chatId}`,RECOVERY_LIMITS.runBytes,'run');
   const callCoverage=cover('calls',RECOVERY_LIMITS.calls);
-  const originalHuman=(id:string)=>store.db.prepare("SELECT 1 FROM messages WHERE id=? AND chat_id=? AND CASE WHEN length(CAST(data AS BLOB))<=? THEN CASE WHEN json_valid(data) THEN json_extract(data,'$.role')='user' ELSE 0 END ELSE 0 END").get(id,chatId,RECOVERY_LIMITS.recordBytes);
+  const originalHuman=(id:string)=>{
+    const row=store.db.prepare('SELECT CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM messages WHERE id=? AND chat_id=?').get(RECOVERY_LIMITS.recordBytes,id,chatId),message=parse(row?.data,RECOVERY_LIMITS.recordBytes);
+    return message?.id===id&&message.chatId===chatId&&message.role==='user';
+  };
   const humanMessageIds:string[]=[];
   if(run){
     if(!Array.isArray(run.frames))callCoverage.unavailable++;
@@ -229,7 +233,9 @@ function observe(store:Store,chatId:string):RecoveryView {
     if(!epochTime(item.createdAt)||!epochTime(item.updatedAt)||integer(item.generation)===undefined||integer(item.modeVersion)===undefined||typeof item.recoveryRequired!=='boolean'){s='unknown';coverage.at(-1)!.unavailable++;}
     const sources=store.db.prepare(`SELECT id,created_at,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND type IN ('install','install_reconciliation') AND
       CASE WHEN length(CAST(data AS BLOB))<=? THEN CASE WHEN json_valid(data) THEN COALESCE(json_extract(data,'$.installId'),json_extract(data,'$.id'))=? ELSE 0 END ELSE 0 END ORDER BY id DESC LIMIT ?`).all(RECOVERY_LIMITS.recordBytes,chatId,RECOVERY_LIMITS.recordBytes,installId,RECOVERY_LIMITS.evidence+1);
-    const originalUncertainty=old?.status==='uncertain'||old?.status==='interrupted'||sources.length>RECOVERY_LIMITS.evidence||sources.some(row=>parse(row.data,RECOVERY_LIMITS.recordBytes)?.state==='uncertain');
+    const parsedSources=sources.map(row=>parse(row.data,RECOVERY_LIMITS.recordBytes)),missingSources=parsedSources.filter(value=>!value).length;
+    coverage.find(c=>c.source==='installs')!.unavailable+=missingSources;
+    const originalUncertainty=old?.status==='uncertain'||old?.status==='interrupted'||sources.length>RECOVERY_LIMITS.evidence||missingSources>0||parsedSources.some(value=>value?.state==='uncertain');
     let receiptEventId:number|undefined;
     if(originalUncertainty){
       const receipt=state(`install-reconciliation:${installId}`,RECOVERY_LIMITS.recordBytes,`install receipt ${installId}`),target=object(object(item.settings).target);
@@ -253,7 +259,7 @@ function observe(store:Store,chatId:string):RecoveryView {
     if(id&&revision&&['running','waiting_for_approval','waiting_for_user','paused','blocked','completed'].includes(s)){
       const original=human&&originalHuman(human);
       const uncertain=Array.isArray(rawGoal.uncertainEventIds)?rawGoal.uncertainEventIds:[];
-      const source=store.db.prepare(`SELECT id FROM events WHERE chat_id=? AND type='goal' AND CASE WHEN length(CAST(data AS BLOB))<=? THEN CASE WHEN json_valid(data) THEN json_extract(data,'$.id')=? AND json_extract(data,'$.revision')=? AND json_extract(data,'$.status')=? ELSE 0 END ELSE 0 END ORDER BY id DESC LIMIT 1`).get(chatId,RECOVERY_LIMITS.recordBytes,id,revision,s);
+      const sourceRow=store.db.prepare(`SELECT id,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND type='goal' AND CASE WHEN length(CAST(data AS BLOB))<=? THEN CASE WHEN json_valid(data) THEN json_extract(data,'$.id')=? AND json_extract(data,'$.revision')=? AND json_extract(data,'$.status')=? ELSE 0 END ELSE 0 END ORDER BY id DESC LIMIT 1`).get(RECOVERY_LIMITS.recordBytes,chatId,RECOVERY_LIMITS.recordBytes,id,revision,s),sourceData=parse(sourceRow?.data,RECOVERY_LIMITS.recordBytes),source=sourceData?.id===id&&sourceData.revision===revision&&sourceData.status===s?sourceRow:undefined;
       goal={id,revision,status:s as GoalStatus,humanMessageId:original?human!:null,updatedAt:time(rawGoal.updatedAt),uncertainEventIds:uncertain.slice(0,100).flatMap(v=>integer(v)?[Number(v)]:[]),truncated:uncertain.length>100||rawGoal.uncertaintyOverflow===true||rawGoal.evidenceOverflow===true,eventId:integer(source?.id)??null};
       if(!source)coverage.find(c=>c.source==='goal')!.unavailable++;
     }else coverage.find(c=>c.source==='goal')!.unavailable++;

@@ -169,6 +169,16 @@ describe('bounded read-only recovery projection, actual disk SQLite and Runtime'
     const view=t.read();expect(view.entries.length).toBeLessThanOrEqual(RECOVERY_LIMITS.entries);expect(view.coverage.find(c=>c.source==='events')?.truncated).toBe(true);expect(view.coverage.find(c=>c.source==='entries')?.truncated).toBe(true);
     expect(view.coverage.find(c=>c.source==='run')?.unavailable).toBe(1);expect(view.coverage.find(c=>c.source==='processes')?.unavailable).toBe(2);expect(JSON.stringify(view)).not.toContain('PRIVATE_');
   });
+  it('rejects ambiguous duplicate JSON keys instead of replacing original uncertainty',async()=>{
+    const t=await fixture();
+    t.store.db.prepare('INSERT INTO events (chat_id,type,data,created_at) VALUES (?,?,?,?)').run(t.chat.id,'command','{"agentId":"frame","commandId":"ambiguous-command","action":{"name":"run_shell","args":{"command":"fixture"}},"status":"uncertain","status":"completed","exitCode":0}',new Date().toISOString());
+    let deep:unknown='PRIVATE_DEPTH';for(let i=0;i<70;i++)deep={child:deep};t.store.event(t.chat.id,'command',{agentId:'frame',commandId:'deep-command',action,status:'completed',exitCode:0,deep});
+    const view=t.read();expect(view.entries.find(e=>e.commandId==='ambiguous-command')).toBeUndefined();expect(view.entries.find(e=>e.commandId==='deep-command')).toBeUndefined();expect(view.coverage.find(c=>c.source==='events')?.unavailable).toBe(2);
+  });
+  it('passes the explicit run byte bound to the strict parser for valid runs above its default limit',async()=>{
+    const t=await fixture(),state=t.seed('prepared');t.store.setState(`run:${t.chat.id}`,{...state,private:'x'.repeat(1200000)});
+    const view=t.read();expect(view.coverage.find(c=>c.source==='run')?.unavailable).toBe(0);expect(view.entries.some(e=>e.status==='not_started')).toBe(true);expect(JSON.stringify(view)).not.toContain('xxxxxxxx');
+  });
   it('includes every projected version/coverage change in observational revision',async()=>{
     const t=await fixture();const first=t.read();expect(t.read().revision).toBe(first.revision);
     t.store.updateChat(t.chat.id,{mode:'plan',modeVersion:4});expect(t.read().revision).not.toBe(first.revision);
