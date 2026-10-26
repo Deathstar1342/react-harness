@@ -6,11 +6,13 @@ User authorization: cancel the native-local deployment redesign, keep current de
 
 ### M33 — Recovery dashboard
 
-Implementation independently reviewed/integrated/published as main `371601602b31fdebe7533f5d09cb8a6103ab70e4` from report-only `fd13ed4` / tested `e14d763`. Coordinator1040Windows tests/46skips,typecheck/build/actualChrome+Electron and155integration checks pass;every applicable source six-workflow step/all9archives independently audited. Delivery remains pending every exact-main Validate `40305577223`,Desktop `40305577348`,support `40305577335`,helper `40305577182`,Container `40305577288`,Source `40305577241` step/fresh evidence. No M34 until those gates pass. [Review](reports/milestone-33-coordinator.md).
+Delivered on reviewed GitHub main `371601602b31fdebe7533f5d09cb8a6103ab70e4` from report-only `fd13ed4` / tested `e14d763`. Coordinator1040Windows tests/46skips,typecheck/build/actualChrome+Electron and155integration checks passed. EVERY applicable exact-main Validate `40305577223`,Desktop `40305577348` Windows/Ubuntu,support `40305577335` Windows/Ubuntu,helper `40305577182`,Container `40305577288`,Source `40305577241` Ubuntu22/24/downstreamWindows step and all9 fresh source-bound archives independently verified. M34 may start from reviewed published main with docs-only kickoff. M21 and platform/human/provider/release limits stay held. [Review](reports/milestone-33-coordinator.md).
 
 Unify interrupted/finished/not-started/running/uncertain work in a bounded authenticated view, with links to existing checked recovery actions. Preserve original evidence and all no-replay/approval/goal gates; no generic uncertainty waiver. Real SQLite/Runtime restart plus UI acceptance required.
 
 ### M34 — Task file checkpoints
+
+Dedicated isolated D kickoff authorized after M33 exact-main delivery; concrete bounded storage/exclusions/integrity/retention/capture/preview/partial-restore journal contract required before substantial interfaces. [Coordinator kickoff](reports/milestone-34-coordinator.md).
 
 Capture bounded project-code checkpoints and preview/restore coherent sets of files under current hashes, leases, idle-project admission and durable restore journals. Never imply command/install/external-effect rollback or overwrite later edits. Preserve history, private evidence and partial-restore uncertainty.
 
