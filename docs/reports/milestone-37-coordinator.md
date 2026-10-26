@@ -1,5 +1,11 @@
 # Milestone 37 coordinator — sequential task queue
 
+## Queue-only HTTP conflict correction — mutable review
+
+Compact cursor0efd9680-69cb-46f0-b89a-f525798fda31:11 remains active. Independently read four-file uncommitted diff beyond457:app error handler adds typed CONFLICT/PROCESS_BUSY HTTP409 mapping only for exact registered queue route templates;ProcessJobs assertIdle retains its original refusal and adds the trusted PROCESS_BUSY code. Existing ordinary route message/status mapping and execution authority remain unchanged in this diff. New actual createApp/production ProcessJobs controlled-executor regression holds the original mutation reservation,requires exact409 and no queue chat,then retains uncertain process evidence after drain and requires exact409/no queue chat/provider0 again. This is reviewed source direction,not independently executed frozen acceptance or actual-worker CI.
+
+Fresh authenticated Source40390198057 job metadata now independently confirms downstreamWindows121812613296 completed successfully,alongside Linux22/24. Five exact457 workflows green;Container40390198032 remains failed/excluded. Original failed archive did not save the response body,so the exact original400 cause remains unproven from that receipt. Source analysis is consistent with the missing typed HTTP mapping;fresh coherent successor and disposable connected CI must prove exact409 and all original controls without assertion/count/timeout waivers. Child owns correction/full/typecheck/build/expanded both UIs/all6freshsourceCI/all9archives/report-only handoff. No duplicate feature edits,healthy-CI cancellation,user blocker,main integration/delivery or M21 resumption.
+
 ## Exact457 source CI — connected queue barrier failure retained
 
 Compact cursor0efd9680-69cb-46f0-b89a-f525798fda31:10 remains active. Fresh authenticated exact457 workflow/job review:Validate40390198134/job121808883114,Desktop40390198010 Ubuntu121808883076/Windows121808883457,support40390198062 Ubuntu121808882813/Windows121808883202,helper40390198019/job121808882955 green. Source40390198057 Ubuntu24job121808882838/22job121808883319 green,downstreamWindows121812613296 still active at query;Installer40390206415 separateheldM21. No source CI acceptance yet.
