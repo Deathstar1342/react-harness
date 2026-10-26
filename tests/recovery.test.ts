@@ -116,6 +116,23 @@ describe('bounded read-only recovery projection, actual disk SQLite and Runtime'
     t.store.event(t.chat.id,'command',{...source,status:'uncertain'});t.store.event(t.chat.id,'command',{...source,status:'running'});
     expect(t.read().entries.find(e=>e.commandId==='original-command')?.status).toBe('uncertain');
   });
+  it.each([false,true])('preserves explicit tool uncertainty against completed lifecycle in either ordering (%s)',async toolFirst=>{
+    const t=await fixture(),source={agentId:'exact-frame',commandId:'exact-command',toolCallId:'exact-call',action};
+    const command=()=>t.store.event(t.chat.id,'command',{...source,status:'completed',exitCode:0}),tool=()=>t.store.event(t.chat.id,'tool',{...source,result:{ok:false,data:{uncertain:true}}});
+    if(toolFirst){tool();command();}else{command();tool();}
+    expect(t.read().entries.find(e=>e.commandId==='exact-command')).toMatchObject({status:'uncertain',callId:'exact-call'});
+  });
+  it.each([{cancelled:true},{timedOut:true},{state:'uncertain'},{shellReset:true,error:'Lost boundary'}])('never completes a generic tool result with interrupted/uncertain indicators %j',async data=>{
+    const t=await fixture();t.store.event(t.chat.id,'tool',{agentId:'frame',commandId:'command',action:{name:'read_file',args:{path:'fixture'}},result:{ok:true,data}});
+    expect(['interrupted','uncertain']).toContain(t.read().entries.find(e=>e.commandId==='command')?.status);
+  });
+  it.each(['callId','processId','generation'] as const)('refuses conflicting process %s without replacing original identity',async field=>{
+    const t=await fixture(),id=randomUUID(),now=new Date().toISOString();
+    t.store.event(t.chat.id,'command',{agentId:'exact-frame',commandId:'exact-command',toolCallId:'original-call',processId:id,generation:2,action,status:'running'});
+    t.store.setState(`process-job:${id}`,{id,projectId:t.project.id,chatId:t.chat.id,frameId:'exact-frame',commandId:'exact-command',callId:field==='callId'?'different-call':'original-call',generation:field==='generation'?3:2,modeVersion:0,status:'completed',exitCode:0,dispatched:true,createdAt:now,updatedAt:now});
+    if(field==='processId')t.store.db.prepare("UPDATE events SET data=json_set(data,'$.processId',?) WHERE chat_id=?").run(randomUUID(),t.chat.id);
+    const view=t.read(),entry=view.entries.find(e=>e.commandId==='exact-command');expect(entry).toMatchObject({status:'uncertain',callId:'original-call',generation:2});expect(view.coverage.find(c=>c.source==='processes')?.unavailable).toBe(1);
+  });
   it.each([{uncertain:true},{recoveryRequired:true},{cancelled:true},{timedOut:true},{shellReset:true},{exitCode:0},{state:'uncertain'}])('refuses contradictory recovered native non-dispatch result %j',async indicators=>{
     const t=await fixture(),call=nativeReply('read_file',{path:'fixture'}).toolCalls![0];
     t.store.setState(`run:${t.chat.id}`,{planOnly:false,generation:0,steps:0,steering:[],frames:[{id:'exact-frame',role:'coder',repairs:0,messages:[{role:'assistant',content:'',tool_calls:[call]},{role:'tool',tool_call_id:call.id,content:JSON.stringify({ok:false,data:{status:'not_started',...indicators}})}]}]});
@@ -137,7 +154,10 @@ describe('bounded read-only recovery projection, actual disk SQLite and Runtime'
     t.store.saveInstall(uncertain);fake.helper.reconcile.mockImplementationOnce(async id=>structuredClone(fake.records.get(id)!));await service.recover(item.id,true);expect(t.read().entries.find(e=>e.installId===item.id)?.status).toBe('completed');
     const receipt=t.store.getState<Record<string,unknown>>(`install-reconciliation:${item.id}`,{});
     for(const patch of [{previewDigest:'wrong'},{targetKey:'wrong'},{eventId:999999},{chatId:'foreign-chat'},{healthy:false}]){t.store.setState(`install-reconciliation:${item.id}`,{...receipt,...patch});expect(t.read().entries.find(e=>e.installId===item.id)?.status).toBe('uncertain');}
-    t.store.setState(`install-reconciliation:${item.id}`,receipt);expect(t.read().entries.find(e=>e.installId===item.id)?.status).toBe('completed');expect(fake.helper.execute).toHaveBeenCalledTimes(1);expect(fake.helper.reconcile).toHaveBeenCalledTimes(1);await service.close();
+    t.store.setState(`install-reconciliation:${item.id}`,receipt);expect(t.read().entries.find(e=>e.installId===item.id)?.status).toBe('completed');
+    const reconciled=t.store.install(item.id);
+    for(const patch of [{reconciliation:undefined},{reconciliation:{healthy:false,matches:true,packages:[]}},{reconciliation:{healthy:true,matches:false,packages:[]}},{state:'noop' as const},{recoveryRequired:true}]){t.store.saveInstall({...reconciled,...patch});expect(t.read().entries.find(e=>e.installId===item.id)?.status).toBe('uncertain');}
+    t.store.saveInstall(reconciled);expect(t.read().entries.find(e=>e.installId===item.id)?.status).toBe('completed');expect(fake.helper.execute).toHaveBeenCalledTimes(1);expect(fake.helper.reconcile).toHaveBeenCalledTimes(1);await service.close();
   });
   it('bounds long histories and record bytes before parsing, and tolerates malformed/foreign records',async()=>{
     const t=await fixture();

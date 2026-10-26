@@ -20,6 +20,7 @@ const originalToolName=(value:unknown)=>{
   try{parseToolArguments(name,fn.arguments);return name;}catch{return;}
 };
 const operationKey=(frameId:string,kind:'command'|'call',id:string)=>JSON.stringify([frameId,kind,id]);
+const uncertainData=(data:Obj)=>data.uncertain===true||data.recoveryRequired===true||data.state==='uncertain'||data.shellReset===true&&typeof data.error==='string'&&data.cancelled!==true&&data.timedOut!==true;
 const nonDispatchStatus=(result:Obj):RecoveryStatus=>{
   const data=object(result.data);
   if(data.uncertain===true||data.recoveryRequired===true||data.cancelled===true||data.timedOut===true||data.shellReset===true||data.exitCode!==undefined||['uncertain','authorizing','dispatching','succeeded'].includes(String(data.state))||result.ok!==false)return 'uncertain';
@@ -70,6 +71,15 @@ function observe(store:Store,chatId:string):RecoveryView {
   const eventEvidence=(entry:RecoveryEntry,id:unknown,at:unknown)=>{
     const n=integer(id);if(n&& !entry.evidence.some(e=>e.eventId===n)){entry.evidence.push({eventId:n,at:time(at)});entry.evidence.sort((a,b)=>b.eventId-a.eventId);if(entry.evidence.length>RECOVERY_LIMITS.evidence){entry.evidence.pop();entry.evidenceTruncated=true;}}
   };
+  const bind=(entry:RecoveryEntry,source:{callId?:string;processId?:string;generation?:number})=>{
+    for(const field of ['callId','processId','generation'] as const)if(entry[field]!==undefined&&source[field]!==undefined&&entry[field]!==source[field]){
+      entry.status='uncertain';entry.reason='Conflicting original call/process/generation identities; evidence was not merged.';return false;
+    }
+    if(entry.callId===undefined&&source.callId!==undefined)entry.callId=source.callId;
+    if(entry.processId===undefined&&source.processId!==undefined)entry.processId=source.processId;
+    if(entry.generation===undefined&&source.generation!==undefined)entry.generation=source.generation;
+    return true;
+  };
   const latest=store.db.prepare('SELECT MAX(id) AS id FROM events WHERE chat_id=?').get(chatId);
   const eventCoverage=cover('events',RECOVERY_LIMITS.events);
   // Window budget applies before materializing JSON. Invalid/large records stay
@@ -83,7 +93,7 @@ function observe(store:Store,chatId:string):RecoveryView {
   // uncertainty or conflict. Retain earlier IDs without projecting raw payloads.
   const commandEvidence=new Map<string,RecoveryEntry>();
   for(const row of eventRows.slice(0,RECOVERY_LIMITS.events)){
-    const data=parse(row.data,RECOVERY_LIMITS.eventBytes),frameId=identity(data?.agentId),commandId=identity(data?.commandId),callId=identity(data?.toolCallId);
+    const data=parse(row.data,RECOVERY_LIMITS.eventBytes),frameId=identity(data?.agentId),commandId=identity(data?.commandId),callId=identity(data?.toolCallId)??identity(data?.callId);
     if(!data||!frameId||(!commandId&&!callId)){eventCoverage.unavailable++;continue;}
     const name=toolName(object(data.action).name),key=operationKey(frameId,commandId?'command':'call',(commandId??callId)!);
     const previous=entries.get(key);
@@ -96,23 +106,29 @@ function observe(store:Store,chatId:string):RecoveryView {
     if(command && (data.cancelled===true||data.timedOut===true) && outcome==='completed')outcome='uncertain';
     if(command && (data.uncertain===true||data.recoveryRequired===true))outcome='uncertain';
     const result=object(data.result),resultData=object(result.data);
-    if(!command && 'result' in data){outcome=resultData.uncertain===true||resultData.recoveryRequired===true?'uncertain':resultData.status==='not_started'?nonDispatchStatus(result):name&&typeof result.ok==='boolean'?(toolRegistry.get(name)?.command?'unknown':result.ok?'completed':'failed'):'unknown';}
+    if(!command && 'result' in data){outcome=uncertainData(resultData)?'uncertain':resultData.status==='not_started'?nonDispatchStatus(result):resultData.cancelled===true||resultData.timedOut===true?'interrupted':name&&typeof result.ok==='boolean'?(toolRegistry.get(name)?.command?'unknown':result.ok?'completed':'failed'):'unknown';}
     if(!previous){
       const entry=make(key,command?'command':'tool',name??'Recorded operation',outcome,command?'Recorded command outcome; running is not a liveness check.':'Recorded tool result; missing command exit evidence stays unknown.','terminal',time(row.created_at));
       if(command&&data.truncated===true)entry.outputTruncated=true;
-      Object.assign(entry,{frameId,...(commandId?{commandId}:{}),...(callId?{callId}:{})});eventEvidence(entry,row.id,row.created_at);entries.set(key,entry);
+      Object.assign(entry,{frameId,...(commandId?{commandId}:{})});bind(entry,{callId,processId:identity(data.processId),generation:integer(data.generation)});eventEvidence(entry,row.id,row.created_at);entries.set(key,entry);
       if(command)commandEvidence.set(key,entry);
     }else{
       eventEvidence(previous,row.id,row.created_at);
+      if(!bind(previous,{callId,processId:identity(data.processId),generation:integer(data.generation)})){eventCoverage.unavailable++;continue;}
+      if(name&&toolName(previous.label)&&name!==previous.label){previous.status='uncertain';previous.reason='Conflicting original tool identities; evidence was not merged.';eventCoverage.unavailable++;continue;}
       if(command&&data.truncated===true)previous.outputTruncated=true;
       if(command){
         if(!commandEvidence.has(key)){
           // A generic tool result cannot replace command lifecycle authority.
-          previous.kind='command';previous.status=outcome;previous.reason='Recorded command lifecycle governs the outcome.';commandEvidence.set(key,previous);
+          previous.kind='command';
+          if(previous.status==='uncertain'||previous.status==='interrupted'||previous.status==='not_started'&&outcome!=='not_started'){
+            previous.status='uncertain';previous.reason='Explicit correlated uncertainty or conflicting non-dispatch evidence remains unresolved.';
+          }else {previous.status=outcome;previous.reason='Recorded command lifecycle governs the outcome.';}
+          commandEvidence.set(key,previous);
         }else if(outcome==='uncertain'||outcome==='interrupted'){
           if(previous.status!==outcome) {previous.status='uncertain';previous.reason='Conflicting or earlier uncertain command evidence remains unresolved.';}
         }else if(outcome!=='running'&&previous.status!==outcome){previous.status='uncertain';previous.reason='Conflicting command outcomes; inspect original evidence.';}
-      }else if(outcome==='uncertain'){previous.status='uncertain';previous.reason='Recorded tool uncertainty remains unresolved.';}
+      }else if(outcome==='uncertain'||outcome==='interrupted'){previous.status='uncertain';previous.reason='Recorded tool uncertainty or interruption remains unresolved.';}
     }
   }
   const legacyCoverage=cover('legacy output',RECOVERY_LIMITS.events);
@@ -147,12 +163,13 @@ function observe(store:Store,chatId:string):RecoveryView {
       if(commandId){
         if(++count>RECOVERY_LIMITS.calls){callCoverage.truncated=true;break;}
         const key=operationKey(frameId,'command',commandId),result=object(pending.result),rd=object(result.data);
-        let s:RecoveryStatus=rd.uncertain===true||rd.recoveryRequired===true?'uncertain':pending.stage==='prepared'?'not_started':pending.stage==='executing'?(chatStatus==='running'?'running':'uncertain'):pending.stage==='done'?(rd.status==='not_started'?nonDispatchStatus(result):name&&toolRegistry.get(name)?.command?'unknown':typeof result.ok==='boolean'?(result.ok?'completed':'failed'):'unknown'):'unknown';
+        let s:RecoveryStatus=uncertainData(rd)?'uncertain':pending.stage==='prepared'?'not_started':pending.stage==='executing'?(chatStatus==='running'?'running':'uncertain'):pending.stage==='done'?(rd.status==='not_started'?nonDispatchStatus(result):rd.cancelled===true||rd.timedOut===true?'interrupted':name&&toolRegistry.get(name)?.command?'unknown':typeof result.ok==='boolean'?(result.ok?'completed':'failed'):'unknown'):'unknown';
+        if(pending.stage!=='done'&&pending.result!==undefined)s='uncertain';
         const nativeResults=callId?results.get(callId)??[]:[];
-        if(nativeResults.length>1||nativeResults.length&&pending.stage!=='done'||nativeResults.some(result=>object(result.data).uncertain===true||object(result.data).recoveryRequired===true)||rd.status==='not_started'&&nativeResults.some(result=>nonDispatchStatus(result)!=='not_started'))s='uncertain';
+        if(nativeResults.length>1||nativeResults.length&&pending.stage!=='done'||nativeResults.some(result=>uncertainData(object(result.data)))||rd.status==='not_started'&&nativeResults.some(result=>nonDispatchStatus(result)!=='not_started'))s='uncertain';
         if(!original(callId,name)){s='unknown';callCoverage.unavailable++;}
         const old=entries.get(key);
-        if(old){if(s==='uncertain' || old.status==='unknown')old.status=s==='completed'&&toolRegistry.get(name??'')?.command?'unknown':s;else if(s==='not_started'&&old.status!=='not_started'){old.status='uncertain';old.reason='Dispatch-stage evidence conflicts with the recorded outcome.';}old.callId=callId;}
+        if(old){if(!bind(old,{callId})){callCoverage.unavailable++;continue;}if(s==='uncertain' || old.status==='unknown')old.status=s==='completed'&&toolRegistry.get(name??'')?.command?'unknown':s;else if(s==='not_started'&&old.status!=='not_started'){old.status='uncertain';old.reason='Dispatch-stage evidence conflicts with the recorded outcome.';}}
         else {const entry=make(key,'tool',name??'Pending operation',s,'Durable dispatch stage. No original timestamp/event was retained for this stage.','controls');Object.assign(entry,{frameId,commandId,...(callId?{callId}:{})});entries.set(key,entry);}
       }
       for(const rawCall of Array.isArray(frame.queuedCalls)?frame.queuedCalls:[]){
@@ -167,7 +184,7 @@ function observe(store:Store,chatId:string):RecoveryView {
       for(const rawMessage of Array.isArray(frame.messages)?frame.messages:[]){
         const message=object(rawMessage);if(message.role!=='tool')continue;
         const id=identity(message.tool_call_id),result=parse(message.content,RECOVERY_LIMITS.recordBytes);
-        const data=object(result?.data);if(!id||data.status!=='not_started'&&data.uncertain!==true&&data.recoveryRequired!==true)continue;
+        const data=object(result?.data);if(!id||data.status!=='not_started'&&!uncertainData(data))continue;
         if(id===callId)continue;
         if(++count>RECOVERY_LIMITS.calls){callCoverage.truncated=true;break;}
         const key=operationKey(frameId,'call',id),valid=original(id),s=!valid?'unknown':(results.get(id)?.length??0)>1?'uncertain':nonDispatchStatus(result!);
@@ -192,9 +209,11 @@ function observe(store:Store,chatId:string):RecoveryView {
   for(const item of readRecords('process',RECOVERY_LIMITS.processes)){
     const frameId=identity(item.frameId)!,commandId=identity(item.commandId),callId=identity(item.callId);if(!commandId||!callId){coverage.at(-1)!.unavailable++;continue;}
     const key=operationKey(frameId,'command',commandId),old=entries.get(key);
+    if(old&&!bind(old,{callId,processId:identity(item.id),generation:integer(item.generation)})){coverage.at(-1)!.unavailable++;continue;}
     let s=item.status==='starting'?'running':status(item.status);
     if(s==='completed'&&item.exitCode!==0)s='unknown';
     if(s==='not_started'&&item.dispatched!==false)s='unknown';
+    if(s==='not_started'&&item.exitCode!==undefined)s='uncertain';
     if(!time(item.createdAt)||!time(item.updatedAt)||integer(item.generation)===undefined||integer(item.modeVersion)===undefined||typeof item.dispatched!=='boolean'){s='unknown';coverage.at(-1)!.unavailable++;}
     if(old?.status==='uncertain'||old?.status==='interrupted')s='uncertain';
     if(old&&s==='running'&&['completed','failed','not_started'].includes(old.status))s='uncertain';
@@ -205,23 +224,25 @@ function observe(store:Store,chatId:string):RecoveryView {
   }
   for(const item of readRecords('install',RECOVERY_LIMITS.installs)){
     const frameId=identity(item.frameId)!,installId=identity(item.id)!,key=operationKey(frameId,'command',installId),old=entries.get(key);
+    if(old&&!bind(old,{generation:integer(item.generation)})){coverage.at(-1)!.unavailable++;continue;}
     let s:RecoveryStatus=item.recoveryRequired===true?'uncertain':item.state==='succeeded'||item.state==='noop'?'completed':item.state==='failed'?'failed':item.state==='uncertain'?'uncertain':item.state==='dispatching'||item.state==='authorizing'?'running':['preparing','reviewing','pending','approved','rejected','stale'].includes(String(item.state))?'not_started':'unknown';
     if(!epochTime(item.createdAt)||!epochTime(item.updatedAt)||integer(item.generation)===undefined||integer(item.modeVersion)===undefined||typeof item.recoveryRequired!=='boolean'){s='unknown';coverage.at(-1)!.unavailable++;}
     const sources=store.db.prepare(`SELECT id,created_at,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND type IN ('install','install_reconciliation') AND
       CASE WHEN length(CAST(data AS BLOB))<=? THEN CASE WHEN json_valid(data) THEN COALESCE(json_extract(data,'$.installId'),json_extract(data,'$.id'))=? ELSE 0 END ELSE 0 END ORDER BY id DESC LIMIT ?`).all(RECOVERY_LIMITS.recordBytes,chatId,RECOVERY_LIMITS.recordBytes,installId,RECOVERY_LIMITS.evidence+1);
-    const originalUncertainty=old?.status==='uncertain'||old?.status==='interrupted'||sources.some(row=>parse(row.data,RECOVERY_LIMITS.recordBytes)?.state==='uncertain');
+    const originalUncertainty=old?.status==='uncertain'||old?.status==='interrupted'||sources.length>RECOVERY_LIMITS.evidence||sources.some(row=>parse(row.data,RECOVERY_LIMITS.recordBytes)?.state==='uncertain');
     let receiptEventId:number|undefined;
     if(originalUncertainty){
       const receipt=state(`install-reconciliation:${installId}`,RECOVERY_LIMITS.recordBytes,`install receipt ${installId}`),target=object(object(item.settings).target);
       const eventId=integer(receipt?.eventId),event=eventId?store.db.prepare("SELECT created_at,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND id=? AND type='install_reconciliation'").get(RECOVERY_LIMITS.recordBytes,chatId,eventId):undefined,data=parse(event?.data,RECOVERY_LIMITS.recordBytes);
       const settings=target.scope==='project-container'?undefined:state('system-installs:v1',RECOVERY_LIMITS.recordBytes,`install target ${installId}`);
-      const valid=receipt&&receipt.installId===installId&&receipt.chatId===chatId&&receipt.state==='succeeded'&&receipt.healthy===true&&receipt.matches===true&&['status','reconcile'].includes(String(receipt.method))&&typeof item.previewDigest==='string'&&receipt.previewDigest===item.previewDigest&&identity(target.id)&&receipt.targetKey===helperCanonical(target)
+      const currentReconciliation=object(item.reconciliation);
+      const valid=item.state==='succeeded'&&item.recoveryRequired===false&&currentReconciliation.healthy===true&&currentReconciliation.matches===true&&receipt&&receipt.installId===installId&&receipt.chatId===chatId&&receipt.state==='succeeded'&&receipt.healthy===true&&receipt.matches===true&&['status','reconcile'].includes(String(receipt.method))&&typeof item.previewDigest==='string'&&receipt.previewDigest===item.previewDigest&&identity(target.id)&&receipt.targetKey===helperCanonical(target)
         &&(target.scope==='project-container'?!!item.containerReceipt&&helperCanonical(receipt.containerReceipt??null)===helperCanonical(item.containerReceipt):helperCanonical(settings?.target??null)===helperCanonical(target))
         &&data?.installId===installId&&data.method===receipt.method&&data.state==='succeeded'&&data.healthy===true&&data.matches===true;
       if(s!=='completed'||!valid)s='uncertain';else receiptEventId=eventId;
     }
     const entry=make(key,'install','System install',s,'Retained install outcome. Only the existing exact-target recovery flow can reconcile it.','installs',epochTime(item.updatedAt));
-    Object.assign(entry,{frameId,installId,commandId:installId,...(integer(item.generation)!==undefined?{generation:integer(item.generation)}:{})});if(old){entry.evidence=old.evidence;entry.evidenceTruncated=old.evidenceTruncated;}entries.set(key,entry);
+    Object.assign(entry,{frameId,installId,commandId:installId,...(integer(item.generation)!==undefined?{generation:integer(item.generation)}:{}),...(old?.callId?{callId:old.callId}:{})});if(old){entry.evidence=old.evidence;entry.evidenceTruncated=old.evidenceTruncated;}entries.set(key,entry);
     for(const source of sources)eventEvidence(entry,source.id,source.created_at);
     if(receiptEventId){const source=store.db.prepare('SELECT created_at FROM events WHERE id=? AND chat_id=?').get(receiptEventId,chatId);eventEvidence(entry,receiptEventId,source?.created_at);}
   }
