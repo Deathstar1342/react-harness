@@ -1,3 +1,6 @@
+import {assertQueueConversationIdle} from './queue-admission.js';
+import type {TaskQueue} from './task-queue.js';
+import {queueError} from './queue-state.js';
 import {observeRequest} from './inspector-records.js';
 import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
@@ -22,6 +25,7 @@ import {ProcessJobs, processRecords} from './process-jobs.js';
 interface PendingAction { verification?: VerificationSnapshot; callId?: string; id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
 export interface Frame { acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
 export interface RunState {
+  queueClaim?:{projectId:string;taskId:string;id:string};
   skillsHash?:string;
   humanMessageIds?: string[];
   frames: Frame[];
@@ -48,6 +52,22 @@ const safeResult = (error: unknown): ToolResult => ({
 });
 
 export class Runtime {
+  queue?:TaskQueue;
+  queueActive(chatId:string){return this.active.has(chatId);}
+  assertQueueIdle(projectId:string) {
+    this.store.assertCheckpointSafe(projectId);this.store.assertSkillRemovalSafe(projectId);this.store.assertInstallRemovalSafe(projectId);
+    const p=this.store.project(projectId);if(p.removalError||this.projectEdits.has(projectId))throw queueError('Project operation needs attention.');
+    this.processes.assertIdle(projectId);if(!this.tools.assertQueueIdle)throw queueError('Queue admission requires observed workspace idle state.',503);this.tools.assertQueueIdle(p.path);
+    for(const chat of assertQueueConversationIdle(this.store,projectId))if(this.active.has(chat.id)||this.decisions.has(chat.id)||['running','awaiting_approval'].includes(chat.status))throw queueError('Project conversation or decision remains active.');
+  }
+  prepareQueueTask(projectId:string,text:string,approvalMode:import('../shared/types.js').ApprovalMode) {
+    this.assertQueueIdle(projectId);const chat=this.store.createChat(projectId,'New chat',approvalMode);
+    const state=this.prepareSubmission(chat.id,text,null),rootId=state.frames[0].id,humanMessageId=state.humanMessageIds![0];
+    if(state.planOnly)throw queueError('Queue admission preserves planning mode. Use a planning conversation and explicitly Start building there.');
+    return {chatId:chat.id,state,rootId,humanMessageId};
+  }
+  publishQueueTask(admission:ReturnType<Runtime['prepareQueueTask']>) {this.runs.set(admission.chatId,admission.state);this.launch(admission.chatId);}
+
   readonly skills:Skills;
   recordSkillUncertainty(chatId:string,writeId:string) {
     const state=this.load(chatId);
@@ -257,6 +277,7 @@ export class Runtime {
   private commitSubmission(chatId: string, content: string, receipt?: {planId: string; planVersion: number; modeVersion: number}, goalRequest?:{input:GoalInput;revision?:{expectedRevision:number;reason:string}}) {
     // Load before changing durable mode. Never expose speculative permissions to
     // a loop which may already hold this cached object across a provider await.
+    this.queue?.human(chatId);
     const previous = this.load(chatId);
     const next = this.store.transaction(() => {
       if (receipt) this.store.setState(`build:${chatId}`, receipt);
@@ -354,11 +375,21 @@ export class Runtime {
     // Events/progress and the corresponding frame snapshot commit together.
     // Rollback leaves both the live loop's root and every frame untouched.
     const draft = structuredClone(state);
+    try {
     this.store.transaction(() => {
       change(draft);
+      this.queue?.transition(chatId,draft);
       this.store.setState(`run:${chatId}`, draft);
       for(const frame of draft.frames)this.store.setState(`native:frame:${chatId}:${frame.id}`,frame.messages);
     });
+    } catch(error) {
+      if(state.queueClaim) {
+        this.active.get(chatId)?.controller.abort();
+        this.runs.delete(chatId);
+        try {this.store.transaction(()=>this.queue?.failed(chatId,'Native transition failed or its acknowledgement was lost. Inspect the retained claim; no automatic retry or replay.'));} catch {/* Original native poison/failed COMMIT remains authoritative. */}
+      }
+      throw error;
+    }
     const oldFrames=new Map(state.frames.map(frame=>[frame.id,frame]));
     draft.frames=draft.frames.map(frame=>{const live=oldFrames.get(frame.id);if(!live)return frame;const oldPending=live.pending;if(oldPending&&frame.pending?.id===oldPending.id){for(const key of Object.keys(oldPending))delete (oldPending as unknown as Record<string,unknown>)[key];Object.assign(oldPending,frame.pending);frame.pending=oldPending;}for(const key of Object.keys(live))delete (live as unknown as Record<string,unknown>)[key];Object.assign(live,frame);return live;});
     Object.assign(state, draft);
@@ -396,8 +427,9 @@ export class Runtime {
         });
         } catch { throw error; } // Secondary persistence failure must not mask the cause.
       })
-      .finally(() => {
+      .finally(async () => {
         this.active.delete(chatId);
+        await this.queue?.settled(chatId);
       });
 
     this.active.set(chatId, { controller, promise });
@@ -457,6 +489,7 @@ export class Runtime {
   }
 
   async control(chatId: string, action: 'pause' | 'resume' | 'interrupt') {
+    this.queue?.human(chatId);
     this.store.chat(chatId);
     this.decisions.set(chatId,(this.decisions.get(chatId) ?? 0)+1);
     try { return await this.controlInternal(chatId,action); }
@@ -518,6 +551,7 @@ export class Runtime {
   }
 
   async decide(approvalId: string, decision: 'approve' | 'deny') {
+    this.queue?.human(this.store.getApproval(approvalId).chatId);
     const chatId = this.store.getApproval(approvalId).chatId;
     this.assertAvailable(chatId);
     this.decisions.set(chatId,(this.decisions.get(chatId) ?? 0)+1);
@@ -632,6 +666,7 @@ export class Runtime {
 
   private resolveCall(chatId:string, frame:Frame, callId:string, result:ToolResult) {
     if (!frame.queuedCalls?.some(call=>call.id===callId)) throw new Error('Native call correlation was lost');
+    if(!result.ok||result.data&&typeof result.data==='object'&&((result.data as Record<string,unknown>).uncertain===true||(result.data as Record<string,unknown>).recoveryRequired===true||(result.data as Record<string,unknown>).state==='uncertain'))this.queue?.failed(chatId,'A native action failed or was refused. Inspect the original task.');
     const full = JSON.stringify(result);
     this.store.setState(`native:result:${chatId}:${frame.id}:${callId}`,result);
     const content = Buffer.byteLength(full) <= 120000 ? full : JSON.stringify({ok:result.ok,output:result.output.slice(0,16000),truncated:true,evidence:`native:result:${chatId}:${frame.id}:${callId}`});
@@ -844,7 +879,7 @@ export class Runtime {
       this.save(chatId,state);
       const deltas=nativeOutputBuffer(text=>this.store.event(chatId,'delta',{role:frame.role,text}));
       const input = {model:this.store.chatModels(chatId)[frame.role],messages,tools:publishedTools(frame.role,state.planOnly?'plan':'execute'),signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
-      this.commitRunTransition(chatId,state,()=>{const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
+      this.commitRunTransition(chatId,state,()=>{this.queue?.beforeProvider(chatId,state);const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
       this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...promptIdentity(messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
       const completion = await observeRequest(this.store,{chatId,projectId:this.store.chat(chatId).projectId,runId:state.frames[0].id,taskId:frame.id,generation,ordinal:state.steps,role:frame.role,humanMessageIds:state.humanMessageIds??[],...(frame.planStep?{planStep:frame.planStep}:{})},input,observed=>this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed),this.hooks.scheduled??false).finally(()=>deltas.flush());
       signal.throwIfAborted();
@@ -1539,6 +1574,7 @@ export class Runtime {
       const next=draft.frames.find(item=>item.id===frame.id)!;
       this.resolveCall(chatId,next,call.id,{ok:true,output:'Goal completed against recorded scoped evidence and accepted reviews. This is not proof of unobserved requirements or external effects.'});
       const event=this.store.event(chatId,'goal_completed',{goalId:current.id,goalRevision:current.revision,planId:plan.id,planVersion:plan.version,modeVersion,reviewEventIds:ids});
+      this.queue?.accepted(chatId,draft,frame.id,call.id,{kind:'goal',eventId:event.id,callId:call.id,goalId:current.id,goalRevision:current.revision,goalGeneration:current.generation});
       current.status='completed';current.reason='All protected requirements have current reviewed observed evidence. Unobserved scope and external races are not proven.';
       current.completion={eventId:event.id,planId:plan.id!,planVersion:plan.version!,reviewEventIds:ids};saveGoal(this.store,chatId,current);
       draft.frames.pop();this.store.updateChat(chatId,{status:'idle'});
@@ -1562,6 +1598,7 @@ export class Runtime {
       switch(action.name) {
         case 'ask_user':
           resolve('Waiting for user information.');
+          this.queue?.waitingForHuman(chatId,frame,call.id);
           this.store.message(chatId,'architect',String(action.args.question));
           this.store.progress(chatId,frame.planStep,frame.id,'blocked','awaiting_user',String(action.args.question).slice(0,2000));
           this.store.updateChat(chatId,{status:'paused'});goalStatus(this.store,chatId,'waiting_for_user',String(action.args.question));paused=true;break;
@@ -1610,7 +1647,10 @@ export class Runtime {
             critic.assignment=frame.assignment;critic.reviewKind='completion';critic.reviewDelegationId=frame.id;draft.frames.push(critic);
           } else if(goalOf(this.store,chatId)?.status !== 'completed' && goalOf(this.store,chatId) && !draft.planOnly) {
             frame.messages.push({role:'user',content:'Frame completion does not complete this durable goal. Continue remaining required scope, or use request_goal_completion with current goal/plan/mode revisions and recorded accepted reviews.'});
-          } else draft.frames.pop();
+          } else {
+            if(draft.frames.length===1&&!draft.planOnly&&this.queue?.owns(chatId,draft)){const event=this.store.event(chatId,'queue_native_acceptance',{rootId:frame.id,callId:call.id});this.queue?.accepted(chatId,draft,frame.id,call.id,{kind:'native-root',eventId:event.id,callId:call.id});}
+            draft.frames.pop();
+          }
           break;
         }
         default:throw new Error('Unknown control tool');
@@ -1724,6 +1764,7 @@ export class Runtime {
   close():Promise<void> {return this.closePromise??=this.closeInternal();}
 
   private async closeInternal() {
+    this.queue?.closing();
     this.installs?.beginClose();
     for (const item of this.active.values()) {
       item.controller.abort();

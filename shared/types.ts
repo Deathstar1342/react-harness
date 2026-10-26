@@ -78,6 +78,8 @@ export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }
 export interface TestReport { id: string; runner: string; command: string; createdAt: string; status: 'passed' | 'failed' | 'error' | 'cancelled'; tests: TestCase[]; output: string; exitCode?: number }
 export interface ToolService {
+  /** Trusted synchronous queue admission observation; no cleanup or dispatch. */
+  assertQueueIdle?(root:string):void;
   readonly processLifecycle?: 'sandbox-dispatch-v1';
   configureMutationGuard?(guard:(root:string, owner?:symbol)=>void):void;
   closeCommandContext?(context:ToolContext):Promise<void>;
@@ -201,3 +203,5 @@ export interface InspectorView {
  summary:{requests:number;reportedRequests:number;unknownRequests:number;conflictedRequests:number;inputTokens:number|null;outputTokens:number|null;elapsedMs:number|null;truncated:boolean;unavailable:number};
  links:InspectorLink[];linksUnavailable:number;legacy:boolean;legacyTruncated:boolean;legacyUnavailable:number;limits:{page:number;summaryRows:number;summaryBytes:number};
 }
+export interface QueueEntry {id:string;revision:number;text:string;digest:string;status:'pending'|'running'|'accepted'|'stopped'|'cancelled';reason:string;chatId?:string}
+export interface QueueView {schema:'queue-v1';projectId:string;revision:number;status:'paused'|'running'|'completed';reason:string;entries:QueueEntry[];total:number;nextCursor:string|null;startScope:{id:string;revision:number;digest:string}[];limits:{tasks:number;textBytes:number;page:number};activeTaskId:string|null}

@@ -1,3 +1,5 @@
+import {TaskQueue,queueStartInput,queueEditInput} from './task-queue.js';
+import {parseNativeJSON} from './native-json.js';
 import {inspectorView} from './inspector.js';
 import {BrowserPreviews} from './browser-previews.js';
 import {browserProbeResult} from '../shared/browser-preview.js';
@@ -63,6 +65,8 @@ export async function createApp(options: AppOptions) {
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json',{parseAs:'string'},(request,body,done)=>{try{done(null,request.url.includes('/queue')?parseNativeJSON(String(body),600000):JSON.parse(String(body)));}catch{done(Object.assign(new Error('Invalid or ambiguous JSON request'),{statusCode:400}));}});
   const browserPreviews=new BrowserPreviews(previews,()=>{if(!options.transportAuth?.browserPairingEnabled)return;const address=app.server.address();if(!address||typeof address==='string')return;if(options.browserPreview==='direct'&&address.address==='127.0.0.1')return address.port;if(options.browserPreview==='source-fixed-3000'&&config.executionMode==='container'&&config.host==='0.0.0.0'&&config.port===3000&&address.port===3000)return 3000;});
   browserPreviews.register(app);
   const watchers = new Map<string,FSWatcher>();
@@ -191,6 +195,8 @@ export async function createApp(options: AppOptions) {
       if(['POST','PUT','PATCH'].includes(request.method)&&!route.endsWith('/editor')&&!route.endsWith('/control'))store.assertCheckpointSafe(projectId);
       if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
+      if(route.includes('/queue'))return;
+      if(['POST','PUT','PATCH','DELETE'].includes(request.method))queues.intervention(projectId);
       requests.set(request.id,projectId);
     }
   });
@@ -199,6 +205,11 @@ export async function createApp(options: AppOptions) {
   const assertNoRequests=(projectId:string,exceptRequest?:string)=>{
     if ([...requests].some(([requestId,id])=>requestId!==exceptRequest && (id==='*' || id===projectId))) throw Object.assign(new Error('A project request is still pending; wait before removal or reset'),{statusCode:409});
   };
+  const queues=new TaskQueue(runtime,()=>settings.get().defaultApprovalMode,projectId=>assertNoRequests(projectId));
+  app.get('/api/projects/:id/queue',async(request,reply)=>{const query=z.strictObject({cursor:z.string().max(1024).optional()}).parse(request.query);reply.header('Cache-Control','no-store');return queues.view(paramId(request.params),query.cursor);});
+  app.patch('/api/projects/:id/queue',async request=>queues.edit(paramId(request.params),queueEditInput.parse(request.body)));
+  app.post('/api/projects/:id/queue/start',async(request,reply)=>{if(!config.baseUrl||!config.apiKey)return reply.code(503).send({error:'Configure the provider before starting the queue.'});return queues.start(paramId(request.params),queueStartInput.parse(request.body));});
+  app.post('/api/projects/:id/queue/cancel-active',async request=>queues.cancel(paramId(request.params),z.strictObject({expectedRevision:z.number().int().safe().nonnegative(),taskId:z.uuid(),chatId:z.uuid()}).parse(request.body)));
   app.post('/api/projects/:id/deletion-preview',async request=>{
     z.object({}).strict().parse(request.body);return removal.preview(paramId(request.params));
   });
@@ -437,5 +448,5 @@ export async function createApp(options: AppOptions) {
   // close its supplied Store. Runtime.close is idempotent for the later hook.
   app.addHook('preClose',async()=>{closing=true;browserPreviews.shutdown();previews.shutdown();installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
-  return {app,store,runtime,installs,previews,browserPreviews};
+  return {app,store,runtime,installs,previews,browserPreviews,queues};
 }

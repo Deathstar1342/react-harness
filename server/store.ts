@@ -1,3 +1,4 @@
+import {installQueue,readQueue,queueError} from './queue-state.js';
 import {installInspector} from './inspector-records.js';
 import {checkpointCatalog,checkpointMetadata,checkpointJournalIntegrity,checkpointSaveJournal} from './checkpoint-state.js';
 import {nativeStateDatabase,nativeStateStore} from './native-state-database.js';
@@ -71,7 +72,7 @@ export class Store {
     try {database.exec('CREATE TABLE IF NOT EXISTS checkpoint_effects (restore_id TEXT NOT NULL, ordinal INTEGER NOT NULL, change_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL, PRIMARY KEY(restore_id,ordinal))');database.exec('COMMIT');}
     catch(error){database.exec('ROLLBACK');throw error;}
     database.exec('BEGIN IMMEDIATE');
-    try {installInspector({db:database} as Store);database.exec('COMMIT');}catch(error){database.exec('ROLLBACK');throw error;}
+    try {installInspector({db:database} as Store);installQueue({db:database} as Store);database.exec('COMMIT');}catch(error){database.exec('ROLLBACK');throw error;}
     database.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run('prototype:protocol',JSON.stringify('native-tools-v1'));
     return database;
     }catch(error){database.close();throw error;}
@@ -130,7 +131,8 @@ export class Store {
     const project = {...this.project(projectId), removalError: message};
     this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(project),projectId);
   }
-  private deleteChatRecords(chatId: string) {
+  private deleteChatRecords(chatId: string,wholeProject=false) {
+    if(!wholeProject&&this.db.prepare('SELECT 1 FROM queue_links WHERE chat_id=?').get(chatId))throw queueError('Queue history pins this conversation. Remove the whole idle project explicitly to remove its retained history.');
     this.assertCheckpointSafe(this.chat(chatId).projectId);
     this.assertSkillRemovalSafe(this.chat(chatId).projectId);
     for(const row of this.db.prepare("SELECT key,data FROM state WHERE key LIKE 'skills:write:%' AND json_extract(data,'$.chatId')=?").all(chatId)) {
@@ -156,7 +158,9 @@ export class Store {
     this.assertCheckpointSafe(projectId);
     this.assertSkillRemovalSafe(projectId);
     this.transaction(()=>{
-      for (const chat of this.chats(projectId)) this.deleteChatRecords(chat.id);
+      if(this.db.prepare('SELECT 1 FROM task_queues WHERE project_id=?').get(projectId)&&readQueue(this,projectId).tasks.some(t=>t.claim&&t.status!=='accepted'))throw queueError('An unresolved queue claim pins this project history.');
+      for (const chat of this.chats(projectId)) this.deleteChatRecords(chat.id,true);
+      this.db.prepare('DELETE FROM queue_links WHERE project_id=?').run(projectId);this.db.prepare('DELETE FROM task_queues WHERE project_id=?').run(projectId);
       this.db.prepare('DELETE FROM file_changes WHERE project_id=?').run(projectId);
       this.db.prepare("DELETE FROM checkpoint_effects WHERE restore_id IN (SELECT json_extract(data,'$.id') FROM state WHERE key LIKE 'checkpoint-restore:v1:%' AND json_extract(data,'$.projectId')=?)").run(projectId);
       this.db.prepare("DELETE FROM state WHERE (key LIKE 'checkpoint:v1:%' OR key LIKE 'checkpoint-meta:v1:%' OR key LIKE 'checkpoint-restore:v1:%') AND json_extract(data,'$.projectId')=?").run(projectId);

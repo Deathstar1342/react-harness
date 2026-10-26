@@ -1,0 +1,4 @@
+// Disposable sandboxed production-renderer host; no packaged/device acceptance.
+const {app,BrowserWindow}=require('electron');const path=require('node:path');
+for(const key of ['M37_ELECTRON_HOME','M37_URL'])if(!process.env[key])throw Error('Explicit fixture paths required');app.setPath('userData',process.env.M37_ELECTRON_HOME);app.setPath('sessionData',path.join(process.env.M37_ELECTRON_HOME,'session'));app.setPath('crashDumps',path.join(process.env.M37_ELECTRON_HOME,'crashes'));app.enableSandbox();
+app.whenReady().then(()=>{const w=new BrowserWindow({show:false,width:1440,height:1000,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,offscreen:true}});globalThis.m37Paints=0;w.webContents.on('paint',()=>globalThis.m37Paints++);w.webContents.setFrameRate(30);w.webContents.setWindowOpenHandler(()=>({action:'deny'}));w.loadURL(process.env.M37_URL);});app.on('window-all-closed',()=>app.quit());
