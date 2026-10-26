@@ -49,3 +49,8 @@ it('refuses mismatched public Host port and reused/expired probe tickets without
 it('terminal proof cannot exceed the combined eight-record bound with retained probe tombstones',async()=>{
  const t=await fixture();for(let n=0;n<7;n++)t.start();await expect(t.grant()).rejects.toThrow(/capacity/);expect((t.browser as any).probes.size).toBe(8);expect((t.browser as any).views.size).toBe(0);expect(t.resources).toBe(0);
 });
+
+it('granted view never outlives its retained proof and an in-flight resource cannot publish after that expiry',async()=>{
+ const t=await fixture(),pending=t.grant();t.advance(10000);const {view,proofId}=await pending,proof=(t.browser as any).probes.get(proofId);expect(view.expiresAt).toBe(proof.expiresAt);
+ await t.get(view.url);const before=t.resources;let release!:()=>void;t.hold(new Promise(resolve=>{release=resolve;}));const asset=t.get(new URL(view.url).origin+'/main.js','script');await new Promise(resolve=>setTimeout(resolve,20));t.advance(110001);release();expect((await asset).statusCode).toBe(410);expect((await t.get(view.url)).statusCode).toBe(421);expect(t.resources).toBe(before+1);expect((t.browser as any).views.size).toBe(0);expect((t.browser as any).probes.size).toBe(0);
+});

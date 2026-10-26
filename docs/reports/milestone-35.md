@@ -16,6 +16,10 @@ Retained failures include initial unsafe header-only Electron policy, UDP positi
 
 Additive existing Desktop CI steps run actual Chrome/native fixtures on Windows/Linux. Existing Container CI retains all original stages and adds both actual owned-worker helper/lifecycle checks and a connected actual production controller API/Store/Runtime/WorkspaceTools/WorkerClient authenticated wire/broker/worker/Chrome React path plus persistent restart/no replay. The CI-only mounted controller fixture authorizes its one synthetic process explicitly and is not shipped as an entrypoint. No workstation Docker/WSL/helper/global provisioning. Actual Linux connected evidence, exact image/artifact identity, all six applicable source workflows/jobs/steps and final report-only handoff must be audited before delivery. Windows Docker/device, native-human, installed package/clean-machine, live provider and M21 release acceptance remain separate and unclaimed.
 
+## Final bounds and lifetime corrections preparing validation
+
+The terminal capability transition previously retained eight proof records and could add a ninth view; a guard now refuses before creating that view/session. A regression reaches the terminal transition with seven other pending probes and requires probes8/views0/resources0. Coordinator independent controlled-clock reproduction also proved that admission-based view expiry could outlive its original retained proof by calibration duration: proof pruned, asset200 and late negative sentinel421. This was a linked-proof lifetime failure, not evidence of a private network leak. View expiry now uses the original proof deadline, resource aborts are capped to its remaining lifetime, and post-await pruning refuses late publication. A regression admits after10s calibration, holds an asset through the original120s boundary and requires410, retired host421 and both record maps empty. Focused91/typecheck passed before the final freeze; superseded capacity-only and earlier source receipts remain retained. Final corrected full/exact-source CI/artifact checks are still required.
+
 ## Historical contract and review record
 
 ## Proposed authority and binding
