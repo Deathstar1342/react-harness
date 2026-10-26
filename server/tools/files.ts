@@ -136,10 +136,13 @@ export class WorkspaceFiles {
   }
   async restoreCheckpoint(root:string,file:FileSnapshot&{mode:number},expected:FileSnapshot,claim:()=>void):Promise<FileSnapshot> {
     if(file.path!==expected.path||!Number.isInteger(file.mode)||file.mode<0||file.mode>0o777)throw new ToolError('Invalid checkpoint file');
+    claim(); // Exact durable intent/root check before any filesystem access, repeated at save and chmod.
     const originalTarget=await scoped(root,file.path);
-    const saveClaim=()=>{if(expected.hash!==null&&'mode' in expected){const current=lstatSync(originalTarget.absolute);if(!current.isFile()||current.isSymbolicLink()||current.nlink!==1||(current.mode&0o777)!==expected.mode)throw new ToolError('Checkpoint current file permissions changed before save');}claim();};
-    const result=await this.save(root,file.path,file.content,expected.hash,undefined,saveClaim,file.hash===null);
+    const modeGuard=()=>{if(expected.hash!==null&&'mode' in expected){const current=lstatSync(originalTarget.absolute);if(!current.isFile()||current.isSymbolicLink()||current.nlink!==1||(current.mode&0o777)!==expected.mode)throw new ToolError('Checkpoint current file permissions changed before save');}};
+    const saveGuard=()=>{claim();modeGuard();};
+    const result=await this.save(root,file.path,file.content,expected.hash,undefined,modeGuard,file.hash===null,saveGuard);
     if(file.hash!==null){
+      claim(); // Recheck live root/intent before inspecting the distinct permission effect.
       const target=await scoped(root,file.path);this.checkLease(key(target.absolute));
       const handle=await open(target.absolute,constants.O_RDONLY|(constants.O_NOFOLLOW||0)|(constants.O_NONBLOCK||0));
       try{
@@ -166,7 +169,7 @@ export class WorkspaceFiles {
     if (Buffer.byteLength(content) > 64_000) throw new ToolError('Line range exceeds 64,000 bytes; request fewer lines.');
     return {path: file.path, hash: file.hash, startLine, totalLines: lines.length, content, nextLine: startLine - 1 + count < lines.length ? startLine + count : null};
   }
-  async save(root: string, input: string, content: string, baseHash: string | null, owner?: string, beforeMutation?: () => void, remove = false): Promise<FileSnapshot> {
+  async save(root: string, input: string, content: string, baseHash: string | null, owner?: string, beforeMutation?: () => void, remove = false, effectGuard?:()=>void): Promise<FileSnapshot> {
     let claimed=false;
     const claim=()=>{assertNativePath(root,false);if(!claimed){beforeMutation?.();claimed=true;}};
     if (typeof content !== 'string' || Buffer.from(content).toString('utf8') !== content || content.includes('\0') || Buffer.byteLength(content) > this.options.maxFileBytes) throw new ToolError('Invalid content or file exceeds size limit.');
@@ -178,7 +181,8 @@ export class WorkspaceFiles {
     const tail = previous.then(() => pending);
     locks.set(id, tail);
     await previous;
-    let temporary: string | undefined;
+    let temporary: string | undefined,temporaryOwned=false,temporaryIdentity:{dev:bigint;ino:bigint}|undefined;
+    const guard=()=>{effectGuard?.();if(effectGuard){leasePath(root,input);if(temporary){leasePath(root,path.relative(target.root,temporary));if(temporaryIdentity){const current=lstatSync(temporary,{bigint:true});if(!current.isFile()||current.nlink!==1n||current.dev!==temporaryIdentity.dev||current.ino!==temporaryIdentity.ino)throw new ToolError('Checkpoint temporary file identity changed');}}}assertNativePath(root,false);};
     try {
       this.checkLease(id, owner);
       const before = await this.read(root, input);
@@ -194,34 +198,43 @@ export class WorkspaceFiles {
         const current = await lstat(target.absolute,{bigint:true});
         if (identity.ino !== current.ino || identity.dev !== current.dev || identity.ctimeNs !== current.ctimeNs) throw new ToolError('File identity changed before removal.', 'CONFLICT');
         claim();
-        assertNativePath(root,false);
+        guard();
         await unlink(target.absolute);
         return { path: target.relative, content: '', hash: null };
       }
       const parentMissing=await lstat(path.dirname(target.absolute)).then(()=>false,error=>{if(error.code==='ENOENT')return true;throw error;});
       if(parentMissing)claim();
-      assertNativePath(root,false);
-      await mkdir(path.dirname(target.absolute), { recursive: true });
+      if(effectGuard){
+        // Checkpoint parents are created one component at a time: recursive mkdir
+        // could otherwise cross a replaced root between its internal awaits.
+        let parent=target.root;
+        for(const part of target.relative.split('/').slice(0,-1)){
+          parent=path.join(parent,part);const info=await lstat(parent).catch(error=>{if(error.code==='ENOENT')return undefined;throw error;});
+          if(!info){guard();await mkdir(parent);}
+          await scoped(root,input);
+        }
+      }else{assertNativePath(root,false);await mkdir(path.dirname(target.absolute), {recursive:true});}
       await scoped(root, input);
       temporary = path.join(path.dirname(target.absolute), `.rh-write-${randomUUID()}`);
       const info = await lstat(target.absolute).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
-      assertNativePath(root,false);
+      guard();
       const handle = await open(temporary, 'wx', info ? info.mode & 0o777 : 0o600);
-      try { await handle.writeFile(content, 'utf8'); await handle.sync(); } finally { await handle.close(); }
+      temporaryOwned=true;
+      try {if(effectGuard){const identity=await handle.stat({bigint:true});temporaryIdentity={dev:identity.dev,ino:identity.ino};guard();}await handle.writeFile(content, 'utf8'); await handle.sync();}finally{await handle.close();}
       // Approval-time snapshots are insufficient: compare again at the write boundary.
       this.checkLease(id, owner);
       if ((await this.read(root, input)).hash !== baseHash) throw new ToolError('File changed before applying the edit.', 'CONFLICT');
       await scoped(root, input);
       this.checkLease(id, owner);
       claim();
-      assertNativePath(root,false);
+      guard();
       await rename(temporary, target.absolute);
       temporary = undefined;
       // Only the editor knows whether more keystrokes arrived during this save.
       // Keep its lease until it explicitly releases the now-clean buffer.
       return { path: target.relative, content, hash: hash(Buffer.from(content)) };
     } finally {
-      if (temporary) await unlink(temporary).catch(() => {});
+      if(temporary){if(effectGuard){if(temporaryOwned&&temporaryIdentity)try{guard();await unlink(temporary);}catch{/* Root/ownership uncertainty retains residue; never delete a replacement entry. */}}else await unlink(temporary).catch(()=>{});}
       release();
       if (locks.get(id) === tail) locks.delete(id);
     }

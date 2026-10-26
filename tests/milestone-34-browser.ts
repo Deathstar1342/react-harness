@@ -19,6 +19,25 @@ const {app}=await createApp({config,store,tools,transportAuth:auth,provider:{mod
 const address=await app.listen({host:'127.0.0.1',port:0});config.port=Number(new URL(address).port);
 let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined,desktop:Awaited<ReturnType<typeof _electron.launch>>|undefined,page:Page|undefined;
 const host=process.env.M34_ELECTRON==='1'?'electron':'browser';
+async function settledObservation(){
+ let previous=-1,stable=Date.now();const deadline=Date.now()+5000;
+ while(Date.now()<deadline){const current=Number(store.db.prepare('SELECT coalesce(max(id),0) AS id FROM events WHERE chat_id=?').get(chat.id)!.id);if(current!==previous){previous=current;stable=Date.now();}if(Date.now()-stable>=400)return;await new Promise(resolve=>setTimeout(resolve,50));}
+ throw new Error('File observation did not settle before the next deliberate preview');
+}
+async function capture(stage:string){
+ if(!page)return;
+ const output=path.join(receipts!,`checkpoint-${host}-${stage}`);
+ await writeFile(output+'-stage.json',JSON.stringify({source:process.env.M34_SOURCE??'working tree',stage,host,step:'font readiness'}));
+ const readiness=await Promise.race([page.evaluate(async()=>{await document.fonts.ready;return {fonts:document.fonts.status,visibility:document.visibilityState,width:innerWidth,height:innerHeight};}),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error(`Font readiness timed out at ${stage}`)),10000).unref())]);
+ const native=desktop?await desktop.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];return {offscreen:w.webContents.isOffscreen(),painting:w.webContents.isPainting(),frameRate:w.webContents.getFrameRate(),paints:(globalThis as Record<string,unknown>).__m34Paints};}):null;
+ await writeFile(output+'-stage.json',JSON.stringify({source:process.env.M34_SOURCE??'working tree',stage,host,readiness,native},null,2));
+ if(desktop){
+  expect(native?.offscreen).toBe(true);expect(native?.painting).toBe(true);expect(Number(native?.paints)).toBeGreaterThan(0);
+  const data=await Promise.race([desktop.evaluate(async({BrowserWindow})=>{const image=await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});return {png:image.toPNG().toString('base64'),size:image.getSize(),empty:image.isEmpty()};}),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error(`Native Electron capture timed out at ${stage}`)),20000).unref())]);
+  expect(data.empty).toBe(false);expect(data.size.width).toBeGreaterThan(1000);expect(data.size.height).toBeGreaterThan(700);await writeFile(output+'.png',Buffer.from(data.png,'base64'));
+ }else await page.screenshot({path:output+'.png',timeout:20000});
+}
+
 try{
  if(host==='electron'){
   const electronHome=path.join(base,'electron');await mkdir(electronHome);
@@ -33,20 +52,21 @@ try{
  await dialog.getByLabel('Checkpoint label').fill('Before task changes');await dialog.getByRole('button',{name:'Capture checkpoint',exact:true}).click();await expect(dialog.getByRole('button',{name:/Before task changes/})).toBeVisible();expect(snapshots()).toBe(1);
  await writeFile(path.join(root,'a.ts'),'Changed a\n');await rename(path.join(root,'b.ts'),path.join(root,'moved.ts'));await writeFile(path.join(root,'added.ts'),'New file\n');
  // Refresh waits for the real filesystem watcher revision before requesting a fresh preview.
- await page.waitForTimeout(350);await dialog.getByRole('button',{name:'Refresh checkpoints',exact:true}).click();await dialog.getByRole('button',{name:/Before task changes/}).click();
+ await settledObservation();await dialog.getByRole('button',{name:'Refresh checkpoints',exact:true}).click();await dialog.getByRole('button',{name:/Before task changes/}).click();
  let review=dialog.getByRole('region',{name:'Checkpoint restore preview'}); // section is named via aria-label.
  await expect(review.getByText('4 file changes',{exact:false})).toBeVisible();await expect(review.getByRole('button',{name:'Restore reviewed files',exact:true})).toBeDisabled();expect(await dialog.textContent()).not.toContain('PRIVATE_CHECKPOINT_SENTINEL');expect(await dialog.textContent()).not.toContain('PRIVATE_PROVIDER_SENTINEL');
- await page.screenshot({path:path.join(receipts,`checkpoint-${host}-preview.png`)});
+ await capture('preview');
  await review.getByLabel('Restore this reviewed file set').check();await review.getByRole('button',{name:'Restore reviewed files',exact:true}).click();await expect(dialog.getByRole('button',{name:'Capture checkpoint',exact:true})).toBeEnabled();
  expect(await readFile(path.join(root,'a.ts'),'utf8')).toBe('Original a\n');expect(await readFile(path.join(root,'b.ts'),'utf8')).toBe('Original b\n');await expect(readFile(path.join(root,'moved.ts'))).rejects.toMatchObject({code:'ENOENT'});await expect(readFile(path.join(root,'added.ts'))).rejects.toMatchObject({code:'ENOENT'});expect(await readFile(path.join(root,'.env'),'utf8')).toBe('PRIVATE_CHECKPOINT_SENTINEL');
  await dialog.getByText('File restore history',{exact:true}).click();await expect(dialog.getByText('done',{exact:true})).toBeVisible();expect(store.fileChanges(project.id)).toHaveLength(4);expect(store.messages(chat.id)).toEqual(before);expect(providerCalls).toBe(0);
- await page.screenshot({path:path.join(receipts,`checkpoint-${host}-restored.png`)});
+ await capture('restored');
  // Backend stale token protection after an exact fresh preview, exercised through authenticated browser fetch.
  const checkpointId=String(store.db.prepare("SELECT json_extract(data,'$.id') AS id FROM state WHERE key LIKE 'checkpoint:v1:%'").get()!.id);
+ await settledObservation();
  const stale=await page.evaluate(async({projectId,checkpointId,chatId})=>{const r=await fetch(`/api/projects/${projectId}/checkpoints/${checkpointId}/preview`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId})});if(!r.ok)throw new Error(await r.text());return r.json();},{projectId:project.id,checkpointId,chatId:chat.id});
  await writeFile(path.join(root,'a.ts'),'Later human edit\n');const rejected=await page.evaluate(async({projectId,checkpointId,chatId,preview})=>{const r=await fetch(`/api/projects/${projectId}/checkpoints/${checkpointId}/restore`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId,previewToken:preview.previewToken,revision:preview.revision,confirmation:'restore-files'})});return {status:r.status,body:await r.text()};},{projectId:project.id,checkpointId,chatId:chat.id,preview:stale});expect(rejected.status).toBe(409);expect(await readFile(path.join(root,'a.ts'),'utf8')).toBe('Later human edit\n');
  await page.reload();await page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:/^Task boundary/}).click();await page.getByRole('button',{name:'Checkpoints',exact:true}).click();await expect(page.getByRole('dialog',{name:'Checkpoints'}).getByRole('button',{name:/Before task changes/})).toBeVisible();expect(snapshots()).toBe(1);expect(providerCalls).toBe(0);expect(errors).toEqual([]);
- await writeFile(path.join(receipts,`checkpoint-${host}.json`),JSON.stringify({source:process.env.M34_SOURCE??'working tree',platform:process.platform,host:desktop?'actual sandboxed Electron test host':'actual headless Chrome',checks:['authenticated capture/list','opening and reload no capture or provider execution','explicit full multi-file preview and checkbox','actual add/delete/move/multifile restore','Git/private/binary exclusions','normal append-only file history','stale preview preserves later edit','reload preserves capture/history and never replays'],providerCalls,errors,staleStatus:rejected.status,fixtureRoot:base,limits:'Fixture provider and portable controller filesystem; no Docker/owned worker/Linux PTY/installed-device/native-human/live-provider/package acceptance'},null,2));
+ await writeFile(path.join(receipts,`checkpoint-${host}.json`),JSON.stringify({source:process.env.M34_SOURCE??'working tree',platform:process.platform,host:desktop?'actual sandboxed offscreen Electron test host with native PNG capture':'actual headless Chrome',checks:['authenticated capture/list','opening and reload no capture or provider execution','explicit full multi-file preview and checkbox','actual add/delete/move/multifile restore','Git/private/binary exclusions','normal append-only file history','stale preview preserves later edit','reload preserves capture/history and never replays'],providerCalls,errors,staleStatus:rejected.status,fixtureRoot:base,limits:'Fixture provider and portable controller filesystem; no Docker/owned worker/Linux PTY/installed-device/native-human/live-provider/package acceptance'},null,2));
  console.log(`PASS M34 ${host}: actual authenticated capture/multifile preview/explicit restore, stale edit preserved, provider calls ${providerCalls}`);
-}catch(error){if(page)await page.screenshot({path:path.join(receipts,`checkpoint-${host}-failed.png`)}).catch(()=>{});throw error;}
+}catch(error){if(page)await capture('failed').catch(()=>{});throw error;}
 finally{await desktop?.close();await browser?.close();await app.close();store.close();}

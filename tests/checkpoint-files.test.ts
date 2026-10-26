@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import {afterEach,expect,it,vi} from 'vitest';
 import * as fs from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -9,8 +10,8 @@ const cleanup:string[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const root of cleanup.splice(0)){if(path.dirname(root)!==path.resolve(tmpdir())||!path.basename(root).startsWith('m34-mode-'))throw new Error('Fixture cleanup identity mismatch');await fs.rm(root,{recursive:true,force:true});}});
 async function fixture(){const root=await fs.mkdtemp(path.join(tmpdir(),'m34-mode-'));cleanup.push(root);await fs.writeFile(path.join(root,'a.ts'),'after');return {root,files:new WorkspaceFiles({maxFileBytes:262144,maxEntries:512,maxSearchFiles:512,leaseMs:45000}),before:{path:'a.ts',content:'before',hash:hash('before'),mode:0o444},expected:{path:'a.ts',content:'after',hash:hash('after')}};}
 it('permission restoration repeats the durable claim after save and refuses a stale second effect',async()=>{
- const t=await fixture();let claims=0;await expect(t.files.restoreCheckpoint(t.root,t.before,t.expected,()=>{if(++claims===2)throw new Error('Claim changed after save');})).rejects.toThrow(/Claim changed/);
- expect(claims).toBe(2);expect(await fs.readFile(path.join(t.root,'a.ts'),'utf8')).toBe('before');expect((await fs.stat(path.join(t.root,'a.ts'))).mode&0o200).not.toBe(0);
+ const t=await fixture();let claims=0;await expect(t.files.restoreCheckpoint(t.root,t.before,t.expected,()=>{claims++;if(readFileSync(path.join(t.root,'a.ts'),'utf8')==='before')throw new Error('Claim changed after save');})).rejects.toThrow(/Claim changed/);
+ expect(claims).toBeGreaterThan(1);expect(await fs.readFile(path.join(t.root,'a.ts'),'utf8')).toBe('before');expect((await fs.stat(path.join(t.root,'a.ts'))).mode&0o200).not.toBe(0);
 });
 it('opened permission descriptor cannot authorize chmod after current path substitution',async()=>{
  const t=await fixture(),target=path.join(t.root,'a.ts'),replacement=path.join(t.root,'replacement.ts'),retained=path.join(t.root,'retained.ts');await fs.writeFile(replacement,'before');

@@ -1,4 +1,6 @@
 import {afterEach,expect,it,vi} from 'vitest';
+import * as filesystem from 'node:fs/promises';
+vi.mock('node:fs/promises',async original=>({...await original<typeof import('node:fs/promises')>()}));
 import {mkdtemp,mkdir,writeFile,readFile,rm,rename,symlink,link,chmod,lstat,realpath} from 'node:fs/promises';
 import path from 'node:path';
 import {tmpdir} from 'node:os';
@@ -221,4 +223,46 @@ it('lost reply after successful final COMMIT keeps durable done and does not rep
 it('long exclusion paths remain byte-bounded metadata and cannot publish an unreadable header',async()=>{
  const t=await fixture(),directory=Array(4).fill('folder-'+('x'.repeat(70))).join('/');for(let i=0;i<120;i++)await t.write(`${directory}/.env-${'x'.repeat(190)}-${i}`,'PRIVATE_EXCLUDED');
  const checkpoint=await t.capture();expect(checkpoint.files).toBe(0);expect(checkpoint.excludedCount).toBe(120);expect(checkpoint.excluded.length).toBeLessThan(100);expect(Buffer.byteLength(JSON.stringify(checkpoint.excluded))).toBeLessThan(16100);expect(t.service.list(t.project.id).items[0].id).toBe(checkpoint.id);expect(()=>t.store.assertCheckpointSafe(t.project.id)).not.toThrow();
+});
+it('root replacement between durable intent and file effect never overwrites the replacement directory',async()=>{
+ const t=await fixture();await t.write('a.ts','before');const checkpoint=await t.capture();await t.write('a.ts','after');const preview=await t.preview(checkpoint.id),retained=t.root+'-retained';
+ expect(path.dirname(retained)).toBe(path.resolve(t.config.workspaceRoot));const original=WorkspaceFiles.prototype.restoreCheckpoint;let swapped=false;
+ vi.spyOn(WorkspaceFiles.prototype,'restoreCheckpoint').mockImplementation(async function(this:WorkspaceFiles,...args){if(!swapped){swapped=true;await rename(t.root,retained);await mkdir(t.root);await writeFile(path.join(t.root,'a.ts'),'after');}return original.apply(this,args);});
+ await expect(t.restore(preview)).rejects.toThrow(/uncertain/);expect(swapped).toBe(true);expect(await readFile(path.join(t.root,'a.ts'),'utf8')).toBe('after');expect(await readFile(path.join(retained,'a.ts'),'utf8')).toBe('after');expect(t.service.list(t.project.id).restores[0].status).toBe('uncertain');
+});
+it('root replacement between two file effects preserves completed old-root edits and the entire replacement',async()=>{
+ const t=await fixture();await t.write('a.ts','before a');await t.write('b.ts','before b');const checkpoint=await t.capture();await t.write('a.ts','after a');await t.write('b.ts','after b');const preview=await t.preview(checkpoint.id),retained=t.root+'-retained';expect(path.dirname(retained)).toBe(path.resolve(t.config.workspaceRoot));
+ const original=WorkspaceFiles.prototype.restoreCheckpoint;let files=0;vi.spyOn(WorkspaceFiles.prototype,'restoreCheckpoint').mockImplementation(async function(this:WorkspaceFiles,...args){if(++files===2){await rename(t.root,retained);await mkdir(t.root);await writeFile(path.join(t.root,'a.ts'),'after a');await writeFile(path.join(t.root,'b.ts'),'after b');}return original.apply(this,args);});
+ await expect(t.restore(preview)).rejects.toThrow(/uncertain/);expect(await readFile(path.join(retained,'a.ts'),'utf8')).toBe('before a');expect(await readFile(path.join(retained,'b.ts'),'utf8')).toBe('after b');expect(await readFile(path.join(t.root,'a.ts'),'utf8')).toBe('after a');expect(await readFile(path.join(t.root,'b.ts'),'utf8')).toBe('after b');expect(t.service.list(t.project.id).restores[0].status).toBe('uncertain');
+});
+it('root replacement after content save cannot authorize chmod of an identical-byte replacement',async()=>{
+ const t=await fixture();await t.write('a.ts','before');await chmod(path.join(t.root,'a.ts'),0o444);const checkpoint=await t.capture();await chmod(path.join(t.root,'a.ts'),0o666);await t.write('a.ts','after');const preview=await t.preview(checkpoint.id),retained=t.root+'-retained';expect(path.dirname(retained)).toBe(path.resolve(t.config.workspaceRoot));
+ const original=WorkspaceFiles.prototype.save;let swapped=false;vi.spyOn(WorkspaceFiles.prototype,'save').mockImplementation(async function(this:WorkspaceFiles,...args){const result=await original.apply(this,args);if(!swapped){swapped=true;await rename(t.root,retained);await mkdir(t.root);await writeFile(path.join(t.root,'a.ts'),'before');}return result;});
+ await expect(t.restore(preview)).rejects.toThrow(/uncertain/);expect(swapped).toBe(true);expect((await lstat(path.join(t.root,'a.ts'))).mode&0o200).not.toBe(0);expect(await readFile(path.join(t.root,'a.ts'),'utf8')).toBe('before');expect(await readFile(path.join(retained,'a.ts'),'utf8')).toBe('before');expect(t.service.list(t.project.id).restores[0].status).toBe('uncertain');
+});
+
+it('root substitution after save entry cannot create or write temporary files in the replacement',async()=>{
+ const t=await fixture();await t.write('a.ts','before');const checkpoint=await t.capture();await t.write('a.ts','after');const preview=await t.preview(checkpoint.id),retained=t.root+'-retained';expect(path.dirname(retained)).toBe(path.resolve(t.config.workspaceRoot));
+ const original=WorkspaceFiles.prototype.read,open=filesystem.open;let swapped=false,temporaryOpens=0;
+ vi.spyOn(filesystem,'open').mockImplementation(async(...args:Parameters<typeof filesystem.open>)=>{if(swapped&&String(args[0]).startsWith(t.root+path.sep)&&String(args[0]).includes('.rh-write-'))temporaryOpens++;return open(...args);});
+ vi.spyOn(WorkspaceFiles.prototype,'read').mockImplementation(async function(this:WorkspaceFiles,...args){if(!swapped&&t.store.db.prepare("SELECT 1 FROM state WHERE key LIKE 'checkpoint-restore:v1:%' AND json_extract(data,'$.status')='claiming'").get()){swapped=true;await rename(t.root,retained);await mkdir(t.root);await writeFile(path.join(t.root,'a.ts'),'after');}return original.apply(this,args);});
+ await expect(t.restore(preview)).rejects.toThrow(/uncertain/);expect(swapped).toBe(true);expect(temporaryOpens).toBe(0);expect(await readFile(path.join(t.root,'a.ts'),'utf8')).toBe('after');expect(t.service.list(t.project.id).restores[0].status).toBe('uncertain');
+});
+it('root substitution after first parent creation cannot create deeper parents or temporary writes in a replacement',async()=>{
+ const t=await fixture();await t.write('new/deep/a.ts','before');const checkpoint=await t.capture();const parent=path.join(t.root,'new');expect(path.dirname(parent)).toBe(t.root);await rm(parent,{recursive:true});const preview=await t.preview(checkpoint.id),retained=t.root+'-retained';expect(path.dirname(retained)).toBe(path.resolve(t.config.workspaceRoot));
+ const original=filesystem.mkdir;let swapped=false;
+ vi.spyOn(filesystem,'mkdir').mockImplementation(async(...args:Parameters<typeof filesystem.mkdir>)=>{const result=await original(...args);if(!swapped&&String(args[0])===parent){swapped=true;await rename(t.root,retained);await original(t.root);await original(parent);}return result;});
+ await expect(t.restore(preview)).rejects.toThrow(/uncertain/);expect(swapped).toBe(true);await expect(lstat(path.join(parent,'deep'))).rejects.toMatchObject({code:'ENOENT'});expect(await filesystem.readdir(parent)).toEqual([]);expect((await lstat(path.join(retained,'new'))).isDirectory()).toBe(true);expect(t.service.list(t.project.id).restores[0].status).toBe('uncertain');
+});
+it('cleanup after temp open never unlinks a same-name replacement sentinel beneath a changed root',async()=>{
+ const t=await fixture();await t.write('a.ts','before');const checkpoint=await t.capture();await t.write('a.ts','after');const preview=await t.preview(checkpoint.id),retained=t.root+'-retained';expect(path.dirname(retained)).toBe(path.resolve(t.config.workspaceRoot));
+ const original=filesystem.open;let swapped=false,sentinel='';vi.spyOn(filesystem,'open').mockImplementation(async(...args:Parameters<typeof filesystem.open>)=>{let handle=await original(...args);if(!swapped&&args[1]==='wx'&&String(args[0]).includes('.rh-write-')){sentinel=String(args[0]);const identity=await handle.stat({bigint:true});
+  try{await rename(t.root,retained);}catch(error){
+   // Windows may forbid renaming a directory with an open child. Reopen the
+   // SAME observed fixture inode after the injected move; no fake handle/data.
+   if(process.platform!=='win32'||!['EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){await handle.close();throw error;}
+   await handle.close();await rename(t.root,retained);handle=await original(path.join(retained,path.basename(sentinel)),'r+');const reopened=await handle.stat({bigint:true});expect([reopened.dev,reopened.ino]).toEqual([identity.dev,identity.ino]);
+  }
+  swapped=true;await mkdir(t.root);await writeFile(path.join(t.root,'a.ts'),'after');await writeFile(sentinel,'REPLACEMENT_SENTINEL');}return handle;});
+ await expect(t.restore(preview)).rejects.toThrow(/uncertain/);expect(swapped).toBe(true);expect(await readFile(sentinel,'utf8')).toBe('REPLACEMENT_SENTINEL');expect(await readFile(path.join(t.root,'a.ts'),'utf8')).toBe('after');expect(await readFile(path.join(retained,'a.ts'),'utf8')).toBe('after');expect(t.service.list(t.project.id).restores[0].status).toBe('uncertain');
 });

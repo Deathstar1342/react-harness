@@ -1,3 +1,4 @@
+import {lstatSync,realpathSync} from 'node:fs';
 import {lstat,opendir,realpath} from 'node:fs/promises';
 import path from 'node:path';
 import type {FileSnapshot,CheckpointAccess} from '../shared/types.js';
@@ -24,6 +25,11 @@ export function checkpointExclusion(relative:string):string|undefined {
 }
 export const manifestDigest=(files:CheckpointFile[])=>hash(JSON.stringify(files.map(f=>[f.path,f.hash,f.mode,f.content])));
 const stamp=(s:Awaited<ReturnType<typeof lstat>>,directory=false)=>[String(s.dev),String(s.ino),String(s.birthtimeMs),...(directory?[]:[String(s.ctimeMs),String(s.mtimeMs),String(s.size),String(s.mode)])].join(':');
+/** Check the original project object again at every actual restore boundary. */
+export function assertCheckpointRoot(root:string,identity:string){
+ assertNativePath(root,false);const current=lstatSync(root);
+ if(!current.isDirectory()||current.isSymbolicLink()||realpathSync(root)!==root||stamp(current,true)!==identity)throw new Error('Checkpoint project root identity changed before file effect');
+}
 /** Enumerate every eligible entry. Unlike file browsing, unsafe/unreadable source is never silently skipped. */
 export async function checkpointTree(root:string,access:Pick<CheckpointAccess,'read'>):Promise<CheckpointTree> {
  assertNativePath(root,false);

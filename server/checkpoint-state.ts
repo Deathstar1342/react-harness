@@ -3,7 +3,7 @@ import {z} from 'zod';
 import path from 'node:path';
 import type {Store} from './store.js';
 import {parseNativeJSON} from './native-json.js';
-import {checkpointLimits,checkpointPolicy,checkpointExclusion,manifestDigest,type CheckpointFile} from './checkpoint-files.js';
+import {checkpointLimits,checkpointPolicy,checkpointExclusion,manifestDigest,assertCheckpointRoot,type CheckpointFile} from './checkpoint-files.js';
 import {hash,safeRelative} from './tools/paths.js';
 import type {SQLInputValue} from 'node:sqlite';
 
@@ -135,8 +135,9 @@ export const checkpointExactClaim=(store:Store,expected:CheckpointJournal,index:
  const row=store.db.prepare('SELECT change_id,CASE WHEN length(CAST(data AS BLOB))<=1100000 THEN data END AS data FROM checkpoint_effects WHERE restore_id=? AND ordinal=?').get(expected.id,index);
  if(typeof row?.data!=='string'||row.change_id!==expected.changes[index].id)return fail();const selected=change.safeParse(checkpointJSON(row.data,1100000));
  if(!selected.success||selected.data.digest!==checkpointChangeDigest(selected.data)||JSON.stringify(selected.data)!==JSON.stringify(expected.changes[index]))return fail();
+ assertCheckpointRoot(expected.root,expected.rootIdentity);
 });
 export const checkpointValidateJournal=(store:Store,expected:CheckpointJournal)=>nativePrivateUnit(()=>{
  const rows=metadataRows(store,'checkpoint-restore:v1:',checkpointJournalKey(expected.id));if(rows.length!==1)return fail();const header=checkpointJournalHeaderSchema.safeParse(rows[0].data);if(!header.success||header.data.integrity!==checkpointJournalIntegrity(header.data))return fail();
- const j=loadCheckpointJournal(store,header.data);if(JSON.stringify(j)!==JSON.stringify(expected))return fail();
+ const j=loadCheckpointJournal(store,header.data);if(JSON.stringify(j)!==JSON.stringify(expected))return fail();assertCheckpointRoot(expected.root,expected.rootIdentity);
 });
