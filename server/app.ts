@@ -1,5 +1,6 @@
 import {TaskQueue,queueStartInput,queueEditInput} from './task-queue.js';
-import {parseNativeJSON} from './native-json.js';
+import {assertNativeJSON} from './native-json.js';
+import {queueProject} from './queue-state.js';
 import {inspectorView} from './inspector.js';
 import {BrowserPreviews} from './browser-previews.js';
 import {browserProbeResult} from '../shared/browser-preview.js';
@@ -41,6 +42,7 @@ import {recoveryView} from './recovery.js';
 import {workerAvailable} from './worker-client.js';
 import { containerExecutionUnavailable } from './container-contract.js';
 
+const queueRoutes=new Set(['/api/projects/:id/queue','/api/projects/:id/queue/start','/api/projects/:id/queue/cancel-active']);
 const approvalMode = z.enum(['autonomous','balanced','review']);
 export interface AppOptions { browserPreview?:'direct'|'source-fixed-3000'; config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
 export async function createApp(options: AppOptions) {
@@ -65,8 +67,12 @@ export async function createApp(options: AppOptions) {
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
+  const ordinaryJson=app.getDefaultJsonParser(app.initialConfig.onProtoPoisoning!,app.initialConfig.onConstructorPoisoning!);
   app.removeContentTypeParser('application/json');
-  app.addContentTypeParser('application/json',{parseAs:'string'},(request,body,done)=>{try{done(null,request.url.includes('/queue')?parseNativeJSON(String(body),600000):JSON.parse(String(body)));}catch{done(Object.assign(new Error('Invalid or ambiguous JSON request'),{statusCode:400}));}});
+  app.addContentTypeParser('application/json',{parseAs:'string'},(request,body,done)=>{
+    if(queueRoutes.has(request.routeOptions.url??'')){try{assertNativeJSON(String(body),600000);}catch{done(Object.assign(new Error('Invalid or ambiguous JSON request'),{statusCode:400}));return;}}
+    ordinaryJson(request,String(body),done);
+  });
   const browserPreviews=new BrowserPreviews(previews,()=>{if(!options.transportAuth?.browserPairingEnabled)return;const address=app.server.address();if(!address||typeof address==='string')return;if(options.browserPreview==='direct'&&address.address==='127.0.0.1')return address.port;if(options.browserPreview==='source-fixed-3000'&&config.executionMode==='container'&&config.host==='0.0.0.0'&&config.port===3000&&address.port===3000)return 3000;});
   browserPreviews.register(app);
   const watchers = new Map<string,FSWatcher>();
@@ -174,6 +180,14 @@ export async function createApp(options: AppOptions) {
   // Track complete request lifetimes, including awaits before a save or registration.
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';
+    if(queueRoutes.has(route)){
+      if(closing)throw Object.assign(new Error('Backend is closing'),{statusCode:503});
+      const {id}=z.strictObject({id:z.uuid()}).parse(request.params),project=queueProject(store,id);
+      if(['POST','PUT','PATCH','DELETE'].includes(request.method))store.assertCheckpointSafe(id);
+      if(resetting.has(id))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
+      if(project.removalError&&['POST','PUT','PATCH','DELETE'].includes(request.method))throw Object.assign(new Error('Project removal needs recovery'),{statusCode:409});
+      return;
+    }
     // This synchronous read validates bounded chat/project rows in its snapshot.
     if(route==='/api/chats/:id/recovery'||route==='/api/chats/:id/inspector')return;
     if(route.startsWith('/api/projects/:id/previews')){
@@ -195,7 +209,6 @@ export async function createApp(options: AppOptions) {
       if(['POST','PUT','PATCH'].includes(request.method)&&!route.endsWith('/editor')&&!route.endsWith('/control'))store.assertCheckpointSafe(projectId);
       if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
-      if(route.includes('/queue'))return;
       if(['POST','PUT','PATCH','DELETE'].includes(request.method))queues.intervention(projectId);
       requests.set(request.id,projectId);
     }
