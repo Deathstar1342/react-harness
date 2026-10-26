@@ -21,6 +21,8 @@ class Broker:
         self.journal, self.docker = journal, docker
         self.lock = threading.RLock()
         self.jobs = {}
+        from previews import Previews
+        self.previews = Previews(self)
         self.closing = False
         self.shutdown_done = threading.Event()
         self.shutdown_error = False
@@ -30,6 +32,7 @@ class Broker:
         self.transfers = Transfers(self)
 
     def dispatch(self, op, body):
+        if op.startswith('preview_'):return self.previews.dispatch(op, body)
         with self.lock:
             require(not self.closing or op in ('observe','install_status','transfer_observe','transfer_cancel','transfer_release'), 'BROKER_CLOSING')
             if op.startswith('transfer_'):
@@ -86,6 +89,7 @@ class Broker:
                         'output': base64.b64encode(page).decode(), 'result': record.get('result')}
             if op == 'cancel':
                 record = self.journal.owned(body)
+                self.previews.invalidate(record['contextId'])
                 if record['state'] == 'prepared':
                     self.docker.close(record['contextId'])
                     self.journal.cancel_prepared(body)
@@ -105,6 +109,7 @@ class Broker:
                 exact(body, ['contextId'])
                 require(type(body['contextId']) is str and HEX.fullmatch(body['contextId']))
                 require(not any(j['thread'].is_alive() and self.journal.get(id)['contextId'] == body['contextId'] for id, j in self.jobs.items()), 'CONTEXT_BUSY')
+                self.previews.invalidate(body['contextId'])
                 self.docker.close(body['contextId'])
                 return {'contextId': body['contextId'], 'cleanupConfirmed': True}
             raise Denied('UNKNOWN_OPERATION')
@@ -174,12 +179,14 @@ class Broker:
                 if final['timedOut'] or cancelled:
                     self.docker.close(original['contextId'])
                     final.update(shellReset=True, cancelled=cancelled)
+                self.previews.invalidate(original['contextId'])
                 current.update(state='finished', code='OBSERVED_EXIT', result=final)
                 self.journal.save(current)
         except Exception:
             with self.lock:
                 current = self.journal.get(original['claimId'])
                 # Lost proof/reply/commit cannot become a fake no-effect result.
+                self.previews.invalidate(original['contextId'])
                 current.update(state='uncertain', code='EXECUTION_OR_CLEANUP_UNCERTAIN')
                 current.pop('result', None)
                 try:
@@ -200,6 +207,7 @@ class Broker:
         with self.lock:
             already = self.closing
             if not already:
+                self.previews.invalidate()
                 self.closing = True  # Admission barrier precedes snapshots and every await.
                 install_threads = list(self.packages.threads.values())
                 jobs = list(self.jobs.values())

@@ -17,7 +17,7 @@ try {
   const desktop=process.env.HARNESS_DESKTOP==='1';
   const launch=await runNativeOperation(()=>desktop?readDesktopLaunch(env.HARNESS_STORAGE_ID??''):undefined);
   if(launch)env.HARNESS_LAUNCH_KEY=launch.key;
-  const backend=await startBackend({env,desktop,transportToken:launch?.token});
+  const backend=await startBackend({env,desktop,transportToken:launch?.token,browserPreview:desktop?undefined:'source-fixed-3000'});
   console.log('Container controller ready; host address http://127.0.0.1:3000');
   // Same deliberate single-use, expiring local-operator capability as source mode.
   if(!desktop)console.log(`Browser pairing code (single use, 5 minutes): ${backend.auth.pairingCode}`);

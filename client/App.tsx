@@ -1,3 +1,4 @@
+import {PreviewPanel} from './PreviewPanel';
 import {TransferDialog} from './TransferDialog';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallHistory } from './InstallControls';
@@ -77,6 +78,7 @@ export function Conversation({
   const [planOpen, setPlanOpen] = useState(false);
   const [recoveryOpen,setRecoveryOpen]=useState(false);
   const [checkpointsOpen,setCheckpointsOpen]=useState(false);
+  const [previewOpen,setPreviewOpen]=useState(false);
   const [recoveryInstall,setRecoveryInstall]=useState<string>();
   const [recoveryProcess,setRecoveryProcess]=useState<string>();
   const recoveryControl=useRef<HTMLButtonElement>(null);
@@ -235,12 +237,14 @@ export function Conversation({
           </button>
           <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>{detail.goal ? `Goal · ${detail.goal.status.replaceAll('_',' ')} · ${detail.plan.phases.filter(phase=>phase.steps.length && phase.steps.every(step=>step.status==='done' && detail.goal!.reviews.some(review=>review.planStep.planId===detail.plan.id && review.planStep.planVersion===detail.plan.version && review.planStep.phaseId===phase.id && review.planStep.stepId===step.id))).length}/${detail.plan.phases.length} phases` : 'Plan'}</button>
           <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
+          <button className="text-button" aria-expanded={previewOpen} onClick={()=>setPreviewOpen(open=>!open)}>Preview</button>
           <button ref={recoveryControl} className="text-button" aria-expanded={recoveryOpen} aria-controls="chat-recovery" onClick={()=>setRecoveryOpen(open=>!open)}>Recovery</button>
           <button className="text-button" aria-expanded={skillsOpen} onClick={()=>setSkillsOpen(true)}>Skills</button>
           <button className="text-button" onClick={onChanges}>Changes</button>
           <button className="text-button" aria-expanded={checkpointsOpen} onClick={()=>setCheckpointsOpen(true)}>Checkpoints</button>
         </div>
       </header>
+      {previewOpen&&<PreviewPanel key={project.id+chatId} projectId={project.id} revision={detail.events.filter(event=>event.type==='command').at(-1)?.id??0} connected={connection==='connected'} onClose={()=>setPreviewOpen(false)}/>}
       {checkpointsOpen&&<CheckpointsPanel key={chatId} projectId={project.id} chatId={chatId} revision={fileRevision} onClose={()=>setCheckpointsOpen(false)}/>}
       {recoveryOpen&&<RecoveryPanel detail={detail} connected={connection==='connected'} onClose={()=>{setRecoveryOpen(false);recoveryControl.current?.focus();}} onNavigate={navigateRecovery}/>}
       {planOpen && <section id="chat-plan" className="chat-plan" aria-label="Current plan" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){setPlanOpen(false);planControl.current?.focus();}}}>

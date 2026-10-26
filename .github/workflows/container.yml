@@ -5,7 +5,7 @@ permissions:
 jobs:
   linux-container:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Bounded fixture Git maintenance lifecycle diagnostic
@@ -21,12 +21,28 @@ jobs:
       - name: Real owned worker PTY and container package transactions
         if: ${{ !cancelled() }}
         run: python3 tests/container-worker-linux.py
+      - name: Real owned worker development server and bounded preview lifecycle
+        if: ${{ !cancelled() }}
+        timeout-minutes: 12
+        run: python3 tests/container-preview-linux.py
       - name: Actual source launcher and private terminal setup
         if: ${{ !cancelled() }}
         run: python3 tests/container-source-linux.py
       - name: Real private desktop supervisor lifecycle and native transfer handoff
         if: ${{ !cancelled() }}
         run: python3 tests/desktop-container-linux.py
+      - uses: actions/setup-node@v4
+        if: ${{ !cancelled() }}
+        with:
+          node-version: 24
+      - name: Connected production controller authenticated worker and browser preview
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: |
+          npm ci
+          export M35_UI_OUTPUT="$RUNNER_TEMP/m35-connected-ui"
+          node node_modules/vite/bin/vite.js build --config tests/preview-vite.config.ts
+          python3 tests/container-preview-connected.py
       - name: Preserve container receipts including failures
         if: always()
         uses: actions/upload-artifact@v4

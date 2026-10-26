@@ -14,8 +14,8 @@ import { BackendLifecycle } from './lifecycle.js';
 import { TransportAuth } from './transport-auth.js';
 import { verifyContainerStorage } from './container-storage.js';
 
-export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean}={}) {return runNativeOperation(()=>startBackendScoped(options));}
-async function startBackendScoped(options:ProfileOptions & {transportToken?:string;desktop?:boolean}) {
+export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean;browserPreview?:'source-fixed-3000'}={}) {return runNativeOperation(()=>startBackendScoped(options));}
+async function startBackendScoped(options:ProfileOptions & {transportToken?:string;desktop?:boolean;browserPreview?:'source-fixed-3000'}) {
   const env={...(options.env ?? process.env)};
   if(env.HARNESS_EXECUTION_MODE==='container') {
     verifyContainerStorage(env.HARNESS_STORAGE_ID ?? '');
@@ -74,7 +74,7 @@ async function startBackendScoped(options:ProfileOptions & {transportToken?:stri
     store=new Store(database);
     durableWrite(dataMarker,JSON.stringify({version:1}));
     ({app}=await createApp({config,provider,store,providerSettingsFile:file,tools,
-      hooks:createManagedHooks(provider,store,config,{promptExtensions}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close},transportAuth:auth}));
+      hooks:createManagedHooks(provider,store,config,{promptExtensions}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close},transportAuth:auth,browserPreview:options.desktop?undefined:options.browserPreview}));
     const address=await app.listen({host:config.host,port:config.port});
     config.port=Number(new URL(address).port);
     lifecycle.ready();

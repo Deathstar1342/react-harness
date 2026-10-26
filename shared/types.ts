@@ -60,6 +60,7 @@ export interface WorkerDispatchBinding {claimId:string;binding:string;sessionId:
 export interface ToolContext {
   projectRoot: string; chatId: string; agentId: string; signal?: AbortSignal; onOutput?: (output: string) => void;
   /** Trusted in-memory capabilities; never serialized or accepted as native arguments. */
+  previewPort?:number;
   mutationOwner?: symbol; prepareCommand?: () => Promise<void>; beforeCommand?: (binding?:WorkerDispatchBinding) => void;
 }
 export interface ProcessJob {
@@ -68,6 +69,9 @@ export interface ProcessJob {
   createdAt:string; updatedAt:string; output:string; baseOffset:number; endOffset:number; truncated:boolean;
   exitCode?:number; message?:string;
 }
+/** Preview observations cannot authorize execution, acceptance or reconciliation. */
+export interface PreviewEntry {processId:string;projectId:string;chatId:string;generation:number;port:number;status:'starting'|'ready'|'stopped'|'failed'|'interrupted'|'uncertain'|'stale';reason:string}
+export interface PreviewSession {id:string;projectId:string;processId:string;chatId:string;generation:number;expiresAt:number}
 export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; before?: string; after?: string; diff?: string; changes?: {before: FileSnapshot; after: FileSnapshot}[] }
 export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }

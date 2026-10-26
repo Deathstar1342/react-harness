@@ -30,6 +30,13 @@ it('final root loss vetoes prepared dispatch while exact cleanup remains sendabl
  const cleanup=t.client.request('cancel',{claimId:randomUUID(),binding:'d'.repeat(64)}),socket=socketState.last;socket.release.runInAsyncScope(()=>socket.emit('connect'));expect(socket.write).toHaveBeenCalledTimes(1);
  const uncertain=expect(cleanup).rejects.toThrow(/UNCERTAIN/);socket.emit('close');await uncertain;expect(t.check).toHaveBeenCalledTimes(1);
 });
-it.each(['prepare','activate','install_hello','install_prepare','install_authorize','install_execute','install_reconcile','transfer_begin','transfer_receipt','reset'])('%s requires a live scope, never a background observation',async op=>{
+it.each(['prepare','activate','install_hello','install_prepare','install_authorize','install_execute','install_reconcile','transfer_begin','transfer_receipt','reset','preview_open'])('%s requires a live scope, never a background observation',async op=>{
  const t=await fixture();expect(()=>t.client.request(op,{})).toThrow(/freshness/);expect(socketState.count).toBe(0);expect(t.check).not.toHaveBeenCalled();
+});
+
+it('aborted preview wire never sends a late connect and cannot renew or bypass poisoned read/close state',async()=>{
+ const t=await fixture(),abort=new AbortController();let pending!:Promise<unknown>;
+ await t.authority.runNativeOperation(()=>{pending=t.client.request('preview_open',{},abort.signal);return undefined;});const socket=socketState.last,refused=expect(pending).rejects.toThrow(/UNCERTAIN/);abort.abort();await refused;socket.release.runInAsyncScope(()=>socket.emit('connect'));expect(socket.write).not.toHaveBeenCalled();
+ await expect(t.authority.runNativeOperation(()=>{t.advance();t.authority.assertNativePath('/workspace',false);})).rejects.toThrow(/freshness/);
+ for(const op of ['preview_read','preview_close'])expect(()=>t.client.request(op,{})).toThrow(/recovery/);expect(socketState.count).toBe(1);expect(t.check).toHaveBeenCalledTimes(2);
 });

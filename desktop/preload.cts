@@ -8,6 +8,10 @@ ipcRenderer.on('desktop:freeze',(_event,nonce:string)=>{
 });
 ipcRenderer.on('desktop:thaw',(_event,nonce:string)=>{if(freeze===nonce){freeze=undefined;document.documentElement.inert=false;}});
 const bridge:DesktopBridge={
+  previewOpen:input=>ipcRenderer.invoke('desktop:preview-open',input),
+  previewBounds:input=>ipcRenderer.invoke('desktop:preview-bounds',input),
+  previewReload:input=>ipcRenderer.invoke('desktop:preview-reload',input),
+  previewClose:input=>ipcRenderer.invoke('desktop:preview-close',input),
   status:()=>ipcRenderer.invoke('desktop:status'),
   checkContainer:()=>ipcRenderer.invoke('desktop:container-check'),
   pickStorage:()=>ipcRenderer.invoke('desktop:storage-pick'),

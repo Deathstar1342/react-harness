@@ -1,0 +1,5 @@
+// Actual older pinned Chromium used as an unsupported browser client; no preload.
+const {app,BrowserWindow,session}=require('electron');const path=require('node:path');
+if(!process.env.M35_BROWSER_HOME||!process.env.M35_BROWSER_URL||!process.env.M35_BROWSER_COOKIE)throw new Error('Explicit isolated browser fixture inputs required');
+app.setPath('userData',path.join(process.env.M35_BROWSER_HOME,'user'));app.setPath('sessionData',path.join(process.env.M35_BROWSER_HOME,'session'));app.setPath('crashDumps',path.join(process.env.M35_BROWSER_HOME,'crashes'));app.enableSandbox();
+app.whenReady().then(async()=>{const cookie=JSON.parse(process.env.M35_BROWSER_COOKIE);await session.defaultSession.cookies.set({url:process.env.M35_BROWSER_URL,name:cookie.name,value:cookie.value,path:'/api',httpOnly:true,sameSite:'strict'});const window=new BrowserWindow({show:false,width:1440,height:1000,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});await window.loadURL(process.env.M35_BROWSER_URL);});app.on('window-all-closed',()=>app.quit());

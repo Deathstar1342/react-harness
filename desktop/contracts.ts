@@ -16,6 +16,10 @@ export interface DesktopStatus {
   helperReadiness?:import('./helper-preflight.js').HelperReadiness;
 }
 export interface DesktopBridge {
+  previewOpen(input:{projectId:string;processId:string;requestId:string;sessionId:string;bounds:{x:number;y:number;width:number;height:number}}):Promise<{previewId:string;requestId:string}>;
+  previewBounds(input:{requestId:string;sessionId:string;bounds:{x:number;y:number;width:number;height:number}}):Promise<{ok:true}>;
+  previewReload(input:{requestId:string;sessionId:string}):Promise<{ok:true}>;
+  previewClose(input:{requestId:string;sessionId:string}):Promise<{closed:true}>;
   status():Promise<DesktopStatus>;
   checkContainer():Promise<DesktopStatus>;
   pickStorage():Promise<{id:string;displayPath:string;mode:'existing'|'initialize'}|null>;
