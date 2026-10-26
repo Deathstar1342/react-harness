@@ -172,7 +172,7 @@ export class StarkProvider implements ModelProvider {
     }
   }
 
-  async #request<T>(endpoint: string, init: RequestInit, external: AbortSignal | undefined, consume: (response: Response) => Promise<T>, noRetry = false): Promise<T> {
+  async #request<T>(endpoint: string, init: RequestInit, external: AbortSignal | undefined, consume: (response: Response) => Promise<T>, noRetry = false, onAttempt?: (attempt:number)=>void): Promise<T> {
     // Allow an unconfigured application to start; fail safely when it requests a model.
     try {
       const url = new URL(this.#baseUrl);
@@ -187,6 +187,7 @@ export class StarkProvider implements ModelProvider {
     try {
       for (let attempt = 0; ; attempt++) {
         controller.signal.throwIfAborted();
+        onAttempt?.(attempt+1);
         const response = await fetch(`${this.#baseUrl}${endpoint}`, {
           ...init, redirect: 'error', signal: controller.signal,
           headers: { 'Authorization': `Bearer ${this.#apiKey}`, 'Accept': (init.headers as Record<string,string>|undefined)?.Accept ?? (endpoint === '/models' || !this.#streaming ? 'application/json' : 'text/event-stream'), ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
@@ -258,6 +259,7 @@ export class StarkProvider implements ModelProvider {
       if (!streaming) {
         const payload = await readJSON(response);
         if (!record(payload) || payload.error != null || !Array.isArray(payload.choices) || payload.choices.length !== 1) throw malformed();
+        const earlyUsage=usageFrom(payload.usage);if(earlyUsage)input.onObservation?.({type:'usage',usage:earlyUsage});
         const choice = payload.choices[0];
         if (!record(choice) || !record(choice.message)) throw malformed();
         rejectRefusal(choice.message.refusal);
@@ -290,7 +292,7 @@ export class StarkProvider implements ModelProvider {
         const payload = parseJSON(frame.data);
         if (!record(payload)) throw malformed();
         if (payload.error != null) throw new ProviderError('transport', 'Provider reported a stream error');
-        if (payload.usage != null) usage = usageFrom(payload.usage);
+        if (payload.usage != null) {usage = usageFrom(payload.usage);if(usage)input.onObservation?.({type:'usage',usage});}
         if (!Array.isArray(payload.choices) || payload.choices.length > 1) throw malformed();
         if (payload.choices.length === 0) {
           if (payload.usage == null) throw malformed();
@@ -337,6 +339,6 @@ export class StarkProvider implements ModelProvider {
         }
       }
       throw truncated();
-    }, input.noRetry === true);
+    }, input.noRetry === true,attempt=>input.onObservation?.({type:'attempt',attempt}));
   }
 }

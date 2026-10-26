@@ -86,6 +86,31 @@ jobs:
           $env:M35_BROWSER_BIND='1'
           $env:M35_BROWSER_ONLY='1'
           node --import tsx tests/milestone-35-native.ts
+      - name: Actual bounded inspector Chrome and sandboxed Electron UI (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 4
+        run: |
+          export M36_APP_ROOT="$GITHUB_WORKSPACE/build/app"
+          export M36_SOURCE="$GITHUB_SHA"
+          export M36_RECEIPTS="$GITHUB_WORKSPACE/test-results/inspector/browser"
+          node --import tsx tests/milestone-36-native.ts browser
+          M36_RECEIPTS="$GITHUB_WORKSPACE/test-results/inspector/native" xvfb-run -a node --import tsx tests/milestone-36-native.ts native
+      - name: Actual bounded inspector Chrome and sandboxed Electron UI (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 4
+        run: |
+          $env:M36_APP_ROOT=Join-Path $env:GITHUB_WORKSPACE 'build/app'
+          $env:M36_SOURCE=$env:GITHUB_SHA
+          $env:M36_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/inspector/browser'
+          $env:TEMP=Join-Path $env:RUNNER_TEMP 'm36-temp'
+          New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+          $env:TMP=$env:TEMP
+          $env:TMPDIR=$env:TEMP
+          $env:electron_config_cache=Join-Path $env:RUNNER_TEMP 'electron-cache'
+          node --import tsx tests/milestone-36-native.ts browser
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:M36_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/inspector/native'
+          node --import tsx tests/milestone-36-native.ts native
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -94,3 +119,4 @@ jobs:
             test-results/electron-*.png
             test-results/checkpoints/
             test-results/preview/
+            test-results/inspector/

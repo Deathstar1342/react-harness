@@ -42,6 +42,7 @@ export function FilePanel({
   onClose,
   expanded = false,
   onToggleExpanded,
+  requestedFile,
 }: {
   projectId: string;
   revision: number;
@@ -49,6 +50,7 @@ export function FilePanel({
   onClose: () => void;
   expanded?: boolean;
   onToggleExpanded?: () => void;
+  requestedFile?:{path:string;nonce:number};
 }) {
   const [directory, setDirectory] = useState("");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -197,6 +199,7 @@ export function FilePanel({
       active = false;
     };
   }, [projectId, revision]);
+  useEffect(()=>{if(requestedFile)void openFile(requestedFile.path);},[requestedFile]);
   const openFile = async (path: string) => {
     if (dirty || saving) {
       setError(

@@ -1,6 +1,6 @@
 # Milestone 36 — Run and usage inspector
 
-Status: EARLY CONTRACT FOR COORDINATOR REVIEW. No implementation or final acceptance claimed.
+Status: early contract reviewed; implementation candidate ready for coherent frozen validation. No final handoff or acceptance claimed.
 
 ## Verified source and scope
 
@@ -43,3 +43,15 @@ After coordinator contract review: add narrowly scoped inspector persistence/pro
 Before any mkdir/validation, a local D-only wrapper will validate existing ancestors (no links/reparse), resolve and record actual source/commonGit/dependency/package-lock identities, dirty state, TEMP/TMP/TMPDIR, npm/Node/Electron/Playwright/Python/Vite caches, web/Electron output and fixture/receipt paths. Existing matching D dependency closure may be reused after resolving its junction target and verifying lock equality; dependency junction is explicit, outputs remain physical D. No implicit C caches, installs or cleanup. Preserve failures. Run fresh coherent frozen typecheck/full tests/web+Electron build, actual browser and sandboxed Electron navigation/stale/reload/long-history flows and inspect PNGs. Keep original six source workflows/every applicable step; use disposable CI for Linux/container/privileged evidence and audit all nine fresh source archives via authenticated connector APIs.
 
 Final report will identify tested SHA/tree/base, report-only SHA/clean branch, concrete tests/limits/interfaces and exact source CI/archive receipts. Local fixtures/portable/native UI, CI Linux worker, Windows Docker device, native human, live provider and customer installer evidence remain separate. No live-provider acceptance is claimed without actual credentials and observed receipts. M21 remains paused.
+
+## Reviewed implementation decisions and mutable evidence
+
+Coordinator approved the early contract69cdae3 conditionally, then requested contextual lifecycle/usage validation after an external disk mutation showed pending/reported7/2 entering complete totals. Corrected parser rejects impossible reported/pending, queued/response, nonreturned/reported, overflow/reported and multiple-attempt/reported states; valid pending partial snapshots remain incomplete. Defensive aggregation independently requires returned/response/no-overflow/at-most-one-attempt. Added disk fault regressions; external replay remains coordinator-owned.
+
+Concrete limits:31 distinct callback changes plus one overflow marker and terminal write;8 human IDs,16 call IDs,8 event IDs,24 evidence destinations,64 evidence rows/256KiB,1KiB original request-start event. Request/page/summary bounds remain8KiB/50+1 and512KiB/4096+1 and8MiB, including original joined request-source bytes. Optional reference omission preserves ordinary native validation and exact request identity. No money estimates. Scope is conversation and managed compaction requests; diagnostics and independent package reviews are excluded with an explicit UI/API coverage statement. Counts never claim account-wide billing.
+
+Mutable D-pinned validation:focused103 then143 then151 then167 passes (one Windows skip in expanded sets), typechecks and fresh web/Electron builds pass. Disk10001-row reads measured roughly107–125ms before later changes; actual5501-row Chrome and sandboxed Electron view/navigation/stale/reload passed with zero provider/command calls, zero page errors and readOnlyChanges0. Browser open~208ms; Electron~313ms, sandbox/contextIsolation true, Node integration false,50 paint events; both PNGs inspected. These receipts identify parent69cdae3 plus dirty source in environment.json and are NOT final frozen acceptance.
+
+Preserved failures in sibling m36-validation:initial typechecks (name collision, missing file-navigation prop, fixture selector/Electron type corrections); early-full-01 had1100pass/21fail/47skip, of which20 came from a test fixture structuredClone trying to clone new onObservation callback and one old source assertion expected drawer props. Updated fixture snapshot excludes callbacks and source contract keeps existing drawer plus selected report navigation. Browser-03 selector matched25 hidden/visible paragraphs; browser-04 found a real selected report hidden in its collapsed runner parent. Fixed parent opening and repeated selection nonce;browser-05/native-01 passed. No failed receipts deleted, no C temp/install/cleanup or workstation provisioning.
+
+Pending:remaining bounded evidence/native-fault/aggregate tests, coherent source freeze/full suite/build/UI reruns, all six source workflows/every applicable job+step and all nine fresh source-bound archive audits. No handoff/delivery/main integration/M37 claimed.

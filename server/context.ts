@@ -1,3 +1,4 @@
+import {observeRequest} from './inspector-records.js';
 import { createHash } from 'node:crypto';
 import type { AgentRole, ModelMessage, ModelProvider } from '../shared/types.js';
 import type { Config } from './config.js';
@@ -53,7 +54,7 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     const output = input.maxTokens ?? config.maxOutputTokens;
     if (!Number.isSafeInteger(output) || output <= 0) throw new ContextError('Output token budget must be a positive integer');
     if (estimateTokens(input.messages, input.tools) + output > config.contextLimits[role]) throw new ContextError('Request exceeds model context capacity; reduce context or output budget before retrying.');
-    return scheduler.complete(role, estimateTokens(input.messages, input.tools) + output, signal => provider.complete({ ...input, maxTokens: output, signal }), input.signal);
+    return scheduler.complete(role, estimateTokens(input.messages, input.tools) + output, signal => {input.onObservation?.({type:'invoked'});return provider.complete({ ...input, maxTokens: output, signal });}, input.signal);
   };
 
   async function prepare(chatId: string, frame: Frame, messages: ModelMessage[], signal: AbortSignal): Promise<ModelMessage[]> {
@@ -131,8 +132,7 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
           let part = store.getState<string | null>(partKey, null);
           if (part === null) {
             const summaryMessages: ModelMessage[] = [{ role: 'system', content: instructions }, { role: 'user', content: fragment }];
-            const result = await scheduler.complete('control', estimateTokens(summaryMessages) + outputTokens,
-              scheduledSignal => provider.complete({ model, messages: summaryMessages, maxTokens: outputTokens, signal: scheduledSignal }), signal);
+            const result = await observeRequest(store,{chatId,projectId:store.chat(chatId).projectId,runId:state?.frames[0]?.id??frame.id,taskId:frame.id,generation:state?.generation??0,ordinal:state?.steps??0,role:frame.role,humanMessageIds:state?.humanMessageIds??[],purpose:'compaction',...(frame.planStep?{planStep:frame.planStep}:{})},{model,messages:summaryMessages,maxTokens:outputTokens,signal},observed=>scheduler.complete('control',estimateTokens(summaryMessages)+outputTokens,scheduledSignal=>{observed.onObservation?.({type:'invoked'});return provider.complete({...observed,signal:scheduledSignal});},signal),true);
             signal.throwIfAborted();
             if (!result.text.trim() || result.finishReason && result.finishReason !== 'stop') throw new ContextError('Compaction did not return a complete continuation summary');
             part = result.text.trim();
@@ -164,6 +164,7 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     return prepared;
   }
   return {
+    scheduled:true,
     instructions: role => roleInstructions(role, options.promptExtensions?.[role]),
     complete,
     prepareMessages: async (chatId, frame, messages, signal) => {

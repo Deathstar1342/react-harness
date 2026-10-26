@@ -1,0 +1,57 @@
+import {createHash} from 'node:crypto';
+import {z} from 'zod';
+import type {Store} from './store.js';
+import type {InspectorView,InspectorLink} from '../shared/types.js';
+import {INSPECTOR_LIMITS as L,parseInspector} from './inspector-records.js';
+import {parseNativeJSON} from './native-json.js';
+import {nativePrivateUnit} from './native-storage.js';
+const identity=z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/),int=z.number().safe().int().nonnegative();
+const cursorSchema=z.object({v:z.literal(1),chatId:identity,revision:z.string().regex(/^[a-f0-9]{64}$/),upper:int,before:int}).strict();
+const fail=(code:number)=>Object.assign(Error(code===409?'Inspector changed. Reload the observation.':code===404?'Inspector evidence unavailable.':'Inspector observation could not be read.'),{statusCode:code});
+const parse=(raw:unknown,max=L.rowBytes):Record<string,unknown>|null=>{if(typeof raw!=='string'||Buffer.byteLength(raw)>max)return null;try{const v=parseNativeJSON(raw,max);return v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:null;}catch{return null;}};
+const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+function checkedPlan(plan:Record<string,unknown>|null):boolean {
+ if(!plan||!identity.safeParse(plan.id).success||!int.safeParse(plan.version).success||!Array.isArray(plan.phases)||plan.phases.length>100)return false;
+ const phases=new Set<string>();let steps=0;
+ for(const phase of plan.phases){if(!phase||typeof phase!=='object'||!identity.safeParse(phase.id).success||phases.has(phase.id)||!Array.isArray(phase.steps))return false;phases.add(phase.id);const ids=new Set<string>();for(const step of phase.steps){if(++steps>100||!step||typeof step!=='object'||!identity.safeParse(step.id).success||ids.has(step.id))return false;ids.add(step.id);}}
+ return true;
+}
+/** SQL byte/row windows precede all original JSON materialization. No Runtime or effect services. */
+export function inspectorView(store:Store,chatId:string,cursor?:string):InspectorView{return nativePrivateUnit(()=>{
+ store.db.exec('SAVEPOINT inspector_observation');try{const v=observe(store,chatId,cursor);store.db.exec('RELEASE inspector_observation');return v;}catch(e){store.db.exec('ROLLBACK TO inspector_observation');store.db.exec('RELEASE inspector_observation');throw (e as {statusCode?:number})?.statusCode?e:fail(503);}
+});}
+function observe(store:Store,chatId:string,cursor?:string):InspectorView{
+ if(!identity.safeParse(chatId).success)throw fail(404);
+ const chatRow=store.db.prepare('SELECT CASE WHEN length(project_id)<=200 THEN project_id END AS project_id,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM chats WHERE id=?').get(L.rowBytes,chatId),chat=parse(chatRow?.data),projectId=String(chatRow?.project_id??'');
+ if(!chat||chat.id!==chatId||chat.projectId!==projectId||!identity.safeParse(projectId).success)throw fail(404);
+ const projectSource=store.db.prepare('SELECT CASE WHEN length(CAST(root AS BLOB))<=4096 THEN root END AS root,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM projects WHERE id=?').get(L.rowBytes,projectId),project=parse(projectSource?.data);
+ if(!project||project.id!==projectId||project.path!==projectSource?.root)throw fail(404);
+ const head={upper:store.db.prepare('SELECT seq FROM inspector_requests WHERE chat_id=? ORDER BY seq DESC LIMIT 1').get(chatId)?.seq??0,revision:store.db.prepare('SELECT revision FROM inspector_requests WHERE chat_id=? ORDER BY revision DESC LIMIT 1').get(chatId)?.revision??0};
+ const latestEventId=Number(store.db.prepare('SELECT MAX(id) AS id FROM events WHERE chat_id=?').get(chatId)?.id??0);
+ const revision=createHash('sha256').update(JSON.stringify([chatId,head.upper??0,head.revision??0,latestEventId,chat,project])).digest('hex');
+ let upper=Number(head.upper??0),before=Number.MAX_SAFE_INTEGER;if(!Number.isSafeInteger(upper)||upper<0||!Number.isSafeInteger(latestEventId))throw fail(503);
+ if(cursor){if(cursor.length>1024)throw fail(409);let cur;try{cur=cursorSchema.parse(parseNativeJSON(Buffer.from(cursor,'base64url').toString('utf8'),1024));}catch{throw fail(409);}if(cur.chatId!==chatId||cur.revision!==revision||cur.upper!==upper||cur.before>upper||cur.before<1)throw fail(409);upper=cur.upper;before=cur.before;}
+ function rows(limit:number,bytes:number,beforeSeq:number){return store.db.prepare(`WITH recent AS (SELECT r.seq,r.id,r.chat_id,r.project_id,r.run_id,r.task_id,r.start_event,r.data,r.bytes,e.data AS original_event,length(CAST(e.data AS BLOB)) AS event_bytes FROM (SELECT seq,CASE WHEN length(id)<=200 THEN id END AS id,chat_id,CASE WHEN length(project_id)<=200 THEN project_id END AS project_id,CASE WHEN length(run_id)<=200 THEN run_id END AS run_id,CASE WHEN length(task_id)<=200 THEN task_id END AS task_id,start_event,data,length(CAST(data AS BLOB)) AS bytes FROM inspector_requests WHERE chat_id=? AND seq<=? AND seq<? ORDER BY seq DESC LIMIT ?) r LEFT JOIN events e ON e.id=r.start_event AND e.chat_id=r.chat_id AND e.type='inspector'),bounded AS (SELECT *,SUM(CASE WHEN bytes<=? THEN bytes+CASE WHEN event_bytes<=1024 THEN event_bytes ELSE 0 END ELSE 0 END) OVER(ORDER BY seq DESC) AS total FROM recent) SELECT seq,id,chat_id,project_id,run_id,task_id,start_event,CASE WHEN bytes<=? AND total<=? THEN data END AS data,CASE WHEN event_bytes<=1024 AND total<=? THEN original_event END AS original_event FROM bounded ORDER BY seq DESC`).all(chatId,upper,beforeSeq,limit,L.rowBytes,L.rowBytes,bytes,bytes);}
+ function projectRow(row:Record<string,unknown>){const request=parseInspector(row.data),original=parse(row.original_event);return {seq:Number(row.seq),request:request&&original&&original.requestId===request.id&&original.runId===request.runId&&original.taskId===request.taskId&&original.stage==='queued'&&request.eventIds[0]===row.start_event&&request.id===row.id&&request.chatId===row.chat_id&&request.chatId===chatId&&request.projectId===row.project_id&&request.projectId===projectId&&request.runId===row.run_id&&request.taskId===row.task_id?request:null,unavailable:false};}
+ const page=rows(L.page+1,L.pageBytes,before),requests=page.slice(0,L.page).map(row=>{const v=projectRow(row);return {...v,unavailable:!v.request};});
+ const summary:InspectorView['summary']={requests:0,reportedRequests:0,unknownRequests:0,conflictedRequests:0,inputTokens:0,outputTokens:0,elapsedMs:0,truncated:false,unavailable:0};
+ const aggregate=rows(L.summaryRows+1,L.summaryBytes,Number.MAX_SAFE_INTEGER);summary.truncated=aggregate.length>L.summaryRows;
+ for(const row of aggregate.slice(0,L.summaryRows)){summary.requests++;const r=projectRow(row).request;if(!r){summary.unavailable++;summary.unknownRequests++;continue;}if(r.usageState==='reported'&&r.usage&&r.outcome==='returned'&&r.stage==='response'&&!r.overflow&&r.attempts<=1){summary.reportedRequests++;for(const key of ['inputTokens','outputTokens'] as const){const n=summary[key];summary[key]=n===null||!Number.isSafeInteger(n+r.usage[key])?null:n+r.usage[key];}}else{summary.unknownRequests++;if(r.usageState==='conflicted')summary.conflictedRequests++;}if(r.elapsedMs===null)summary.elapsedMs=null;else if(summary.elapsedMs!==null)summary.elapsedMs+=r.elapsedMs;}
+ // Fixed bounded legacy existence observation. Legacy rows are never backfilled.
+ if(summary.requests===0)summary.elapsedMs=null;
+ if(summary.reportedRequests===0){summary.inputTokens=null;summary.outputTokens=null;}
+ const legacyRows=store.db.prepare("SELECT CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND type IN ('usage','provider_request') ORDER BY id DESC LIMIT 65").all(L.rowBytes,chatId);
+ const legacy=legacyRows.length>64||legacyRows.slice(0,64).some(row=>{const d=parse(row.data);return !d||!identity.safeParse(d.inspectorRequestId).success;});
+ const links:InspectorLink[]=[];let linksUnavailable=0;
+ // Original evidence is bounded before parsing; no test bodies/frames/ledgers are fetched.
+ const events=store.db.prepare(`WITH recent AS (SELECT id,type,data,length(CAST(data AS BLOB)) AS bytes FROM events WHERE chat_id=? AND type IN ('file_changed','tests','plan_progress') ORDER BY id DESC LIMIT ?),bounded AS (SELECT *,SUM(CASE WHEN bytes<=? THEN bytes ELSE 0 END) OVER(ORDER BY id DESC) AS total FROM recent) SELECT id,type,CASE WHEN bytes<=? AND total<=? THEN data END AS data FROM bounded ORDER BY id DESC`).all(chatId,L.evidenceRows,L.rowBytes,L.rowBytes,L.evidenceBytes);
+ const validPath=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=1024&&!v.includes('\\')&&!v.startsWith('/')&&!v.split('/').some(p=>!p||p==='.'||p==='..')&&!/[:\u0000-\u001f]/.test(v);
+ const state=store.db.prepare('SELECT CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM state WHERE key=?').get(L.rowBytes,'plan:'+chatId),parsedPlan=parse(state?.data),plan=checkedPlan(parsedPlan)?parsedPlan:null;
+ for(const e of events){if(links.length>=L.links){linksUnavailable++;continue;}const d=parse(e.data);if(!d){linksUnavailable++;continue;}const eventId=Number(e.id);
+ if(e.type==='file_changed'&&validPath(d.path)&&d.source==='agent'){const original=identity.safeParse(d.changeId).success?store.db.prepare('SELECT id,status,CASE WHEN length(CAST(summary AS BLOB))<=? THEN summary END AS data FROM file_changes WHERE id=? AND project_id=?').get(L.rowBytes,String(d.changeId),projectId):undefined,f=parse(original?.data);if(f&&f.id===original?.id&&f.projectId===projectId&&f.chatId===chatId&&(f.path===d.path||f.destinationPath===d.path)&&original?.status==='confirmed')links.push({kind:'files',id:String(f.id),eventId,path:d.path});else linksUnavailable++;}
+ else if(e.type==='tests'&&identity.safeParse(d.id).success){const original=store.db.prepare('SELECT id,chat_id,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM test_reports WHERE id=? AND chat_id=?').get(L.rowBytes,String(d.id),chatId),t=parse(original?.data);if(t&&t.id===original?.id&&original?.chat_id===chatId&&same(t,d))links.push({kind:'tests',id:String(d.id),eventId});else linksUnavailable++;}
+ else if(e.type==='plan_progress'){const step=d;if(step&&plan&&plan.id===step.planId&&plan.version===step.planVersion&&Array.isArray(plan.phases)&&plan.phases.some((v:any)=>v.id===step.phaseId&&Array.isArray(v.steps)&&v.steps.some((s:any)=>s.id===step.stepId))&&[step.planId,step.phaseId,step.stepId].every(v=>identity.safeParse(v).success))links.push({kind:'plan',id:String(step.stepId),eventId,planStep:{planId:String(step.planId),planVersion:Number(step.planVersion),phaseId:String(step.phaseId),stepId:String(step.stepId)}});else linksUnavailable++;}
+ }
+ const nextCursor=page.length>L.page?Buffer.from(JSON.stringify({v:1,chatId,revision,upper,before:requests.at(-1)!.seq})).toString('base64url'):null;
+ return {schema:'inspector-v1',chatId,projectId,observedAt:new Date().toISOString(),revision,latestEventId,requests,nextCursor,summary,links,linksUnavailable,legacy,limits:{page:L.page,summaryRows:L.summaryRows,summaryBytes:L.summaryBytes}};
+}
