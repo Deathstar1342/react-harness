@@ -28,7 +28,7 @@ async function capture(stage:string){
  if(!page)return;
  const output=path.join(receipts!,`checkpoint-${host}-${stage}`);
  await writeFile(output+'-stage.json',JSON.stringify({source:process.env.M34_SOURCE??'working tree',stage,host,step:'font readiness'}));
- const readiness=await Promise.race([page.evaluate(async()=>{await document.fonts.ready;return {fonts:document.fonts.status,visibility:document.visibilityState,width:innerWidth,height:innerHeight};}),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error(`Font readiness timed out at ${stage}`)),10000).unref())]);
+ const readiness=await Promise.race([page.evaluate(async()=>{await document.fonts.ready;await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));return {fonts:document.fonts.status,visibility:document.visibilityState,width:innerWidth,height:innerHeight,detailsOpen:[...document.querySelectorAll('dialog details')].map(element=>(element as HTMLDetailsElement).open)};}),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error(`Font readiness timed out at ${stage}`)),10000).unref())]);
  const native=desktop?await desktop.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];return {offscreen:w.webContents.isOffscreen(),painting:w.webContents.isPainting(),frameRate:w.webContents.getFrameRate(),paints:(globalThis as Record<string,unknown>).__m34Paints};}):null;
  await writeFile(output+'-stage.json',JSON.stringify({source:process.env.M34_SOURCE??'working tree',stage,host,readiness,native},null,2));
  if(desktop){
