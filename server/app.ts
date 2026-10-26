@@ -1,3 +1,6 @@
+import {TaskQueue,queueStartInput,queueEditInput} from './task-queue.js';
+import {assertNativeJSON} from './native-json.js';
+import {queueProject} from './queue-state.js';
 import {inspectorView} from './inspector.js';
 import {BrowserPreviews} from './browser-previews.js';
 import {browserProbeResult} from '../shared/browser-preview.js';
@@ -39,6 +42,7 @@ import {recoveryView} from './recovery.js';
 import {workerAvailable} from './worker-client.js';
 import { containerExecutionUnavailable } from './container-contract.js';
 
+const queueRoutes=new Set(['/api/projects/:id/queue','/api/projects/:id/queue/start','/api/projects/:id/queue/cancel-active']);
 const approvalMode = z.enum(['autonomous','balanced','review']);
 export interface AppOptions { browserPreview?:'direct'|'source-fixed-3000'; config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
 export async function createApp(options: AppOptions) {
@@ -63,6 +67,12 @@ export async function createApp(options: AppOptions) {
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
+  const ordinaryJson=app.getDefaultJsonParser(app.initialConfig.onProtoPoisoning!,app.initialConfig.onConstructorPoisoning!);
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json',{parseAs:'string'},(request,body,done)=>{
+    if(queueRoutes.has(request.routeOptions.url??'')){try{assertNativeJSON(String(body),600000);}catch{done(Object.assign(new Error('Invalid or ambiguous JSON request'),{statusCode:400}));return;}}
+    ordinaryJson(request,String(body),done);
+  });
   const browserPreviews=new BrowserPreviews(previews,()=>{if(!options.transportAuth?.browserPairingEnabled)return;const address=app.server.address();if(!address||typeof address==='string')return;if(options.browserPreview==='direct'&&address.address==='127.0.0.1')return address.port;if(options.browserPreview==='source-fixed-3000'&&config.executionMode==='container'&&config.host==='0.0.0.0'&&config.port===3000&&address.port===3000)return 3000;});
   browserPreviews.register(app);
   const watchers = new Map<string,FSWatcher>();
@@ -142,7 +152,7 @@ export async function createApp(options: AppOptions) {
   app.setErrorHandler((error,request,reply)=> {
     if (error instanceof z.ZodError) return reply.code(400).send({error:error.issues.map(issue=>`${issue.path.join('.')}: ${issue.message}`).join('; ')});
     const e = error as Error & {statusCode?:number;code?:string};
-    const conflict = /stale|conflict|changed since|dirty|unsaved|version mismatch/i.test(e.message);
+    const conflict = /stale|conflict|changed since|dirty|unsaved|version mismatch/i.test(e.message)||queueRoutes.has(request.routeOptions.url??'')&&['CONFLICT','PROCESS_BUSY'].includes(e.code??'');
     const statusCode = conflict ? 409 : e.statusCode ?? (e.code === 'ENOENT' ? 404 : 400);
     reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({error:e.message.replaceAll(config.apiKey || '\u0000','[redacted]')});
   });
@@ -170,6 +180,14 @@ export async function createApp(options: AppOptions) {
   // Track complete request lifetimes, including awaits before a save or registration.
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';
+    if(queueRoutes.has(route)){
+      if(closing)throw Object.assign(new Error('Backend is closing'),{statusCode:503});
+      const {id}=z.strictObject({id:z.uuid()}).parse(request.params),project=queueProject(store,id);
+      if(['POST','PUT','PATCH','DELETE'].includes(request.method))store.assertCheckpointSafe(id);
+      if(resetting.has(id))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
+      if(project.removalError&&['POST','PUT','PATCH','DELETE'].includes(request.method))throw Object.assign(new Error('Project removal needs recovery'),{statusCode:409});
+      return;
+    }
     // This synchronous read validates bounded chat/project rows in its snapshot.
     if(route==='/api/chats/:id/recovery'||route==='/api/chats/:id/inspector')return;
     if(route.startsWith('/api/projects/:id/previews')){
@@ -191,6 +209,7 @@ export async function createApp(options: AppOptions) {
       if(['POST','PUT','PATCH'].includes(request.method)&&!route.endsWith('/editor')&&!route.endsWith('/control'))store.assertCheckpointSafe(projectId);
       if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
+      if(['POST','PUT','PATCH','DELETE'].includes(request.method))queues.intervention(projectId);
       requests.set(request.id,projectId);
     }
   });
@@ -199,6 +218,11 @@ export async function createApp(options: AppOptions) {
   const assertNoRequests=(projectId:string,exceptRequest?:string)=>{
     if ([...requests].some(([requestId,id])=>requestId!==exceptRequest && (id==='*' || id===projectId))) throw Object.assign(new Error('A project request is still pending; wait before removal or reset'),{statusCode:409});
   };
+  const queues=new TaskQueue(runtime,()=>settings.get().defaultApprovalMode,projectId=>assertNoRequests(projectId));
+  app.get('/api/projects/:id/queue',async(request,reply)=>{const query=z.strictObject({cursor:z.string().max(1024).optional()}).parse(request.query);reply.header('Cache-Control','no-store');return queues.view(paramId(request.params),query.cursor);});
+  app.patch('/api/projects/:id/queue',async request=>queues.edit(paramId(request.params),queueEditInput.parse(request.body)));
+  app.post('/api/projects/:id/queue/start',async(request,reply)=>{if(!config.baseUrl||!config.apiKey)return reply.code(503).send({error:'Configure the provider before starting the queue.'});return queues.start(paramId(request.params),queueStartInput.parse(request.body));});
+  app.post('/api/projects/:id/queue/cancel-active',async request=>queues.cancel(paramId(request.params),z.strictObject({expectedRevision:z.number().int().safe().nonnegative(),taskId:z.uuid(),chatId:z.uuid()}).parse(request.body)));
   app.post('/api/projects/:id/deletion-preview',async request=>{
     z.object({}).strict().parse(request.body);return removal.preview(paramId(request.params));
   });
@@ -437,5 +461,5 @@ export async function createApp(options: AppOptions) {
   // close its supplied Store. Runtime.close is idempotent for the later hook.
   app.addHook('preClose',async()=>{closing=true;browserPreviews.shutdown();previews.shutdown();installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
-  return {app,store,runtime,installs,previews,browserPreviews};
+  return {app,store,runtime,installs,previews,browserPreviews,queues};
 }

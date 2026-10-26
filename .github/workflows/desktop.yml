@@ -111,6 +111,32 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:M36_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/inspector/native'
           node --import tsx tests/milestone-36-native.ts native
+      - name: Actual sequential queue Chrome and sandboxed Electron UI (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 4
+        run: |
+          export M37_APP_ROOT="$GITHUB_WORKSPACE/build/app"
+          export M37_SOURCE="$GITHUB_SHA"
+          export M37_RECEIPTS="$GITHUB_WORKSPACE/test-results/queue/browser"
+          export electron_config_cache="$RUNNER_TEMP/electron-cache"
+          node --import tsx tests/milestone-37-native.ts browser
+          M37_RECEIPTS="$GITHUB_WORKSPACE/test-results/queue/native" xvfb-run -a node --import tsx tests/milestone-37-native.ts native
+      - name: Actual sequential queue Chrome and sandboxed Electron UI (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 4
+        run: |
+          $env:M37_APP_ROOT=Join-Path $env:GITHUB_WORKSPACE 'build/app'
+          $env:M37_SOURCE=$env:GITHUB_SHA
+          $env:M37_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/queue/browser'
+          $env:TEMP=Join-Path $env:RUNNER_TEMP 'm37-temp'
+          New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+          $env:TMP=$env:TEMP
+          $env:TMPDIR=$env:TEMP
+          $env:electron_config_cache=Join-Path $env:RUNNER_TEMP 'electron-cache'
+          node --import tsx tests/milestone-37-native.ts browser
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:M37_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/queue/native'
+          node --import tsx tests/milestone-37-native.ts native
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -120,3 +146,4 @@ jobs:
             test-results/checkpoints/
             test-results/preview/
             test-results/inspector/
+            test-results/queue/

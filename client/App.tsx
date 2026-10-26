@@ -1,3 +1,4 @@
+import {QueuePanel} from './QueuePanel';
 import {InspectorPanel} from './InspectorPanel';
 import {PreviewPanel} from './PreviewPanel';
 import {TransferDialog} from './TransferDialog';
@@ -612,6 +613,7 @@ export function App() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatId, setChatId] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [queueOpen,setQueueOpen]=useState(false);
   const [showProject, setShowProject] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [sidebar, setSidebar] = useState(false);
@@ -820,6 +822,7 @@ export function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
+          {project&&<button className="navigation-row" onClick={()=>setQueueOpen(true)}>Task queue</button>}
           <button className="navigation-row" onClick={() => setShowProject(true)}>
             <FolderPlus size={16} />
             Add project
@@ -999,6 +1002,7 @@ export function App() {
           }
         }}/>}
       {changes && project && <ChangesPanel key={project.id} projectId={project.id} revision={fileRevision} onClose={()=>setChanges(false)} />}
+      {queueOpen&&project&&<QueuePanel key={project.id} projectId={project.id} onClose={()=>setQueueOpen(false)} onChat={next=>{setChatId(next);setQueueOpen(false);void refreshChats();}}/>}
       {showProject && (
         <ProjectDialog
           onClose={() => setShowProject(false)}

@@ -1,6 +1,6 @@
 /** Bounded JSON parser rejecting duplicate decoded keys at every object depth.
  * JSON.parse alone accepts ambiguous last-key-wins arguments. No prose recovery. */
-export function parseNativeJSON(source: string, maxBytes = 1_100_000): unknown {
+export function parseNativeJSON(source: string, maxBytes = 1_100_000, validateOnly = false): unknown {
   const invalid = () => { throw new Error('Invalid or ambiguous native tool arguments'); };
   if (typeof source !== 'string' || Buffer.byteLength(source) > maxBytes) invalid();
   let i = 0;
@@ -38,5 +38,9 @@ export function parseNativeJSON(source: string, maxBytes = 1_100_000): unknown {
     if (!match) invalid(); else i += match[0].length;
   };
   value(0); ws(); if (i !== source.length) invalid();
+  if(validateOnly)return;
   try { return JSON.parse(source); } catch { return invalid(); }
 }
+
+/** Syntax and duplicate-key validation without constructing a private transcript. */
+export function assertNativeJSON(source:string,maxBytes=1_100_000):void {parseNativeJSON(source,maxBytes,true);}

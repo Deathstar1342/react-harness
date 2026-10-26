@@ -2101,3 +2101,11 @@ option {
 .browser-preview-surface iframe {width:100%;height:320px;border:1px solid #444;background:white;}
 
 .inspector-totals{display:flex;gap:1.5rem;flex-wrap:wrap;margin:1rem 0}.inspector-totals>div{display:flex;flex-direction:column}.inspector-totals strong{font-size:1.4rem}.inspector-totals span{font-size:.8rem;color:var(--muted)}.inspector-timeline{padding-left:1.3rem}.inspector-timeline>li{border-bottom:1px solid var(--border);padding:.7rem 0}.inspector-timeline summary{display:flex;gap:.65rem;flex-wrap:wrap;cursor:pointer}.inspector-timeline dl{font-size:.8rem;overflow-wrap:anywhere}.inspector-timeline dt{color:var(--muted)}.inspector-timeline dd{margin:0 0 .5rem}.chat-inspector code{overflow-wrap:anywhere}
+.queue-controls {display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0;}
+.queue-compose {display:grid;gap:8px;margin:16px 0 10px;}
+.queue-dialog textarea {display:block;width:100%;min-height:80px;resize:vertical;}
+.queue-tasks {padding-left:28px;}
+.queue-tasks li {padding:16px 4px;border-bottom:1px solid var(--border);}
+.queue-text {white-space:pre-wrap;overflow-wrap:anywhere;}
+
+.queue-tasks li>div:first-child {display:flex;align-items:center;flex-wrap:wrap;gap:12px;}

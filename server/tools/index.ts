@@ -7,7 +7,7 @@ import { createTwoFilesPatch } from 'diff';
 import { definitionFor, validateAction, workspaceAction } from '../tool-registry.js';
 import type { Action, FileChange, FileSnapshot, ToolContext, ToolInspection, ToolResult, ToolService, TestReport } from '../../shared/types.js';
 import { patchSnapshot, type LineEdit } from './edits.js';
-import {reserveMutation} from './mutations.js';
+import {assertMutationIdle,reserveMutation} from './mutations.js';
 import {validateProjectSkillResources} from '../skill-files.js';
 import { WorkspaceFiles, type FileOptions } from './files.js';
 import { allowed, hash, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
@@ -40,6 +40,7 @@ export class WorkspaceTools implements ToolService {
     const reservation=reserveMutation(root,owner);
     try {return await runNativeOperation(()=>{assertNativePath(root,false);return operation();});} finally {reservation.release();}
   }
+  assertQueueIdle(root:string) {this.check();assertNativePath(root,false);assertMutationIdle(root);this.mutationGuard(root);const id=key(path.resolve(root));if(this.operations.has(id)||this.removing.has(id)||this.quarantined.has(id))throw new ToolError('Workspace operation or cleanup remains active.','CONFLICT');this.files.assertRemovable(root);}
   closeCommandContext(context:ToolContext) {return this.shells.closeContext(context);}
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
     this.sandbox.validateRoot(root);
