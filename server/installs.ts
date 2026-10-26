@@ -93,12 +93,14 @@ export class InstallService {
   create(id: string, chatId: string, frameId: string, role: AgentRole, generation: number, recommendation: unknown) {
     if (this.closing) throw conflict('Backend is shutting down');
     const chat = this.store.chat(chatId);
+    this.store.assertCheckpointSafe(chat.projectId);
     if (chat.mode === 'plan' || role === 'critic') throw conflict('Planning and review cannot request system installs');
     if (this.store.installs().some(i=>(!this.container||i.projectId===chat.projectId)&&(i.recoveryRequired || i.state==='dispatching'))) throw conflict('A system install needs recovery or is still running');
     return this.write({id,chatId,projectId:chat.projectId,frameId,role,generation,modeVersion:chat.modeVersion ?? 0,recommendation:packageRecommendation.parse(recommendation),settings:this.settings(),state:'preparing',createdAt:this.now(),updatedAt:this.now(),code:'PREPARING',recoveryRequired:false});
   }
   private current(id: string, guard: () => boolean): InstallRecord {
     const item = this.store.install(id), chat = this.store.chat(item.chatId), settings=this.settings();
+    this.store.assertCheckpointSafe(item.projectId);
     if (this.closing || !pendingStates.has(item.state) || !guard() || chat.mode==='plan' || chat.modeVersion!==item.modeVersion || settings.revision!==item.settings.revision || settings.policy!==item.settings.policy || settings.reviewerModel!==item.settings.reviewerModel || !this.container && item.settings.target && helperCanonical(settings.target)!==helperCanonical(item.settings.target) || item.expiresAt && this.now()>=item.expiresAt || this.store.installs().some(other=>other.id!==id && (!this.container||other.projectId===item.projectId) && (other.recoveryRequired || other.state==='dispatching'))) {
       this.stale(item,item.expiresAt && this.now()>=item.expiresAt ? 'PREVIEW_EXPIRED':'CONTEXT_CHANGED');
       throw conflict('System install decision is stale; request a new preview');
@@ -121,6 +123,7 @@ export class InstallService {
     if (this.active.has(id)) return Promise.reject(conflict('System install is already in progress'));
     const item=this.store.install(id);
     if(processRecords(this.store,item.projectId).some(processBlocking))return Promise.reject(conflict('A project process is active or uncertain.'));
+    this.store.assertCheckpointSafe(item.projectId);
     const reservation=reserveMutation(this.store.project(item.projectId).path);
     const promise = this.perform(id,guard,signal,refreshContext).finally(()=>{this.active.delete(id);reservation.release();});
     this.active.set(id,promise);return promise;
@@ -196,6 +199,7 @@ export class InstallService {
     const item=this.store.install(id);
     if(!['uncertain','failed','succeeded'].includes(item.state))throw conflict('This request does not need outcome recovery');
     if(processRecords(this.store,item.projectId).some(processBlocking))throw conflict('A project process is active or uncertain.');
+    this.store.assertCheckpointSafe(item.projectId);
     const reservation=reserveMutation(this.store.project(item.projectId).path);
     this.recovering.add(id);
     try {

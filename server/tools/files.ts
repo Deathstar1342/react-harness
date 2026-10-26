@@ -1,5 +1,5 @@
 import {assertNativePath} from '../native-storage.js';
-import { constants } from 'node:fs';
+import { constants,lstatSync } from 'node:fs';
 import { open, lstat, mkdir, rename, unlink, opendir } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -133,6 +133,30 @@ export class WorkspaceFiles {
       await unlink(source.absolute);
       return {source: {path: source.relative, content: '', hash: null}, destination: {...before, path: target.relative}};
     });
+  }
+  async restoreCheckpoint(root:string,file:FileSnapshot&{mode:number},expected:FileSnapshot,claim:()=>void):Promise<FileSnapshot> {
+    if(file.path!==expected.path||!Number.isInteger(file.mode)||file.mode<0||file.mode>0o777)throw new ToolError('Invalid checkpoint file');
+    const originalTarget=await scoped(root,file.path);
+    const saveClaim=()=>{if(expected.hash!==null&&'mode' in expected){const current=lstatSync(originalTarget.absolute);if(!current.isFile()||current.isSymbolicLink()||current.nlink!==1||(current.mode&0o777)!==expected.mode)throw new ToolError('Checkpoint current file permissions changed before save');}claim();};
+    const result=await this.save(root,file.path,file.content,expected.hash,undefined,saveClaim,file.hash===null);
+    if(file.hash!==null){
+      const target=await scoped(root,file.path);this.checkLease(key(target.absolute));
+      const handle=await open(target.absolute,constants.O_RDONLY|(constants.O_NOFOLLOW||0)|(constants.O_NONBLOCK||0));
+      try{
+        const opened=await handle.stat({bigint:true});
+        if(!opened.isFile()||opened.nlink!==1n||opened.size>BigInt(this.options.maxFileBytes))throw new ToolError('Checkpoint permission target is unsafe');
+        const bytes=Buffer.alloc(Number(opened.size)+1);let size=0;
+        while(size<bytes.length){const read=await handle.read(bytes,size,bytes.length-size,null);if(!read.bytesRead)break;size+=read.bytesRead;}
+        if(size!==Number(opened.size)||hash(bytes.subarray(0,size))!==file.hash)throw new ToolError('Checkpoint descriptor changed before permission restoration');
+        await scoped(root,file.path);this.checkLease(key(target.absolute));
+        const again=await handle.stat({bigint:true}),current=await lstat(target.absolute,{bigint:true});
+        const same=(a:typeof current,b:typeof current)=>a.dev===b.dev&&a.ino===b.ino&&a.ctimeNs===b.ctimeNs&&a.mtimeNs===b.mtimeNs&&a.mode===b.mode&&a.size===b.size&&a.nlink===1n&&b.nlink===1n&&a.isFile()&&b.isFile();
+        if(!same(opened,again)||!same(again,current))throw new ToolError('Checkpoint permission descriptor/path identity changed');
+        // chmod is a distinct effect: repeat the exact durable claim after every awaited observation.
+        this.checkLease(key(target.absolute));claim();assertNativePath(root,false);await handle.chmod(file.mode);
+      }finally{await handle.close();}
+    }
+    return result;
   }
   async range(root: string, input: string, startLine: number, count: number) {
     if (!Number.isSafeInteger(startLine) || startLine < 1 || !Number.isSafeInteger(count) || count < 1 || count > 500) throw new ToolError('Invalid line range.');

@@ -33,8 +33,30 @@ jobs:
       - name: Real Windows Electron (no WSL distribution launch)
         if: runner.os == 'Windows'
         run: npm run desktop:smoke
+      - name: Actual checkpoint Chrome and sandboxed Electron UI (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 4
+        run: |
+          export M34_RECEIPTS="$GITHUB_WORKSPACE/test-results/checkpoints"
+          export M34_SOURCE="$GITHUB_SHA"
+          export electron_config_cache="$RUNNER_TEMP/electron-cache"
+          node --import tsx tests/milestone-34-browser.ts
+          M34_ELECTRON=1 xvfb-run -a node --import tsx tests/milestone-34-browser.ts
+      - name: Actual checkpoint Chrome and sandboxed Electron UI (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 4
+        run: |
+          $env:M34_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/checkpoints'
+          $env:M34_SOURCE=$env:GITHUB_SHA
+          $env:electron_config_cache=Join-Path $env:RUNNER_TEMP 'electron-cache'
+          node --import tsx tests/milestone-34-browser.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:M34_ELECTRON='1'
+          node --import tsx tests/milestone-34-browser.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: desktop-evidence-${{ matrix.os }}
-          path: test-results/electron-*.png
+          path: |
+            test-results/electron-*.png
+            test-results/checkpoints/

@@ -9,6 +9,7 @@ import {WorkspaceTools} from '/app/server/tools/index.ts';
 import {WorkerClient} from '/app/server/worker-client.ts';
 import {readConfig} from '/app/server/config.ts';
 import {roleInstructions} from '/app/server/prompts.ts';
+import {Checkpoints} from '/app/server/checkpoints.ts';
 import {createGoal,goalOf} from '/app/server/goals.ts';
 const checks=[];
 const check=(name,condition)=>{assert.ok(condition,name);checks.push(name);console.log('PASS:',name);};
@@ -126,5 +127,30 @@ for(const kind of ['completed','lease','cancelled']){
     if(kind==='lease'){tools.setDirty(root,'manual.txt','editor',false);check('real background process rechecks editor lease before dispatch',job.status==='not_started'&&activations===0&&!await exists(root+'/process.txt'));}
     if(kind==='cancelled'){await new Promise(resolve=>setTimeout(resolve,2100));check('owned cancellation cannot publish success or leave later writes',['uncertain','interrupted'].includes(job.status)&&activations===1&&!await exists(root+'/late.txt'));}
   }finally{WorkerClient.prototype.request=original;await runtime.close();await tools.dispose();store.close();}
+}
+// M34: real owned worker descendants must drain before source capture/restore.
+{
+ const id=randomUUID(),root='/workspace/checkpoint-'+id,home='/tmp/checkpoint-'+id;await mkdir(root);await mkdir(home,{mode:0o700});
+ await writeFile(root+'/a.ts','before a');await writeFile(root+'/b.ts','before b');await writeFile(root+'/AGENTS.md','Preserve source guidance');
+ const filename=home+'/state.sqlite',store=new Store(filename),tools=new WorkspaceTools(),project=store.createProject('Checkpoint worker',root),chat=store.createChat(project.id,'Human task boundary','review');
+ const config=readConfig({HARNESS_EXECUTION_MODE:'container',HARNESS_HOME:home,HARNESS_DATA_DIR:home+'/data',HARNESS_WORKSPACE_ROOT:'/workspace'});
+ tools.configureSandbox({home,projects:()=>[root],protectedPaths:[],executionMode:'container'});
+ const runtime=new Runtime(store,{models:async()=>[],complete:async()=>{throw new Error('Checkpoints never call provider');}},tools,config,{instructions:roleInstructions}),service=new Checkpoints(store,runtime),context={projectRoot:root,chatId:chat.id,agentId:'checkpoint-worker'};
+ const original=WorkerClient.prototype.request;let confirmedCloses=0;
+ try{
+  const captured=await service.capture(project.id,{chatId:chat.id,label:'Before worker task'});
+  WorkerClient.prototype.request=async function(op,body){const result=await original.call(this,op,body);if(op==='close'&&result.cleanupConfirmed===true)confirmedCloses++;return result;};
+  const pending=tools.execute(context,{name:'run_shell',args:{command:'sleep .3; printf busy > busy.ts',timeoutMs:10000}});await new Promise(resolve=>setTimeout(resolve,40));
+  await assert.rejects(service.capture(project.id,{chatId:chat.id,label:'Must reject active writer'}),/mutation|pending|process/);check('checkpoint capture rejects actual pending worker writer',(await pending).ok);
+  const changed=await tools.execute(context,{name:'run_shell',args:{command:"printf changed > a.ts; mv b.ts moved.ts; printf added > added.ts; (sleep 4; printf late > late.ts) >/dev/null 2>&1 &",timeoutMs:10000}});check('checkpoint fixture changed real managed files through worker',changed.ok&&await readFile(root+'/a.ts','utf8')==='changed');
+  await service.capture(project.id,{chatId:chat.id,label:'After confirmed worker drain'});check('checkpoint idle boundary observes exact confirmed worker closure',confirmedCloses>=1);
+  const preview=await service.preview(project.id,captured.id,{chatId:chat.id});tools.setDirty(root,'a.ts','human',true);
+  await assert.rejects(service.restore(project.id,captured.id,{chatId:chat.id,previewToken:preview.previewToken,revision:preview.revision,confirmation:'restore-files'}),/unsaved/);tools.setDirty(root,'a.ts','human',false);
+  await service.restore(project.id,captured.id,{chatId:chat.id,previewToken:preview.previewToken,revision:preview.revision,confirmation:'restore-files'});
+  check('actual controller SQLite and guarded files restore coherent pre-worker source',await readFile(root+'/a.ts','utf8')==='before a'&&await readFile(root+'/b.ts','utf8')==='before b'&&!await exists(root+'/moved.ts')&&!await exists(root+'/added.ts')&&!await exists(root+'/busy.ts'));
+  await new Promise(resolve=>setTimeout(resolve,4200));check('drained owned descendants cannot write after checkpoint restore',!await exists(root+'/late.ts'));
+  check('container checkpoint appends confirmed normal file history',store.fileChanges(project.id).length>=5&&store.fileChanges(project.id).every(change=>change.status==='confirmed'&&change.source==='checkpoint'));
+ }finally{WorkerClient.prototype.request=original;await runtime.close();await tools.dispose();store.close();}
+ const reopened=new Store(filename);reopened.recover();try{check('actual container checkpoint restore remains terminal on SQLite restart',reopened.db.prepare("SELECT json_extract(data,'$.status') AS status FROM state WHERE key LIKE 'checkpoint-restore:v1:%'").get().status==='done');}finally{reopened.close();}
 }
 console.log(JSON.stringify({platform:'actual Linux controller/broker/worker with disk SQLite',provider:'unused synthetic fixture',checks}));

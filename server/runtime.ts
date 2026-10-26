@@ -69,6 +69,7 @@ export class Runtime {
 
   private assertAvailable(chatId: string) {
     const projectId = this.store.chat(chatId).projectId;
+    this.store.assertCheckpointSafe(projectId);
     if (this.store.project(projectId).removalError) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
     if (this.projectEdits.has(projectId)) {
       throw Object.assign(
