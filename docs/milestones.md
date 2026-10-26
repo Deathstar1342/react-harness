@@ -28,6 +28,8 @@ Show the exact owned project's running development UI in a separate isolated ori
 
 ### M36 — Run and usage inspector
 
+Dispatched dedicated Milestone 36 chat `01a17913-6384-7400-bb17-9a91ca7a3ec1`,isolated D `codex/milestone-36` from published docs-only kickoff `33f28944e5843098d8a6c0efe1a937aac1343e66`. Clean base/branch/physical commonGit verified before/after dispatch and initial progress explicitly observed. Early concrete contract is next;no implementation delivery/M37. [Dispatch](reports/milestone-36-coordinator.md).
+
 Authorized dedicated isolated D kickoff after M35 exact-main acceptance. Before substantial interfaces,review concrete original run/request/call/model/role/usage correlation,read/row/byte/pagination bounds,unknown versus reported-zero usage,elapsed clocks,linked file/test/plan evidence,retention/restart and public/private projection. [Coordinator kickoff](reports/milestone-36-coordinator.md). No M37 until independently reviewed exact-main M36 delivery.
 
 Expose a bounded factual task timeline with changed-file/test/plan links, role/model requests, elapsed time and reported token usage. Unknown stays unknown; optional money estimates require configured rates. No hidden prompt/private evidence/provider credential exposure.
