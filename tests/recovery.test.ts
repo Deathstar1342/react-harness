@@ -61,7 +61,7 @@ describe('bounded read-only recovery projection, actual disk SQLite and Runtime'
   });
   it('shows owned running then restart-uncertain process records without adopting/cancelling anything',async()=>{
     const t=await fixture(),state=t.seed('executing'),pending=state.frames[0].pending!,id=randomUUID(),now=new Date().toISOString();
-    t.store.setState(`process-job:${id}`,{id,projectId:t.project.id,chatId:t.chat.id,frameId:'coder-original',commandId:pending.id,callId:pending.callId,status:'running',createdAt:now,updatedAt:now,dispatched:true,generation:2,output:'private-process-output'});
+    t.store.setState(`process-job:${id}`,{id,projectId:t.project.id,chatId:t.chat.id,frameId:'coder-original',commandId:pending.id,callId:pending.callId,status:'running',createdAt:now,updatedAt:now,dispatched:true,generation:2,modeVersion:0,output:'private-process-output'});
     expect(t.read().entries.find(e=>e.processId===id)?.status).toBe('running');await t.restart();const before=logical(t.store);
     expect(t.read().entries.find(e=>e.processId===id)?.status).toBe('uncertain');expect(logical(t.store)).toBe(before);expect(t.tools.execute).not.toHaveBeenCalled();
   });
@@ -91,6 +91,14 @@ describe('bounded read-only recovery projection, actual disk SQLite and Runtime'
   it('uses unambiguous tuple identities even when original IDs contain delimiters',async()=>{
     const t=await fixture();t.store.event(t.chat.id,'command',{agentId:'a:command:b',commandId:'c',action,status:'uncertain'});t.store.event(t.chat.id,'command',{agentId:'a',commandId:'b:command:c',action,status:'completed',exitCode:0});
     const view=t.read();expect(view.entries.find(e=>e.frameId==='a:command:b')?.status).toBe('uncertain');expect(view.entries.find(e=>e.frameId==='a')?.status).toBe('completed');
+  });
+  it('keeps malformed original arguments and malformed install/process metadata unknown',async()=>{
+    const t=await fixture(),state=t.seed('prepared');const message=state.frames[0].messages.find(m=>m.role==='assistant')!;if(message.role==='assistant')message.tool_calls![0].function.arguments='{';t.store.setState(`run:${t.chat.id}`,state);
+    const id=randomUUID();t.store.db.prepare('INSERT INTO install_requests VALUES (?,?,?,?)').run(id,t.project.id,t.chat.id,JSON.stringify({id,projectId:t.project.id,chatId:t.chat.id,frameId:'bad-install',state:'succeeded',recoveryRequired:false,updatedAt:'PRIVATE_BAD_TIMESTAMP'}));
+    const pid=randomUUID();t.store.setState(`process-job:${pid}`,{id:pid,projectId:t.project.id,chatId:t.chat.id,frameId:'bad-process',callId:'call',commandId:'command',status:'completed',exitCode:0,updatedAt:'PRIVATE_BAD_TIMESTAMP'});
+    const view=t.read();expect(view.entries.filter(e=>e.status==='completed'||e.status==='not_started')).toEqual([]);expect(view.entries.find(e=>e.installId===id)?.status).toBe('unknown');expect(view.entries.find(e=>e.processId===pid)?.status).toBe('unknown');expect(JSON.stringify(view)).not.toContain('PRIVATE_BAD_TIMESTAMP');
+    // Remove intentionally malformed fixture rows before ordinary shutdown loaders.
+    t.store.db.prepare('DELETE FROM install_requests WHERE id=?').run(id);t.store.db.prepare('DELETE FROM state WHERE key=?').run(`process-job:${pid}`);
   });
   it('keeps conflicts, missing exit evidence and out-of-order uncertainty honest',async()=>{
     const t=await fixture(),frame='frame',commandId=randomUUID();

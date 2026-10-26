@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {Store} from './store.js';
 import type {RecoveryEntry,RecoveryStatus,RecoveryView,ChatStatus,GoalStatus,PlanStepRef} from '../shared/types.js';
-import {toolRegistry} from './tool-registry.js';
+import {toolRegistry,parseToolArguments} from './tool-registry.js';
 import {helperCanonical} from './package-helper.js';
 
 export const RECOVERY_LIMITS={events:500,installs:100,processes:64,calls:100,steps:100,entries:200,evidence:8,
@@ -15,6 +15,10 @@ const epochTime=(value:unknown):string|null=>typeof value==='number'&&Number.isS
 const statuses=new Set<RecoveryStatus>(['completed','failed','not_started','running','uncertain','interrupted','unknown']);
 const status=(value:unknown):RecoveryStatus=>statuses.has(value as RecoveryStatus)?value as RecoveryStatus:'unknown';
 const toolName=(value:unknown)=>typeof value==='string'&&toolRegistry.has(value)?value:undefined;
+const originalToolName=(value:unknown)=>{
+  const fn=object(value),name=toolName(fn.name);if(!name||typeof fn.arguments!=='string'||Buffer.byteLength(fn.arguments)>RECOVERY_LIMITS.recordBytes)return;
+  try{parseToolArguments(name,fn.arguments);return name;}catch{return;}
+};
 const operationKey=(frameId:string,kind:'command'|'call',id:string)=>JSON.stringify([frameId,kind,id]);
 const nonDispatchStatus=(result:Obj):RecoveryStatus=>{
   const data=object(result.data);
@@ -136,7 +140,7 @@ function observe(store:Store,chatId:string):RecoveryView {
       for(const message of (Array.isArray(frame.messages)?frame.messages:[]).map(object)){
         if(message.role==='tool'){const id=identity(message.tool_call_id),result=parse(message.content,RECOVERY_LIMITS.recordBytes);if(id&&result)results.set(id,[...(results.get(id)??[]).slice(0,1),result]);}
         if(message.role==='assistant')for(const call of (Array.isArray(message.tool_calls)?message.tool_calls:[]).map(object)){
-        const id=identity(call.id);if(id)originals.set(id,{name:toolName(object(call.function).name),count:(originals.get(id)?.count??0)+1});
+        const id=identity(call.id);if(id)originals.set(id,{name:originalToolName(call.function),count:(originals.get(id)?.count??0)+1});
       }}
       const original=(id:string|undefined,name?:string)=>!!id&&originals.get(id)?.count===1&&!!originals.get(id)?.name&&(!name||originals.get(id)?.name===name);
       const pending=object(frame.pending),commandId=identity(pending.id),callId=identity(pending.callId),name=toolName(object(pending.action).name);
@@ -191,6 +195,7 @@ function observe(store:Store,chatId:string):RecoveryView {
     let s=item.status==='starting'?'running':status(item.status);
     if(s==='completed'&&item.exitCode!==0)s='unknown';
     if(s==='not_started'&&item.dispatched!==false)s='unknown';
+    if(!time(item.createdAt)||!time(item.updatedAt)||integer(item.generation)===undefined||integer(item.modeVersion)===undefined||typeof item.dispatched!=='boolean'){s='unknown';coverage.at(-1)!.unavailable++;}
     if(old?.status==='uncertain'||old?.status==='interrupted')s='uncertain';
     if(old&&s==='running'&&['completed','failed','not_started'].includes(old.status))s='uncertain';
     if(old&&['completed','failed','not_started'].includes(s)&&old.status!==s&&old.status!=='running'&&old.status!=='unknown')s='uncertain';
@@ -201,6 +206,7 @@ function observe(store:Store,chatId:string):RecoveryView {
   for(const item of readRecords('install',RECOVERY_LIMITS.installs)){
     const frameId=identity(item.frameId)!,installId=identity(item.id)!,key=operationKey(frameId,'command',installId),old=entries.get(key);
     let s:RecoveryStatus=item.recoveryRequired===true?'uncertain':item.state==='succeeded'||item.state==='noop'?'completed':item.state==='failed'?'failed':item.state==='uncertain'?'uncertain':item.state==='dispatching'||item.state==='authorizing'?'running':['preparing','reviewing','pending','approved','rejected','stale'].includes(String(item.state))?'not_started':'unknown';
+    if(!epochTime(item.createdAt)||!epochTime(item.updatedAt)||integer(item.generation)===undefined||integer(item.modeVersion)===undefined||typeof item.recoveryRequired!=='boolean'){s='unknown';coverage.at(-1)!.unavailable++;}
     const sources=store.db.prepare(`SELECT id,created_at,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND type IN ('install','install_reconciliation') AND
       CASE WHEN length(CAST(data AS BLOB))<=? THEN CASE WHEN json_valid(data) THEN COALESCE(json_extract(data,'$.installId'),json_extract(data,'$.id'))=? ELSE 0 END ELSE 0 END ORDER BY id DESC LIMIT ?`).all(RECOVERY_LIMITS.recordBytes,chatId,RECOVERY_LIMITS.recordBytes,installId,RECOVERY_LIMITS.evidence+1);
     const originalUncertainty=old?.status==='uncertain'||old?.status==='interrupted'||sources.some(row=>parse(row.data,RECOVERY_LIMITS.recordBytes)?.state==='uncertain');
