@@ -1,6 +1,6 @@
 # Milestone 36 — Run and usage inspector
 
-Status: early contract reviewed; implementation candidate ready for coherent frozen validation. No final handoff or acceptance claimed.
+Status: M36 report-only handoff ready after exact-source local/full/UI and all six applicable CI workflows/all nine fresh archives passed. Coordinator independently accepted the tested source and all evidence; main integration/exact-main gates remain coordinator-owned and pending. M21 stays paused; no M37/release.
 
 ## Verified source and scope
 
@@ -66,3 +66,59 @@ Coordinator also found that >64 entirely correlated provider events were falsely
 Independent coordinator scalar-fault receipt demonstrated64KiB revision/start_event/status materialization against c05. Narrow correction applies SQL typeof/range/byte+enum CASE before materialization; invalid revision refuses observation, invalid start evidence makes request unavailable, invalid status removes checked link. Added actual returned-field instrumentation tests for each column and a corrupt-clock no-invocation/no-repair regression. No earlier failed or superseded evidence removed.
 
 Frozen591c9bb/treef433f1f passed1145localtests/47platformskips,types/build/actualChrome+Electron/PNG/realHTTP-SSE diskRuntime scenarios, but independent coordinator33-row scalar replay found ORDER BY revision sorted the projected alias and hid one invalid revision among valid rows. Qualified ORDER BY inspector_requests.revision and added the exact mixed-valid/one-corrupt regression. Earlier591receipts remain superseded, including full/runtime/UI evidence. Receipt transport attempts (oversized terminal input rejected by automatic approval review; incomplete terminal writer; Node tool EPERM) created no accepted CI receipt; owned helper stopped and normal authorized D file writes replace them. Final CI/archive evidence must bind the subsequent coherent source.
+
+
+## Final report-only handoff — 2026-10-26
+
+Implementation/tested source: `e988255357897c2da7c33b105f0f9ae68726d130`; tree `c278280ac83212fae30b15c50846cd0ed546967b`; base `33f28944e5843098d8a6c0efe1a937aac1343e66`. This final report-only commit changes only this report after that tested source. Its actual SHA/clean branch identity is recorded in the handoff response and external handoff.json; no product change after frozen validation. Branch remains `codex/milestone-36`, coordinator owns independent acceptance/integration/exact-main gates. No M37 or release.
+
+Local coherent frozen receipts are in physical D sibling `m36-validation/frozen-e988-*`: full1146passed/47platformskips (85filespassed/3skipped), typecheck, fresh web/Electron builds and actual Chrome plus sandboxed Electron inspector navigation/stale/reload/long-history flows all passed. Both PNGs inspected. Actual5501-row UI open251ms Chrome/323ms Electron, provider0/commands0/errors[]/readOnlyChanges0; Electron42.11.13/Chromium148 sandbox+contextIsolation true, Node integration false,50paints. Real disk10001-row bounded projection measured127ms; environment.json binds clean exact SHA/tree/lock/all actual resolved D paths (the budget test receipt retains a conservative static unfrozen-mode label). These timings are controlled observations, not guarantees.
+
+External frozen-e988-http diagnostic ran actual local HTTP/SSE + disk Store/Runtime/WorkspaceTools: five exact controlled requests, knownzero versus missing, midstream cancel with retained incomplete6/1, refusal4/0, reply-loss5/1, repeated UI usage events do not add requests, and reopened runtime starts0extra/provider requests. Commands0. This is a controlled provider fixture, not live STARK/provider billing or quality acceptance. Script/receipts are preserved beside the worktree; no source changes were needed for it.
+
+Final regressions include original JSON/key/project/root/start-event references, knownzero/unknown/incomplete/conflicting usage, callback write cap, UTF8 reference omission without native semantic changes, multiple attempts, all/mixed unavailable elapsed, >64 fully correlated events, actual uncorrelated/malformed legacy controls,64KiB revision/start_event/status scalars, corrupt-clock no-repair/no-invocation, single corrupt revision among33valid rows, actual failed start/terminal COMMIT, native observer/shared poison, restart/retention/pagination and checked file/test/plan navigation. Earlier failed/superseded receipts and coordinator external diagnostics remain preserved.
+
+### Exact-source CI
+
+All six original applicable workflows preserved, with only scoped additive M36 renderer steps/artifact paths. Authenticated connector run/job/decoded-log APIs verified all10jobs and154step records (135success/19expected platform/failure-diagnostic conditional skips), no incomplete/failing applicable step. Full decoded logs were read; durable job JSON stores complete step metadata and explicitly bounded5000-character log excerpts, not claimed complete logs. `ci-e988/runs-jobs-summary.json` and `job-*.json` preserve identities and evidence.
+
+| Workflow | Exact-source run | Jobs |
+|---|---|---|
+| Privileged helper validation | [40369641818](https://github.com/Deathstar1342/react-harness/actions/runs/40369641818) | helper:121736600189 |
+| Validate | [40369641623](https://github.com/Deathstar1342/react-harness/actions/runs/40369641623) | verify:121736599784 |
+| Desktop validation | [40369641624](https://github.com/Deathstar1342/react-harness/actions/runs/40369641624) | electron (ubuntu-24.04):121736600557; electron (windows-latest):121736601168 |
+| Container foundation | [40369641604](https://github.com/Deathstar1342/react-harness/actions/runs/40369641604) | linux-container:121736600080 |
+| Private desktop support runtime | [40369641657](https://github.com/Deathstar1342/react-harness/actions/runs/40369641657) | runtime (windows-latest):121736600029; runtime (ubuntu-24.04):121736600201 |
+| Guided container source desktop | [40369641614](https://github.com/Deathstar1342/react-harness/actions/runs/40369641614) | linux-source (ubuntu-24.04):121736599701; linux-source (ubuntu-22.04):121736600326; windows-payload:121740531334 |
+
+Automatic Installer candidates run40369641664 failed and remains a separate held M21 packaging gate; it is not counted as M36 acceptance or waived. No M21 source/notices/worktree changes, release or installed-preview update.
+
+### All nine fresh exact-source archives
+
+Authenticated artifact metadata/download APIs fetched every ZIP anew onto verified physical D. Published compressed byte length/SHA256, canonical unique/case-folded names, link refusal, full CRC reads, original strict JSON/source/provenance and required screenshots/semantic counters passed. No artifact payload was executed locally. `ci-e988/audit.json`, per-ID metadata and ZIPs preserve replayable audit evidence. One early audit ran before the large Windows transfer completed; its missing-metadata failure was retained, then the dependent audit ran after verified transfer completion, without source changes or relaxed checks.
+
+| Artifact | ID | Compressed bytes | SHA256 |
+|---|---:|---:|---|
+| container-foundation-e988255357897c2da7c33b105f0f9ae68726d130 | 12671238989 | 157373 | `27a9cbc6e93cf3f746386bbadc4788ceb40c5727655b320adc81caa1c1fc2164` |
+| private-runtime-windows-latest-e988255357897c2da7c33b105f0f9ae68726d130 | 12671433472 | 37958 | `d5b8a3adeb2ff8ae4322486dbfcfedaf50d1c88e0145c27513eb68c781f21cd2` |
+| private-runtime-ubuntu-24.04-e988255357897c2da7c33b105f0f9ae68726d130 | 12671778298 | 186505 | `34896ec1f62bdd6db29f58c6a1a3e89102c0cd1c9999ba56b9eeb72d1a932023` |
+| desktop-evidence-ubuntu-24.04 | 12671917567 | 984683 | `ffe03647ba36b84ef83a630ab7925ca9edfe1121be6e58ac341e56be54010583` |
+| source-windows-e988255357897c2da7c33b105f0f9ae68726d130 | 12672008177 | 205342939 | `571ef73844b1ce93173442b8fdc9b8093ae1ba543c738d749a436b0e83ac8139` |
+| source-evidence-ubuntu-22.04-e988255357897c2da7c33b105f0f9ae68726d130 | 12672526815 | 104993 | `2f4061fa6daae56f6c9995496d7f0a96cd00858ce3b16bf5225b7df73692b388` |
+| source-evidence-ubuntu-24.04-e988255357897c2da7c33b105f0f9ae68726d130 | 12672711790 | 114632 | `529cb6fb91b1da300601016032bfee1f3ba68bdd1dc588e06e45df59d25795f5` |
+| desktop-evidence-windows-latest | 12673015497 | 524066 | `3224af91a7b5179ff69f549144b5da51a24bcacb9cbab1e9fb3a27770f901e24` |
+| source-evidence-windows-e988255357897c2da7c33b105f0f9ae68726d130 | 12673190829 | 35707 | `8556f035aca894416bb4b89c71e26bc59a1de80bd840ec15808096694ae69a04` |
+
+Complete Windows source ZIP12672008177: 10398members, all10397inner manifest hashes and exact member set passed; 587680532expanded bytes. All42available copied Python/shell/helper sources matched exact Git blobs rather than CRLF checkout bytes. Original source/platform/controller+worker image agreement and relocated Windows execution receipt passed. Connected Linux browser receipt explicitly requires starts1/provider0/checkpoint409/errors[]; restarted browser receipt starts0/provider0, with retained uncertainty/no auto-adoption. Both desktop platforms contain actual M36 browser and sandboxed Electron receipts/PNGs with provider0/commands0/readOnlyChanges0/errors[].
+
+### Changed interfaces and retained limits
+
+- New authenticated bounded read-only inspector GET/InspectorView; new inspector_requests/clock tables and bounded indexes, deleted only by existing explicit chat removal. Existing run/native/goal/install/checkpoint evidence is not rewritten or evicted.
+- Backend-only optional provider observation callback, managed-scheduler admission marker and wrapper-owned inspectorRequestId correlation; provider_request/usage events add that ID. New file_changed.changeId joins exact original file-change evidence. Existing provider bodies/tool schemas/native validation/execution authority remain unchanged.
+- Public DTO excludes prompts/provider payloads/endpoint/account/key/controller paths/private testcase ledgers/worker or desktop capabilities. Conversation and compaction scope is explicit; diagnostic/package-review calls and older uncorrelated evidence are outside complete totals. No prices or quotas.
+- Limits:8192-byte request envelope;50+1rows/512KiB page;4096+1rows/8MiB retained summary including original source-event bytes;31callback changes+one overflow+terminal;8human/16call/8event references;24links from64events/256KiB;64+lookahead legacy observations/128KiB. SQL bounds precede JS parsing/materialization, including SQLite scalar affinity faults; duplicate keys and mismatched sources cannot authorize joins.
+- Counts never establish acceptance. Pending/missing/unavailable/byte-omitted/conflicted records remain unknown/incomplete; reported0is distinct. Elapsed is monotonic observed request time (scheduler waits included), not task active time, billing or restart-gap reconstruction. Inspector links use existing checked navigation and do not execute/restore/reconcile anything.
+
+Windows local fixture/native renderer, disposable Linux Docker/PTY/worker/source CI, actual Windows relocated payload, native-human, Windows Docker device, live work-provider and customer-installer evidence remain separate. The last four device/human/live-provider/installer acceptance classes are not established by this milestone. No workstation engine/WSL/helper/project preview/global provisioning, no C checkout/OneDrive/earlier worktree edits, no global Git settings, no secrets/runtime databases/projects/build artifacts in Git. M21 remains paused and preserved.
+
+No user-assistance blocker. Coordinator independently accepted exact e988 source/full/typecheck/build/actual UI/original disk faults/all six CI workflows/all nine archives, including complete Windows10397hashes and exact helper bytes, in its own frozen-e988255 receipts. No further source change requested. Final handoff review/main integration/exact-main verification remain coordinator-owned.
