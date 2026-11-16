@@ -199,6 +199,11 @@ export const actionSchema = z.discriminatedUnion('name', [
     args: z.strictObject({
       verdict: z.enum(['pass', 'changes_requested']),
       findings: z.array(text(8_000)).max(100),
+      replan: z.strictObject({
+        reason: z.enum(['architecture_conflict','dependency_blocked','invalid_assumption','scope_change']),
+        explanation: text(768),
+        evidenceEventIds: z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).min(1).max(4),
+      }).optional(),
     }),
   }),
   z.strictObject({
@@ -306,7 +311,7 @@ const descriptions: Record<string,string> = {
   set_plan:'Replace the full ordered outline. Cite native reads/absence and observable checks on changed steps. Optional admission.task saves task metadata. Cite a retained step for reorder or removal. Use phases: [] to clear. Last in batch.',
   delegate:'Assign one coder a bounded objective, verifiable acceptance criteria and scoped paths. For related planned work bind planStep to exact current identities and revision; omit it for unrelated work. Must be last in a batch.',
   review:'Request an independent read-only review of a concrete focus. This does not accept unrelated plan steps or a whole phase. Must be last in a batch.',
-  review_result:'Record a critic verdict with findings from actual files, diffs and verification. Checkpoint is not completion; PASS cannot override failed or uncertain execution, or grant OS/package authority. Must be last in a batch.',
+  review_result:'Record a critic judgment from actual files, diffs and verification. Use changes_requested for local repairs. In a completion review, optionally cite exact observed receipt IDs and a reason for genuine replanning. PASS cannot override runtime evidence or grant authority. Must be last in a batch.',
   ask_user:'Pause for necessary user information. Must be the last call in a batch.',
   submit_completion:'Submit the current work frame for completion with observed evidence and limitations. Coder completion requires independent review. Does not prove goal completion. Must be the last call in a batch.',
   recommend_packages:'Propose up to 16 unique apt package identities with a specific need. Separate system policy, target freshness and helper authorization apply; never grants shell or root access.',
@@ -343,7 +348,14 @@ export function validateAction(action: Action, role?: ToolRole, mode?: ChatMode)
   if (role && !definition.roles.includes(role) || mode && !definition.modes.includes(mode)) throw new Error('Native tool is not permitted for this role or mode');
   const parsed = definition.arguments.safeParse(action.args);
   if (!parsed.success) throw new Error('Invalid native tool arguments');
-  return {name:action.name,args:parsed.data as Record<string,unknown>};
+  const args = parsed.data as Record<string,unknown>;
+  if (action.name === 'review_result' && args.replan) {
+    const {evidenceEventIds} = args.replan as import('../shared/types.js').ReviewReplan;
+    if (args.verdict !== 'changes_requested' || new Set(evidenceEventIds).size !== evidenceEventIds.length) {
+      throw new Error('Replanning requires changes_requested and distinct receipt IDs.');
+    }
+  }
+  return {name:action.name,args};
 }
 export function parseToolArguments(name:string,args:string): Action {
   return validateAction({name,args:parseNativeJSON(args) as Record<string,unknown>});

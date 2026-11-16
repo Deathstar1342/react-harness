@@ -5,6 +5,7 @@ import { Store } from '../server/store.js';
 import { Runtime } from '../server/runtime.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 import { readConfig } from '../server/config.js';
+import { createManagedHooks } from '../server/context.js';
 import { roleInstructions } from '../server/prompts.js';
 import { validateNativeHistory } from '../server/provider.js';
 import type { Action, CompletionResult, ModelProvider, PlanStepRef, ToolResult, ToolService } from '../shared/types.js';
@@ -23,7 +24,7 @@ export const testResult = (status: 'passed'|'failed'|'error'|'skipped'): ToolRes
 });
 
 /** Real SQLite/runtime/file tools; only provider and command outcomes are synthetic. */
-export async function orchestrationFixture(phases = 1, persistent = false) {
+export async function orchestrationFixture(phases = 1, persistent = false, managedCriticBoundary?: () => void | Promise<void>) {
   const base = await mkdtemp(path.join(tmpdir(), 'm23-scenario-'));
   const root = persistent ? path.join(base,'project') : base, home = path.join(base,'app');
   if(persistent) {await mkdir(root);await mkdir(home,{mode:0o700});}
@@ -36,6 +37,7 @@ export async function orchestrationFixture(phases = 1, persistent = false) {
   const tools: ToolService = {
     processLifecycle:workspace.processLifecycle,
     planningRoot:workspace.planningRoot.bind(workspace),
+    assertCoderContextPath:workspace.assertCoderContextPath.bind(workspace),
     configureMutationGuard:workspace.configureMutationGuard.bind(workspace),
     closeCommandContext:workspace.closeCommandContext.bind(workspace),
     restore:workspace.restore.bind(workspace), restoreMove:workspace.restoreMove.bind(workspace),
@@ -55,8 +57,19 @@ export async function orchestrationFixture(phases = 1, persistent = false) {
     const reply = replies.shift(); if (!reply) throw new Error('Unexpected scenario provider request');
     return typeof reply === 'function' ? await reply(input) : reply;
   }};
-  const config = readConfig(persistent ? {HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'data'),HARNESS_WORKSPACE_ROOT:path.join(base,'workspaces')} : {});
-  const runtime = new Runtime(store,provider,tools,config,{instructions:roleInstructions});
+  const config = readConfig({
+    ...(persistent ? {HARNESS_HOME:home,HARNESS_DATA_DIR:path.join(home,'data'),HARNESS_WORKSPACE_ROOT:path.join(base,'workspaces')} : {}),
+    ...(managedCriticBoundary ? {CRITIC_INPUT_TOKEN_LIMIT:'40000',MODEL_MAX_OUTPUT_TOKENS:'256',TOKENS_PER_MINUTE:'2000000'} : {}),
+  });
+  const hooks = managedCriticBoundary ? createManagedHooks(provider,store,config) : {instructions:roleInstructions};
+  if (managedCriticBoundary && 'complete' in hooks && hooks.complete) {
+    const complete = hooks.complete;
+    hooks.complete = (role,input,check) => complete(role,input,role==='critic' && check ? async signal=>{
+      await managedCriticBoundary();
+      return check(signal);
+    } : check);
+  }
+  const runtime = new Runtime(store,provider,tools,config,hooks);
   const delegate = (phase = 1, extra: Record<string,unknown> = {}) => call('delegate',{objective:`Deliver phase ${phase}`,acceptanceCriteria:[`Inspect evidence for phase ${phase}; preserve manual.txt`],paths:['result.txt','README.md'],planStep:reference(phase),...extra});
   return {root,store,chat,plan,reference,replies,requests,executed,commandResults,tools,runtime,config,provider,delegate,
     seed: (name='result.txt',content='Original observed file')=>writeFile(path.join(root,name),content),

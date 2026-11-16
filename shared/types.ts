@@ -117,6 +117,12 @@ export interface ToolService {
   dispose(): Promise<void>;
 }
 export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string; install?: InstallRecord }
+export type ReviewDisposition = 'accepted'|'local_repair'|'replan'|'unaccepted';
+export interface ReviewReplan {
+  reason: 'architecture_conflict'|'dependency_blocked'|'invalid_assumption'|'scope_change';
+  explanation: string;
+  evidenceEventIds: number[];
+}
 export interface RunEvent { id: number; chatId: string; type: string; data: unknown; createdAt: string }
 export interface CommandEvent {
   processId?:string;

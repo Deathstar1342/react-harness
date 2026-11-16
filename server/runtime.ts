@@ -5,7 +5,7 @@ import {observeRequest} from './inspector-records.js';
 import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
-import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, NativeToolDefinition, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef } from '../shared/types.js';
+import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, NativeToolDefinition, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef, ReviewDisposition } from '../shared/types.js';
 import type { Config } from './config.js';
 import { Store, unchangedPlanStructure } from './store.js';
 import { nativeResultFits, planningRead, planObservation, prepareAdmission, prepareTaskProposal, stepKey, type PlanObservation, type PlanStepAdmission } from './plan-admission.js';
@@ -27,9 +27,11 @@ import { promptIdentity } from './prompts.js';
 import { snapshotScope, unknownScope, type ScopeSnapshot, type VerificationSnapshot } from './verification-scope.js';
 import { acceptances, activeGoalEvidence, addGoalUncertainty, bindGoal, createGoal, goalBlockers, goalInput, goalOf, goalRevisionInput, goalStatus, inheritedGoalEvidence, invalidateGoal, parseGoalCommand, recordGoalEvidence, refreshGoalResolutions, saveGoal, unresolvedGoalEvents, type GoalInput } from './goals.js';
 import {ProcessJobs, processRecords} from './process-jobs.js';
+import {isReplanReceipt, reviewEvidence, reviewLimits, reviewReplan, samePlanStep} from './review-evidence.js';
+import {captureReviewContext, currentReceiptFiles, observeReviewFiles, recheckReviewContext, recheckReviewFiles, renderReviewEvidence, reviewFileCandidates, unavailableReview, type ReviewFileObservation} from './review-context.js';
 
-interface PendingAction { verification?: VerificationSnapshot; callId?: string; id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
-export interface Frame { acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
+interface PendingAction { reviewOrigin?:string; verification?: VerificationSnapshot; callId?: string; id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
+export interface Frame { acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; reviewOrigin?:string; evidenceWindowTruncated?:boolean; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
 export interface RunState {
   queueClaim?:{projectId:string;taskId:string;id:string};
   skillsHash?:string;
@@ -45,6 +47,14 @@ export interface RunState {
 }
 type BeforeProvider = (signal: AbortSignal) => Promise<ModelMessage[]>;
 interface CoderContextBinding { key: string; previous?: CoderSourceContext }
+interface CompletionReviewAdmission {
+  current: (state: RunState) => boolean;
+  workspaceIdentity?: string;
+  scope?: ScopeSnapshot;
+  files: ReviewFileObservation;
+}
+const boundedReviewText = (text: string) => Buffer.from(text).subarray(0,reviewLimits.summary).toString('utf8');
+
 export interface RuntimeHooks {
   scheduled?:boolean;
   instructions(role: AgentRole): string;
@@ -103,6 +113,7 @@ export class Runtime {
   private closePromise?: Promise<void>;
   private readonly planningEpoch = randomUUID();
   private readonly coderContexts = new WeakMap<Frame,CoderContextBinding>();
+  private readonly reviewedContext = new WeakSet<Frame>();
   private readonly repositoryOverviews = new WeakMap<RunState, {identity: string; message: ModelMessage}>();
 
   private assertAvailable(chatId: string) {
@@ -823,6 +834,138 @@ export class Runtime {
     }};
   }
 
+  private reviewOrigin(chatId: string, state: RunState, frame: Frame) {
+    const chat = this.store.chat(chatId), project = this.store.project(chat.projectId);
+    const {id:planId,version:planVersion} = this.store.plan(chatId), goal = goalOf(this.store,chatId);
+    return hash(JSON.stringify([chatId,project.id,project.path,project.createdAt,state.frames[0]?.id,frame.id,state.generation,
+      chat.modeVersion,chat.mode,chat.approvalMode,state.planOnly,planId,planVersion,state.instructionsHash,state.skillsHash,
+      goal && [goal.id,goal.revision,goal.generation],frame.assignment,frame.scope,frame.planStep]));
+  }
+
+  private completionParent(chatId: string, state: RunState, reviewer: Frame) {
+    const parent = state.frames.at(-2);
+    if (reviewer.role !== 'critic' || reviewer.reviewKind !== 'completion' || state.frames.at(-1) !== reviewer ||
+        state.frames.at(-3)?.role !== 'architect' || !parent || parent.role !== 'coder' || parent.id !== reviewer.reviewDelegationId ||
+        parent.final === undefined || parent.pending || state.planOnly || state.steering.length ||
+        this.store.chat(chatId).mode === 'plan' || !parent.assignment ||
+        JSON.stringify(reviewer.assignment) !== JSON.stringify(parent.assignment) ||
+        !samePlanStep(parent.planStep,parent.assignment.planStep) || JSON.stringify(parent.scope) !== JSON.stringify(parent.assignment.paths) ||
+        reviewer.reviewOrigin && reviewer.reviewOrigin !== this.reviewOrigin(chatId,state,parent)) return;
+    if (parent.planStep && this.store.planStep(chatId,parent.planStep)?.evidence?.delegationId !== parent.id) return;
+    return parent;
+  }
+
+  private collectReviewEvidence(chatId: string, state: RunState, parent: Frame, reviewer: Frame, rows?: number) {
+    const evidence = reviewEvidence(this.store,chatId,[
+      {id:parent.id,role:'coder',origin:this.reviewOrigin(chatId,state,parent),ids:parent.evidenceEventIds},
+      {id:reviewer.id,role:'critic',origin:this.reviewOrigin(chatId,state,reviewer),ids:reviewer.evidenceEventIds},
+    ],parent.scope,parent.acceptanceEvidence,rows);
+    evidence.incomplete ||= !!parent.evidenceWindowTruncated || !!reviewer.evidenceWindowTruncated;
+    return evidence;
+  }
+
+  private guardReviewFile(chatId: string, root: string, filename: string) {
+    this.processes.assertIdle(this.store.chat(chatId).projectId);
+    if (!this.tools.assertCoderContextPath) throw new Error('Workspace lease observation unavailable.');
+    this.tools.assertCoderContextPath(root,filename);
+  }
+
+  private async prepareCriticRequest(
+    chatId: string, state: RunState, frame: Frame, messages: ModelMessage[], tools: NativeToolDefinition[], signal: AbortSignal,
+  ): Promise<{messages:ModelMessage[];beforeProvider:BeforeProvider}|undefined> {
+    const parent = this.completionParent(chatId,state,frame);
+    if (!parent) return;
+    const base = estimateTokens(messages,tools), capacity = this.config.contextLimits.critic;
+    const room = capacity-this.config.maxOutputTokens-Math.min(8192,Math.floor(capacity*0.1))-base;
+    if (advisoryEstimate(room) < 256) return;
+    const origin = this.reviewOrigin(chatId,state,parent);
+    const live = () => this.completionParent(chatId,state,frame) === parent && this.reviewOrigin(chatId,state,parent) === origin;
+    const evidence = this.collectReviewEvidence(chatId,state,parent,frame,reviewLimits.rows);
+    const chat = this.store.chat(chatId);
+    const checks = parent.planStep ? this.store.planStep(chatId,parent.planStep)?.task?.checks ?? [] : [];
+    const render = (context: ReturnType<typeof unavailableReview>, budget: number) => {
+      const advisory = renderReviewEvidence(evidence,context,checks,budget);
+      if (!advisory) return messages;
+      const insert = messages.length-frame.messages.length;
+      return [...messages.slice(0,insert),advisory,...messages.slice(insert)];
+    };
+    let context = unavailableReview();
+    if (!this.reviewedContext.has(frame) && coderScopes(parent.scope).length) {
+      try {
+        context = await runNativeOperation(async () => {
+          signal.throwIfAborted();
+          if (!live()) return unavailableReview();
+          const root = this.planningWorkspace(chatId);
+          return captureReviewContext(this.store,chat.projectId,chatId,evidence,root,filename=>this.guardReviewFile(chatId,root.path,filename),signal);
+        });
+      } catch {
+        signal.throwIfAborted();
+        nativeStorageActive();
+      }
+    }
+    signal.throwIfAborted();
+    if (!live()) return;
+    const preview = render(context,room), reserved = estimateTokens(preview,tools)-base;
+    return {messages:preview,beforeProvider:async dispatchSignal=>{
+      dispatchSignal.throwIfAborted();
+      if (!live()) return messages;
+      let checked = context;
+      if (context.observation.identity) {
+        try {
+          checked = await runNativeOperation(() => {
+            dispatchSignal.throwIfAborted();
+            if (!live()) return unavailableReview();
+            const root = this.planningWorkspace(chatId);
+            return recheckReviewContext(context,recheckReviewFiles(root,context.observation,filename=>this.guardReviewFile(chatId,root.path,filename)));
+          });
+        } catch {
+          dispatchSignal.throwIfAborted();
+          nativeStorageActive();
+          checked = unavailableReview();
+        }
+      }
+      if (!live()) return messages;
+      this.reviewedContext.add(frame);
+      return render(checked,reserved);
+    }};
+  }
+
+  private async prepareCompletionReview(
+    chatId: string, state: RunState, reviewer: Frame, call: NativeToolCall, action: Action, signal: AbortSignal,
+  ): Promise<CompletionReviewAdmission> {
+    const parent = this.completionParent(chatId,state,reviewer);
+    if (!parent) throw new Error('The completion review no longer matches the original assignment and current plan.');
+    const origin = this.reviewOrigin(chatId,state,parent);
+    const current = (draft: RunState) => {
+      const next = draft.frames.at(-1);
+      const owner = next && this.completionParent(chatId,draft,next);
+      return !signal.aborted && owner?.id === parent.id && next?.id === reviewer.id && next.queuedCalls?.[0]?.id === call.id &&
+        this.reviewOrigin(chatId,draft,owner) === origin;
+    };
+    const chat = this.store.chat(chatId);
+    const evidence = this.collectReviewEvidence(chatId,state,parent,reviewer);
+    const candidates = reviewFileCandidates(evidence.receipts).reverse();
+    let files: ReviewFileObservation = {files:[]}, workspaceIdentity: string|undefined;
+    if (candidates.length || reviewReplan(action.args)) {
+      try {
+        files = await runNativeOperation(() => {
+          const root = this.planningWorkspace(chatId);
+          workspaceIdentity = root.identity;
+          return observeReviewFiles(root,candidates,filename=>this.guardReviewFile(chatId,root.path,filename),signal);
+        });
+      } catch {
+        signal.throwIfAborted();
+        nativeStorageActive();
+      }
+    }
+    await this.refreshInstructions(chatId,state,signal);
+    const scope = current(state) && (parent.acceptanceEvidence?.checks.length || parent.assignment?.goal)
+      ? await snapshotScope(this.tools,this.store.project(chat.projectId).path,parent.assignment?.paths)
+      : undefined;
+    signal.throwIfAborted();
+    return {current,scope,files,workspaceIdentity};
+  }
+
   private toolContext(
     chatId: string,
     frame: Frame,
@@ -1005,7 +1148,7 @@ export class Runtime {
         continue;
       }
       this.deliverSteering(chatId, state);
-      const frame = state.frames.at(-1)!;
+      const frame: Frame = state.frames.at(-1)!;
 
       if (frame.pending && frame.pending.stage !== 'prepared') {
         if (!await this.executePending(chatId, state, frame, signal)) return;
@@ -1068,12 +1211,21 @@ export class Runtime {
         }
       }
 
+      // Historical completion scaffolds can contain raw tool transcripts.
+      // Keep their stored record and omit the scaffold from provider preparation.
+      const reviewScaffold = frame.reviewKind === 'completion' && frame.messages[0]?.content.startsWith('Review request:\n');
+      const initialMessages = reviewScaffold
+        ? [reviewMessage('completion',frame,''),...frame.messages.slice(1)]
+        : frame.messages;
+      if (reviewScaffold) messages = [...messages.slice(0,-frame.messages.length),...initialMessages];
       let preparedFrame:Frame|undefined;
       if (this.hooks.prepareMessages) {
-        preparedFrame=structuredClone(frame);
+        const preparation = structuredClone(frame);
+        preparedFrame = preparation;
+        if (reviewScaffold) preparation.messages=structuredClone(initialMessages);
         messages = await this.hooks.prepareMessages(
           chatId,
-          preparedFrame,
+          preparation,
           messages,
           signal,
         );
@@ -1081,25 +1233,27 @@ export class Runtime {
 
       await this.refreshInstructions(chatId,state,signal);
       if(state.generation!==generation)continue;
-      if(preparedFrame && JSON.stringify(preparedFrame.messages)!==JSON.stringify(frame.messages))this.commitRunTransition(chatId,state,draft=>{draft.frames.find(item=>item.id===frame.id)!.messages=preparedFrame!.messages;});
+      if(preparedFrame && JSON.stringify(preparedFrame.messages)!==JSON.stringify(initialMessages))this.commitRunTransition(chatId,state,draft=>{draft.frames.find(item=>item.id===frame.id)!.messages=preparedFrame!.messages;});
       const tools = publishedTools(frame.role,state.planOnly?'plan':'execute');
-      const coderRequest = await this.prepareCoderRequest(chatId,state,frame,messages,tools,signal);
+      const advisoryRequest = frame.role === 'critic'
+        ? await this.prepareCriticRequest(chatId,state,frame,messages,tools,signal)
+        : await this.prepareCoderRequest(chatId,state,frame,messages,tools,signal);
       signal.throwIfAborted();
       if (state.generation!==generation || state.frames.at(-1)!==frame) continue;
       this.save(chatId,state);
       const deltas=nativeOutputBuffer(text=>this.store.event(chatId,'delta',{role:frame.role,text}));
-      const input = {model:this.store.chatModels(chatId)[frame.role],messages:coderRequest?.messages ?? messages,tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
+      const input = {model:this.store.chatModels(chatId)[frame.role],messages:advisoryRequest?.messages ?? messages,tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
       this.commitRunTransition(chatId,state,()=>{this.queue?.beforeProvider(chatId,state);const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
       this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...promptIdentity(messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
       const completion = await observeRequest(this.store,{chatId,projectId:this.store.chat(chatId).projectId,runId:state.frames[0].id,taskId:frame.id,generation,ordinal:state.steps,role:frame.role,humanMessageIds:state.humanMessageIds??[],...(frame.planStep?{planStep:frame.planStep}:{})},input,async observed => {
-        if (this.hooks.scheduled && this.hooks.complete) return this.hooks.complete(frame.role,observed,coderRequest?.beforeProvider);
-        if (coderRequest) {
-          const checked = await coderRequest.beforeProvider(signal);
+        if (this.hooks.scheduled && this.hooks.complete) return this.hooks.complete(frame.role,observed,advisoryRequest?.beforeProvider);
+        if (advisoryRequest) {
+          const checked = await advisoryRequest.beforeProvider(signal);
           observed = {...observed,messages:checked};
           observed.onObservation?.({type:'invoked'});
         }
         return this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed);
-      },this.hooks.scheduled || !!coderRequest).finally(()=>deltas.flush());
+      },this.hooks.scheduled || !!advisoryRequest).finally(()=>deltas.flush());
       signal.throwIfAborted();
       this.store.event(chatId,'provider_request',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,model:input.model,finishReason:completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
       if (completion.usage) this.store.event(chatId,'usage',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,...completion.usage});
@@ -1163,14 +1317,11 @@ export class Runtime {
         if(action.name==='delegate')for(const target of (action.args.paths as string[]|undefined)??[])safeRelative(target,true);
         if(definition.effect!=='read' && definition.approval!=='owned_stop')this.processes.assertIdle(this.store.chat(chatId).projectId);
         if(definition.kind==='control' && action.name!=='recommend_packages') {
-          let reviewedScope:ScopeSnapshot|undefined;
-          const parent=state.frames.at(-2);
-          if(action.name==='review_result' && frame.reviewKind==='completion' && parent?.role==='coder' && parent.id===frame.reviewDelegationId && (parent.acceptanceEvidence?.checks.length || parent.assignment?.goal)) {
-            const boundGeneration=state.generation, boundMode=this.store.chat(chatId).modeVersion, assignment=JSON.stringify(parent.assignment);
-            reviewedScope=await snapshotScope(this.tools,this.store.project(this.store.chat(chatId).projectId).path,parent.assignment?.paths);
-            signal.throwIfAborted();await this.refreshInstructions(chatId,state,signal);
-            if(state.generation!==boundGeneration || state.frames.at(-1)!==frame || frame.queuedCalls?.[0]?.id!==call.id || this.store.chat(chatId).modeVersion!==boundMode || JSON.stringify(parent.assignment)!==assignment)continue;
-          }
+          const review: CompletionReviewAdmission|undefined = action.name==='review_result' && frame.reviewKind==='completion' &&
+            !state.planOnly && state.frames.at(-2)?.assignment
+            ? await this.prepareCompletionReview(chatId,state,frame,call,action,signal)
+            : undefined;
+          if (review && !review.current(state)) throw new Error('The review was superseded before commit.');
           if(action.name==='request_goal_completion') {
             await this.completeGoal(chatId,state,frame,call,action,signal);
             continue;
@@ -1181,7 +1332,8 @@ export class Runtime {
             if (!admission.current()) continue;
           }
           const outcome = await definition.handler({workspace:this.tools, context:this.toolContext(chatId,frame,signal), control:async request => {
-            const commit = () => this.controlAction(chatId,state,frame,call,request,reviewedScope,admission);
+            const commit = () => this.controlAction(chatId,state,frame,call,request,review,admission);
+            if (review) return runNativeOperation(() => commit());
             if (!admission?.checkWorkspaceAtCommit) return commit();
             // Refresh only the synchronous plan/file check and SQLite transition.
             // The surrounding tool handler and all provider work stay outside.
@@ -1522,7 +1674,9 @@ export class Runtime {
         }
 
         this.commitRunTransition(chatId,state,draft=>{
-          draft.frames.find(item=>item.id===frame.id)!.pending!.stage='executing';
+          const executing = draft.frames.find(item=>item.id===frame.id)!;
+          executing.pending!.stage='executing';
+          if (executing.role !== 'architect') executing.pending!.reviewOrigin=this.reviewOrigin(chatId,draft,executing);
 
           if (isCommand(pending.action)) {
             this.store.event(
@@ -1701,9 +1855,12 @@ export class Runtime {
           action: pending.action,
           result,
           messageId: message.id,
+          ...(frame.role !== 'architect' ? {reviewReceipt:{version:1,origin:pending.reviewOrigin,callId:pending.callId}} : {}),
         });
 
-        frame.evidenceEventIds = [...(frame.evidenceEventIds ?? []), toolEvent.id].slice(-100);
+        const previousIds = frame.evidenceEventIds ?? [];
+        if (previousIds.length >= reviewLimits.receipts) frame.evidenceWindowTruncated = true;
+        frame.evidenceEventIds = [...previousIds, toolEvent.id].slice(-reviewLimits.receipts);
         recordAssignmentEvidence(frame, pending.action, result, toolEvent.id, pending.verification);
         recordGoalEvidence(this.store,chatId,frame);
         // Install recommendations can originate from the architect as well.
@@ -1774,9 +1931,14 @@ export class Runtime {
   private observationEvidence(chatId:string,frame:Pick<Frame,'id'|'evidenceEventIds'|'assignment'>,reviewer?:Frame) {
     const ids=[...(frame.evidenceEventIds??[]),...(reviewer?.evidenceEventIds??[])];
     if(!ids.length || frame.assignment?.evidenceKind!=='observation')return false;
-    const events=this.store.db.prepare("SELECT id,data FROM events WHERE chat_id=? AND type='tool' AND json_extract(data,'$.agentId')=?").all(chatId,frame.id).map(row=>({id:Number(row.id),data:JSON.parse(String(row.data)) as {action?:Action;result?:ToolResult}}));
-    return events.length>0 && events.every(({data:event})=>!!event.action && readTools.has(event.action.name) && (!event.result || event.result.ok)) &&
-      events.some(event=>ids.includes(event.id) && event.data.result?.ok===true);
+    const limit=reviewLimits.receipts*2+2;
+    const events=this.store.db.prepare(
+      "SELECT id,CASE WHEN length(json_extract(data,'$.action.name'))<=64 THEN json_extract(data,'$.action.name') END AS action,"+
+      " json_type(data,'$.result') AS resultType,json_type(data,'$.result.ok') AS ok FROM events WHERE chat_id=? AND type='tool'"+
+      " AND CASE WHEN json_valid(data) THEN json_extract(data,'$.agentId')=? ELSE 0 END LIMIT ?",
+    ).all(chatId,frame.id,limit+1);
+    return events.length<=limit && events.every(event=>typeof event.action==='string' && readTools.has(event.action) && (!event.resultType || event.ok==='true')) &&
+      events.some(event=>ids.includes(Number(event.id)) && event.ok==='true');
   }
 
   private async completeGoal(chatId:string,state:RunState,frame:Frame,call:NativeToolCall,action:Action,signal:AbortSignal) {
@@ -1828,7 +1990,7 @@ export class Runtime {
     });
   }
 
-  private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot, admission?: {proposed: StoredPlan; rejection: () => string | undefined}):ToolResult {
+  private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,review?:CompletionReviewAdmission, admission?: {proposed: StoredPlan; rejection: () => string | undefined}):ToolResult {
     if(['submit_completion','review_result'].includes(action.name))this.skills.assertCertain(chatId);
     if(['submit_completion','review_result','delegate'].includes(action.name)) {
       const projectId=this.store.chat(chatId).projectId;
@@ -1901,13 +2063,29 @@ export class Runtime {
           const critic=this.frame('critic',[reviewMessage('independent',frame,String(action.args.focus))],String(action.args.focus));
           critic.assignment=frame.assignment;critic.reviewKind='independent';draft.frames.push(critic);break;
         }
-        case 'review_result':
-          resolve('Critic verdict recorded.');
-          if(reviewedScope) {
-            const parent=draft.frames.at(-2);
-            if(parent?.role==='coder' && parent.id===frame.reviewDelegationId)refreshAssignmentEvidence(parent,reviewedScope);
+        case 'review_result': {
+          const parent = draft.frames.at(-2);
+          const unbound = draft.planOnly || !parent?.assignment;
+          if (reviewReplan(action.args) && (frame.reviewKind !== 'completion' || unbound)) throw new Error('Replanning is available only for an exact executable completion review.');
+          if (frame.reviewKind === 'completion' && unbound) {
+            if (parent?.role !== 'coder' || frame.reviewDelegationId !== parent.id || parent.final===undefined || parent.pending) {
+              throw new Error('Original unbound review frame is unavailable.');
+            }
+            resolve('Completion has no executable assignment to accept.',{disposition:'unaccepted'});
+            const findings = (action.args.findings as string[]).slice(0,8).map(item=>boundedReviewText(item).slice(0,768));
+            this.store.event(chatId,'review',{reviewKind:'completion',passed:action.args.verdict==='pass',findings,disposition:'unaccepted',
+              reason:draft.planOnly?'plan_only':'assignment_unbound',evidenceStatus:'unavailable',delegationId:parent.id,planStep:parent.planStep});
+            draft.frames.splice(-2);
+          } else if (frame.reviewKind === 'completion') {
+            if (!review?.current(draft)) throw new Error('Completion review binding expired before commit.');
+            const disposition = this.finishCompletionReview(chatId,draft,frame,action,review);
+            resolve('Critic judgment recorded. Runtime disposition: '+disposition+'.',{disposition});
+          } else {
+            this.finishHistoricalReview(chatId,draft,action.args.verdict==='pass',action.args.findings as string[]);
+            resolve('Critic verdict recorded.');
           }
-          this.finishReviewInternal(chatId,draft,action.args.verdict==='pass',action.args.findings as string[],reviewedScope);break;
+          break;
+        }
         case 'submit_completion': {
           const summary=String(action.args.summary);
           if(!frame.messages.at(-1)?.content)this.store.message(chatId,frame.role,summary,{agentId:frame.id});
@@ -1916,11 +2094,13 @@ export class Runtime {
             frame.final=summary;
             this.store.progress(chatId,frame.planStep,frame.id,'in_progress','reviewing','Coder reported completion; independent review is pending.');
             const critic=this.frame('critic',[reviewMessage('completion',frame,'Review this completed coder task before accepting it.')],frame.objective);
-            critic.assignment=frame.assignment;critic.reviewKind='completion';critic.reviewDelegationId=frame.id;draft.frames.push(critic);
+            critic.assignment=frame.assignment;critic.reviewKind='completion';critic.reviewDelegationId=frame.id;
+            critic.reviewOrigin=this.reviewOrigin(chatId,draft,frame);
+            draft.frames.push(critic);
           } else if(goalOf(this.store,chatId)?.status !== 'completed' && goalOf(this.store,chatId) && !draft.planOnly) {
             frame.messages.push({role:'user',content:'Frame completion does not complete this durable goal. Continue remaining required scope, or use request_goal_completion with current goal/plan/mode revisions and recorded accepted reviews.'});
           } else {
-            if(draft.frames.length===1&&!draft.planOnly&&this.queue?.owns(chatId,draft)){const event=this.store.event(chatId,'queue_native_acceptance',{rootId:frame.id,callId:call.id});this.queue?.accepted(chatId,draft,frame.id,call.id,{kind:'native-root',eventId:event.id,callId:call.id});}
+            if(!draft.planOnly&&this.queue?.canAccept(chatId,draft,frame.id)){const event=this.store.event(chatId,'queue_native_acceptance',{rootId:frame.id,callId:call.id});this.queue?.accepted(chatId,draft,frame.id,call.id,{kind:'native-root',eventId:event.id,callId:call.id});}
             draft.frames.pop();
           }
           break;
@@ -1932,89 +2112,130 @@ export class Runtime {
     return {ok:true,output:'Control transition committed.',...(paused?{data:'pause'}:{})};
   }
 
-  private finishReviewInternal(chatId: string, state: RunState, passed: boolean, findings: string[],reviewedScope?:ScopeSnapshot) {
-    this.processes.assertQuiescent(this.store.chat(chatId).projectId);
-    const reviewer = state.frames.pop();
+  private finishHistoricalReview(chatId: string, state: RunState, passed: boolean, findings: string[]) {
+    const reviewer = state.frames.pop()!;
     const parent = state.frames.at(-1);
-
-    const reviewEvent = this.store.event(chatId, 'review', { passed, findings, delegationId: reviewer?.reviewDelegationId, planStep: parent?.planStep, reviewKind: reviewer?.reviewKind ?? 'completion', evidenceEventIds: [...(parent?.evidenceEventIds ?? []), ...(reviewer?.evidenceEventIds ?? [])] });
-
-    this.store.message(
-      chatId,
-      'critic',
-      `${passed ? 'Review passed' : 'Changes requested'}${findings.length ? `:\n${findings.join('\n')}` : '.'}`,
-    );
-
-    if (reviewer?.reviewKind === 'checkpoint') {
-      if (!passed && parent) this.store.progress(chatId,parent.planStep,parent.id,'blocked','checkpoint_changes_requested',findings.join('\n').slice(0,2000),reviewEvent.id);
-      parent?.messages.push(checkpointFeedback(passed, findings));
-
-      return;
-    }
-
-    if (parent?.role === 'coder') {
-      recordGoalEvidence(this.store,chatId,parent);
-      const processBlockers=this.processes.blockers(this.store.chat(chatId).projectId,parent.id);
-      const blockers = [...assignmentBlockers(parent),...processBlockers];
-      const goal=goalOf(this.store,chatId), binding=parent.assignment?.goal;
-      const goalBound=!!goal && goal.status!=='completed' && binding?.goalId===goal.id && binding.goalRevision===goal.revision && !!parent.planStep;
-      const observation=parent.assignment?.evidenceKind==='observation' && this.observationEvidence(chatId,parent,reviewer);
-      if(parent.assignment?.evidenceKind==='observation' && !observation)blockers.push('Observation-only acceptance is disqualified by missing/failed read evidence or an attempted effect. Request a workspace assignment if current source verification is needed.');
-      if(binding && (!goalBound || !observation && reviewedScope?.status!=='observed'))blockers.push('Goal assignment binding or observed workspace scope is missing/stale.');
-      // The critic's raw verdict remains in its review event. Runtime acceptance
-      // cannot turn recorded failures/uncertainty into successful verification.
-      const matching = reviewer?.reviewDelegationId === parent.id && parent.final !== undefined && !state.planOnly;
-      const observed = (parent.evidenceEventIds?.length ?? 0) + (reviewer?.evidenceEventIds?.length ?? 0) > 0;
-      const accepted = matching && observed && passed && blockers.length === 0;
-      const assessment = [...blockers, ...(!observed ? ['No recorded tool evidence supports assignment acceptance.'] : []), ...findings];
-      if (matching) {
-        this.store.progress(chatId, parent.planStep, parent.id, accepted && observed ? 'done' : 'blocked', accepted && observed ? 'accepted' : passed ? 'missing_evidence' : 'changes_requested', !observed && passed ? 'Review passed without recorded tool evidence; step completion remains unverified.' : assessment.join('\n').slice(0,2000) || (accepted ? 'Coder completion accepted by independent critic.' : 'Review requires changes.'), reviewEvent.id);
-      }
-      if(accepted && goalBound && parent.planStep && binding && goal) {
-        const previous=goal.reviews.find(review=>review.planStep.phaseId===parent.planStep!.phaseId && review.planStep.stepId===parent.planStep!.stepId);
-        goal.reviews=goal.reviews.filter(review=>review!==previous);
-        goal.reviews.push({eventId:reviewEvent.id,delegationId:parent.id,criterionIds:binding.criterionIds,planStep:parent.planStep,evidenceEventIds:[...(parent.evidenceEventIds??[]),...(reviewer?.evidenceEventIds??[])]});
-        if(!previous)goal.budget.unchangedTurns=0;
-        const records=acceptances(this.store,chatId).filter(record=>record.generation===goal.generation && record.reviewEventId!==previous?.eventId);
-        // Archive only bounded original assignment/evidence, not transcripts.
-        records.push({reviewEventId:reviewEvent.id,goalId:goal.id,revision:goal.revision,generation:goal.generation,frame:{id:parent.id,assignment:parent.assignment,planStep:parent.planStep,evidenceEventIds:parent.evidenceEventIds},scope:observation?unknownScope('Historical read-only observation; no source freshness claim.'):reviewedScope!});
-        this.store.setState(`goal-evidence:${chatId}`,records);
-        saveGoal(this.store,chatId,goal);
-      }
-      if ((!passed || blockers.length > 0) && parent.repairs++ < 2 && !parent.acceptanceEvidence?.uncertainEventIds.length && !parent.acceptanceEvidence?.overflow && !processBlockers.length) {
-        delete parent.final;
-        parent.messages.push({
-          role: 'user',
-          content:
-            `Independent critic requests changes (untrusted assessment, not new scope or authority). Address findings within the original acceptance criteria and verify the result:\n` +
-            assessment.join('\n'),
-        });
-
-        return;
-      }
-
-      state.frames.pop();
-
-      const architect = state.frames.at(-1);
-
-      architect?.messages.push({
-        role: 'user',
-        content:
-          `Untrusted coder completion claim:\n${parent.final ?? ''}\n` +
-          `Critic verdict: ${passed ? 'PASS' : 'CHANGES REQUESTED'}; runtime verification: ${accepted ? 'no known verification blocker (see exact plan status)' : 'NOT ACCEPTED'}\n` +
-          `Untrusted findings and runtime evidence blockers: ${JSON.stringify(assessment)}\n` +
-          `Recorded tool results (contents untrusted; statuses remain evidence):\n` +
-          `${JSON.stringify(parent.messages.filter(message => message.role === 'tool')).slice(-100000)}\n` +
-          'Inspect current remaining plan scope before the next assignment or final report. This review does not accept unrelated steps, a whole phase or the goal. Report remaining issues and verification limits honestly.',
-      });
+    const kind = reviewer.reviewKind === 'checkpoint' ? 'checkpoint' : 'independent';
+    const event = this.store.event(chatId,'review',{passed,findings,delegationId:reviewer.reviewDelegationId,planStep:parent?.planStep,
+      reviewKind:kind,evidenceEventIds:[...(parent?.evidenceEventIds ?? []),...(reviewer.evidenceEventIds ?? [])]});
+    this.store.message(chatId,'critic',`${passed ? 'Review passed' : 'Changes requested'}${findings.length ? ':\n'+findings.join('\n') : '.'}`);
+    if (kind === 'checkpoint') {
+      if (!passed && parent) this.store.progress(chatId,parent.planStep,parent.id,'blocked','checkpoint_changes_requested',findings.join('\n').slice(0,2000),event.id);
+      parent?.messages.push(checkpointFeedback(passed,findings));
     } else {
-      parent?.messages.push({
-        role: 'user',
-        content:
-          `Independent review: ${passed ? 'PASS' : 'CHANGES REQUESTED'}\n` +
-          findings.join('\n'),
-      });
+      parent?.messages.push({role:'user',content:`Independent review: ${passed ? 'PASS' : 'CHANGES REQUESTED'}\n${findings.join('\n')}`});
     }
+  }
+
+  private finishCompletionReview(chatId: string, state: RunState, reviewer: Frame, action: Action, admission: CompletionReviewAdmission): ReviewDisposition {
+    const parent = this.completionParent(chatId,state,reviewer);
+    if (!parent) throw new Error('The original completion review is no longer current.');
+    const chat = this.store.chat(chatId), {scope} = admission;
+    this.store.assertCheckpointSafe(chat.projectId);
+    this.processes.assertQuiescent(chat.projectId);
+    const pendingApproval = this.store.db.prepare(
+      "SELECT 1 FROM approvals WHERE chat_id=? AND json_extract(data,'$.status')='pending' AND json_extract(data,'$.agentId') IN (?,?) LIMIT 1",
+    ).get(chatId,parent.id,reviewer.id);
+    if (pendingApproval) {
+      throw new Error('An original approval is still pending. Resolve it before recording a review.');
+    }
+    if (scope) refreshAssignmentEvidence(parent,scope);
+    const evidence = this.collectReviewEvidence(chatId,state,parent,reviewer);
+    let files: ReviewFileObservation = {files:[]}, currentWorkspace = false;
+    if (admission.workspaceIdentity) {
+      try {
+        const root = this.planningWorkspace(chatId);
+        currentWorkspace = root.identity === admission.workspaceIdentity;
+        if (currentWorkspace) files = recheckReviewFiles(root,admission.files,filename=>this.guardReviewFile(chatId,root.path,filename));
+      } catch { nativeStorageActive(); }
+    }
+    const currentFiles = currentReceiptFiles(evidence.receipts,files,this.store,chat.projectId,chatId);
+    const currentCheck = (receipt: typeof evidence.receipts[number]) => {
+      if (receipt.role!=='coder' || receipt.legacy || receipt.tool!=='run_tests' || scope?.status!=='observed') return false;
+      const check = parent.acceptanceEvidence?.checks.find(item=>item.eventId===receipt.id);
+      return !!check && check.scopeDigest===scope.digest;
+    };
+    const observationEvidence = parent.assignment?.evidenceKind==='observation' && this.observationEvidence(chatId,parent,reviewer);
+    const observed = evidence.receipts.filter(receipt=>currentFiles.has(receipt.id) ||
+      receipt.status==='succeeded' && receipt.check==='passed' && receipt.report==='passed' && currentCheck(receipt) ||
+      observationEvidence && receipt.status==='succeeded' && receipt.directory);
+    const passed = action.args.verdict==='pass', replan = reviewReplan(action.args);
+    const rawFindings = action.args.findings as string[];
+    const findings = rawFindings.slice(0,8).map(item=>boundedReviewText(item).slice(0,768));
+    const processBlockers = this.processes.blockers(chat.projectId,parent.id);
+    const blockers = [...assignmentBlockers(parent),...processBlockers];
+    const goal = goalOf(this.store,chatId), binding = parent.assignment?.goal;
+    const goalBound = !!goal && goal.status!=='completed' && binding?.goalId===goal.id && binding.goalRevision===goal.revision && !!parent.planStep;
+    const goalUncertain = goal && (goal.uncertaintyOverflow || goal.evidenceOverflow || unresolvedGoalEvents(this.store,chatId,goal).length>0);
+    const correlatedUncertainty = evidence.receipts.some(receipt=>receipt.status==='uncertain');
+    const nonRepairable = !!(processBlockers.length || parent.acceptanceEvidence?.uncertainEventIds.length || parent.acceptanceEvidence?.overflow ||
+      goalUncertain || evidence.incomplete || correlatedUncertainty);
+    const observation = observationEvidence && observed.some(receipt=>receipt.role==='coder');
+    if (parent.assignment?.evidenceKind==='observation' && !observation) {
+      blockers.push('Observation-only acceptance requires successful current read evidence and no attempted effect.');
+    }
+    if (binding && (!goalBound || !observation && scope?.status!=='observed')) blockers.push('Goal assignment binding or observed workspace scope is missing/stale.');
+    if (goalUncertain) blockers.push('Goal uncertainty or evidence overflow remains unresolved.');
+    if (evidence.incomplete) blockers.push('Original receipt coverage is incomplete or exceeded its bound.');
+    if (!observed.length) blockers.push('No correlated current tool evidence supports assignment acceptance.');
+    if (correlatedUncertainty && !parent.acceptanceEvidence?.uncertainEventIds.length) blockers.push('A correlated tool outcome is uncertain.');
+    if (replan && (!currentWorkspace || nonRepairable || binding && !goalBound || !replan.evidenceEventIds.every(id=> {
+      const receipt = evidence.receipts.find(item=>item.id===id);
+      return receipt && isReplanReceipt(receipt,currentFiles,currentCheck(receipt));
+    }))) {
+      throw new Error('Replanning requires current exact receipts and a quiescent original assignment. Inspect retained evidence and retry the review.');
+    }
+
+    const accepted = passed && blockers.length===0;
+    const repairable = !nonRepairable && (!passed || blockers.length > (observed.length ? 0 : 1));
+    const disposition: ReviewDisposition = accepted ? 'accepted' : replan ? 'replan' :
+      repairable && parent.repairs<2 ? 'local_repair' : 'unaccepted';
+    const reason = accepted ? 'verified_assignment' : replan ? replan.reason :
+      disposition==='local_repair' ? 'within_assignment' : nonRepairable ? 'review_blocked' :
+      repairable ? 'repair_budget_exhausted' : 'missing_current_evidence';
+    const evidenceStatus = !observed.length ? 'unavailable' : evidence.incomplete || blockers.length ? 'partial' : 'observed';
+    const evidenceEventIds = observed.map(receipt=>receipt.id);
+    const assessment = boundedReviewText([...blockers,...findings].join('\n')) ||
+      (accepted ? 'Coder completion accepted for this assignment.' : 'Review requires changes.');
+
+    recordGoalEvidence(this.store,chatId,parent);
+    if (disposition==='replan' || disposition==='unaccepted') {
+      this.queue?.failed(chatId,'Delegated work remains unaccepted. Inspect the retained review before admitting another task.');
+    }
+    const event = this.store.event(chatId,'review',{passed,findings,findingsOmitted:rawFindings.length-findings.length,
+      delegationId:parent.id,planStep:parent.planStep,reviewKind:'completion',evidenceEventIds,disposition,reason,evidenceStatus,
+      ...(replan ? {replan} : {})});
+    this.store.message(chatId,'critic',`Critic judgment: ${passed ? 'PASS' : 'CHANGES REQUESTED'}. Runtime disposition: ${disposition}.\n${assessment}`);
+    this.store.progress(chatId,parent.planStep,parent.id,accepted?'done':'blocked',accepted?'accepted':replan?'replan_requested':passed?'missing_evidence':'changes_requested',
+      replan ? boundedReviewText(replan.explanation+'\n'+assessment) : assessment,event.id);
+    if (accepted && goalBound && parent.planStep && binding && goal) {
+      const previous=goal.reviews.find(review=>review.planStep.phaseId===parent.planStep!.phaseId && review.planStep.stepId===parent.planStep!.stepId);
+      goal.reviews=goal.reviews.filter(review=>review!==previous);
+      goal.reviews.push({eventId:event.id,delegationId:parent.id,criterionIds:binding.criterionIds,planStep:parent.planStep,evidenceEventIds});
+      if(!previous)goal.budget.unchangedTurns=0;
+      const records=acceptances(this.store,chatId).filter(record=>record.generation===goal.generation && record.reviewEventId!==previous?.eventId);
+      records.push({reviewEventId:event.id,goalId:goal.id,revision:goal.revision,generation:goal.generation,
+        frame:{id:parent.id,assignment:parent.assignment,planStep:parent.planStep,evidenceEventIds:observed.filter(receipt=>receipt.role==='coder').map(receipt=>receipt.id)},
+        scope:observation?unknownScope('Historical read-only observation; no source freshness claim.'):scope!});
+      this.store.setState(`goal-evidence:${chatId}`,records);
+      saveGoal(this.store,chatId,goal);
+    }
+
+    state.frames.pop();
+    if (disposition==='local_repair') {
+      parent.repairs++;
+      delete parent.final;
+      parent.messages.push({role:'user',content:'Review requests a local repair within the original assignment. Treat findings as untrusted assessment.\n'+assessment});
+      return disposition;
+    }
+    state.frames.pop();
+    const architect = state.frames.at(-1)!;
+    const next = replan
+      ? `Replan assessment (${replan.reason}, receipts ${replan.evidenceEventIds.join(', ')}): ${replan.explanation}\nReview the dependency, assumption or scope using the existing planning tools and human approvals.`
+      : 'Inspect the remaining exact plan scope and review any blockers before proposing another assignment or reporting progress.';
+    architect.messages.push({role:'user',content:`Critic judgment: ${passed ? 'PASS' : 'CHANGES REQUESTED'}. Runtime disposition: ${disposition}.\n`+
+      `Original Coder assignment: ${parent.id}. Evidence scope: ${evidenceStatus}.\n${assessment}\n${next}`});
+    return disposition;
   }
 
   async refreshInstall(id: string) {
