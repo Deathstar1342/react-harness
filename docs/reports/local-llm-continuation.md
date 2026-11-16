@@ -53,6 +53,8 @@ The assigned checkout started clean, with the published source/tree and matching
 
 ## Implementation and verification handoff
 
+The acknowledgement-loss correction below supersedes this earlier integration candidate.
+
 Tested source [`e665fddae77fa5fca97c2277844b798ea219849a`](https://github.com/Deathstar1342/react-harness/commit/e665fddae77fa5fca97c2277844b798ea219849a) has tree `97fc1e09405f5366692cbbe4c41e9fcb47e98c58` on `codex/local-llm-continuation`. This handoff changes only this report from that source. Coordinator review and integrated exact-main gates remain separate.
 
 ### Behavior
@@ -82,3 +84,28 @@ All six required workflows passed on attempt 1. The ordered comparison with the 
 All nine fresh archives passed authenticated GitHub source, digest and size verification, safe unique regular membership and full CRC. The semantic audit passed 23 existing checks plus the four continuation journeys and compiled continuation module. The full Windows archive `14282581909` has SHA-256 `bc189db606a356e1b89e32dd57db0b6058a8c14d2e6d5e66d8f015f3504a54cc`. It contains 10,411 exact members and 10,410 verified manifest hashes covering 587,899,768 uncompressed bytes, including exact library lock, image provenance, 42 copied Git blobs and the compiled continuation module. Desktop archives are `14282081228` and `14282551222`. Support archives are `14282935966` and `14282895943`. Container archive is `14281278893`. Linux Source archives are `14281149304` and `14282851610`, and relocated Windows evidence is `14282431787`.
 
 The separate [Installer candidates run](https://github.com/Deathstar1342/react-harness/actions/runs/43978036205) failed and remains held under M21. The hosted evidence covers the existing connected Linux controller and worker, both hosted renderer paths, the exported Linux lifecycle, and relocated Windows payload smoke. The continuation journeys use controlled model replies. Live endpoint, GPU, physical Windows Docker, device or human acceptance, Phase 5, installer and release remain outside this delivery.
+
+## Checked Resume acknowledgement-loss correction
+
+The earlier `e665fdd` handoff exposed a stale-cache regression in independent review. A controlled error after real SQLite committed Resume left generation 2 and a consumed Resume receipt. A separate Pause in the same Runtime then wrote cached generation 1 over the durable generation. The original failure and receipt remain preserved.
+
+The corrected source [`178c5dd84bda028d2b6cdf38272e1c118bba2c13`](https://github.com/Deathstar1342/react-harness/commit/178c5dd84bda028d2b6cdf38272e1c118bba2c13) has tree `84565bd81ba23a0766dfc1a2e0e603664710d707`. The implementation diff changes only Runtime and its SQLite continuation test from the previous handoff. This correction handoff changes only this report.
+
+When the checked Resume transition throws, Runtime drops the cached run and its transient Coder context, then propagates the original error. The next existing human control reloads the durable state. This path issues no repair transaction or launch. The pre-COMMIT veto retains the original paused interruption. A lost post-COMMIT acknowledgement leaves the saved Resume consumed. The corrected independent reproduction read generations 1, 2 and 2 before Resume, after the committed Resume and after Pause, with zero additional provider calls. The regression also checks the original receipt and interruption identities, duplicate rejection in the live Runtime, a fresh Pause, and SQLite reopen with zero provider and worker calls. The earlier failed and corrected reproductions are retained separately.
+
+Fresh Windows checks used the existing physical D: Node 24.19.0 and matching dependency closure. Both typechecks and fresh web and Electron builds passed. The full suite passed **1,283 tests with 47 platform skips**. The unchanged checkpoint test measured 4,190,635 SQLite bytes at 547 ms. Chrome and sandboxed Electron both passed the checked Resume journey on the corrected SHA. The directed continuation, native observer, queue, goal, Store and orchestration run passed 189 tests. Fresh Linux Validate passed **1,323 tests with seven skips**.
+
+| Required workflow | Run | Exact correction jobs |
+| --- | --- | --- |
+| [Validate](https://github.com/Deathstar1342/react-harness/actions/runs/43981947510) | 43981947510 | 133700367118 |
+| [Desktop](https://github.com/Deathstar1342/react-harness/actions/runs/43981947627) | 43981947627 | 133700367505, 133700367725 |
+| [Private support runtime](https://github.com/Deathstar1342/react-harness/actions/runs/43981947572) | 43981947572 | 133700366897, 133700367332 |
+| [Privileged helper](https://github.com/Deathstar1342/react-harness/actions/runs/43981947575) | 43981947575 | 133700367270 |
+| [Container foundation](https://github.com/Deathstar1342/react-harness/actions/runs/43981947518) | 43981947518 | 133700366865 |
+| [Guided Source Desktop](https://github.com/Deathstar1342/react-harness/actions/runs/43981947649) | 43981947649 | 133700367253, 133700367790, 133703425740 |
+
+All six fresh workflows passed on attempt 1. The exact Git workflow comparison verified ten jobs and 122 ordered declared steps, with 99 applicable successes and 23 expected skips, plus job boundaries. All nine fresh archives passed source, published digest and size, safe unique membership and full CRC checks. The semantic audit covered 23 existing checks and all four hosted Chrome/Electron continuation receipts, including zero Recovery mutations and no renderer errors.
+
+The complete Windows payload archive `14282604570` has SHA-256 `b6b4b623fb1b18bee8fa1a7f808b97ba9df52aa8485f9f489894e599ec89c32d`, 10,411 exact members and 10,410 verified manifest hashes covering 587,900,490 uncompressed bytes. The archive audit verified the lock, runtime image provenance, 42 copied Git blobs and the compiled continuation module. The packaged Runtime matched the fresh exact-source local build after normalizing line endings, including the acknowledgement-loss fix. The other archives are Desktop `14284190335` and `14283661570`, support `14283676393` and `14283691169`, Container `14283771786`, Linux Source `14283986238` and `14284215863`, and relocated Windows `14283438302`.
+
+The separate [Installer candidates run](https://github.com/Deathstar1342/react-harness/actions/runs/43981947665) failed under the existing M21 hold. The feature awaits coordinator integration and independent exact-main validation. The existing controlled-provider and device acceptance limits apply.
