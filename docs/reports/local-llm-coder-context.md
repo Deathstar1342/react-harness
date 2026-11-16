@@ -90,3 +90,25 @@ Tested source [`29ecf856781af8aa2051cf4f54bf9a3753c07a09`](https://github.com/De
 GitHub listed nine artifact IDs with positive sizes, published SHA-256 values and the exact source SHA. Archive and semantic auditing remain for the coordinator. The separately triggered [Installer candidates](https://github.com/Deathstar1342/react-harness/actions/runs/43934148224) workflow failed under the existing M21 hold. It is outside the six required workflows.
 
 The Coder-specific boundary fixtures used a hard-link substitution, lease conflict and native identity failure. A dedicated live same-device bind insertion during Coder preparation was outside those fixtures. Actual container and desktop results above are CI execution evidence. Provider behavior, source quality and estimates came from controlled fixtures. Local inference, GPU fit, physical workstation acceptance and release remain separate.
+
+## Recovery envelope correction and handoff
+
+The independent review held first candidate `29ecf85` on a concrete Recovery regression. The original 54-step, 100,431-byte outline returned all 54 entries. With eight bounded task annotations, the same Plan occupied 142,191 bytes and the former raw read returned no plan and zero entries. The original candidate, `730f575` report, CI receipts, and failing replay are retained.
+
+Corrected tested source [`1cb78c761f0329123a5e237c42b683ad6ef05aa8`](https://github.com/Deathstar1342/react-harness/commit/1cb78c761f0329123a5e237c42b683ad6ef05aa8) has tree `770703c0f58471cf330141cfa025e1bd2d482bf7`. This handoff differs from that source only in this report.
+
+- Recovery and Inspector now read through one bounded SQLite Plan reader. The query checks original row bytes, individual task bytes, aggregate task bytes and the old outline budget before decoding. The decoder checks strict JSON, rejects ambiguous keys and malformed v1 annotations, and strips the private task metadata before returning the outline. Annotated rows use the existing Store serialization. The Recovery 128 KiB and 100-step limits and Inspector 8 KiB and evidence limits still apply. The original Plan remains the only ledger.
+- Replaying the coordinator's exact disk-SQLite case returned all 54 entries at both revisions. The corrected annotated read reported zero unavailable plan records. Regression cases preserved original progress event and goal correlations, rejected changed event revisions, malformed and duplicate keys, noncanonical annotation envelopes, both metadata overruns and genuinely oversized old outlines. The SQL rejection tests proved the decoder was never invoked for oversized evidence. Recovery observation left all logical database rows unchanged.
+- On Windows Node v24.19.0, the corrected source passed both typechecks, both builds, all 177 focused tests, and the full suite with 1,255 passed and 47 skipped. Linux Validate passed 1,295 and skipped seven. The first-candidate failure receipt and corrected replay and test logs remain in the worktree's ignored receipt directory.
+- All six required workflows passed on attempt 1. The exact-source audit checked 10 jobs and 118 ordered declared steps, with 97 applicable successes and 21 expected skips. The artifact IDs below were verified against the corrected SHA, positive published sizes and published SHA-256 values. Download and semantic auditing remain with the coordinator.
+
+| Corrected exact-source workflow | Jobs | GitHub-listed artifacts |
+| --- | --- | --- |
+| [Validate](https://github.com/Deathstar1342/react-harness/actions/runs/43937902211) | 133547264947 | |
+| [Desktop validation](https://github.com/Deathstar1342/react-harness/actions/runs/43937902202) | 133547264969, 133547265559 | 14260922127, 14262211722 |
+| [Privileged helper](https://github.com/Deathstar1342/react-harness/actions/runs/43937902404) | 133547265675 | |
+| [Private desktop support runtime](https://github.com/Deathstar1342/react-harness/actions/runs/43937902298) | 133547264547, 133547265612 | 14260444808, 14262051829 |
+| [Container foundation](https://github.com/Deathstar1342/react-harness/actions/runs/43937902342) | 133547265319 | 14261517051 |
+| [Guided container source desktop](https://github.com/Deathstar1342/react-harness/actions/runs/43937902290) | 133547264675, 133547265378, 133550163352 | 14261517006, 14262291687, 14261292182, 14261157318 |
+
+The separate [Installer candidates](https://github.com/Deathstar1342/react-harness/actions/runs/43937902367) workflow failed and remains under the M21 hold. The coordinator owns integration and fresh exact-main validation.
