@@ -599,22 +599,35 @@ export class Runtime {
         throw continuationConflict(error instanceof Error ? error.message : 'Current workspace evidence is unavailable.');
       }
       let history:ReturnType<typeof assertContinuationEvidence>=[];
-      this.commitRunTransition(chatId,current(),draft=>{
-        current();
-        if(this.continuationWorkspace(chatId).identity!==workspace || this.continuationSettingsBinding()!==providerConfig)
-          throw continuationConflict('Workspace identity or provider settings changed.');
-        history=assertContinuationEvidence(this.store,chatId,draft);
-        const interruption=draft.continuationControl!.eventId;
-        draft.generation++;
-        draft.steps=0;
-        const coder=draft.frames.at(-1)!;
-        coder.proseTurns=0;
-        for(const check of coder.acceptanceEvidence?.checks??[])if(check.status==='passed')check.status='stale';
-        this.store.updateChat(chatId,{status:'running'});
-        recordContinuationControl(this.store,chatId,draft,'resume',interruption);
-        if(draft.continuationControl?.kind!=='resume')
-          throw continuationConflict('Exact resumed assignment could not be recorded.');
-      });
+      const interrupted=current();
+      try {
+        this.commitRunTransition(chatId,interrupted,draft=>{
+          current();
+          if(this.continuationWorkspace(chatId).identity!==workspace || this.continuationSettingsBinding()!==providerConfig)
+            throw continuationConflict('Workspace identity or provider settings changed.');
+          history=assertContinuationEvidence(this.store,chatId,draft);
+          const interruption=draft.continuationControl!.eventId;
+          draft.generation++;
+          draft.steps=0;
+          const coder=draft.frames.at(-1)!;
+          coder.proseTurns=0;
+          for(const check of coder.acceptanceEvidence?.checks??[])if(check.status==='passed')check.status='stale';
+          this.store.updateChat(chatId,{status:'running'});
+          recordContinuationControl(this.store,chatId,draft,'resume',interruption);
+          if(draft.continuationControl?.kind!=='resume')
+            throw continuationConflict('Exact resumed assignment could not be recorded.');
+        });
+      } catch(error) {
+        // SQLite may have committed before the acknowledgement failed. The next
+        // human control must read the durable run even if this one cannot launch.
+        const cached=this.runs.get(chatId);
+        if(cached) {
+          for(const frame of cached.frames)this.coderContexts.delete(frame);
+          this.repositoryOverviews.delete(cached);
+          this.runs.delete(chatId);
+        }
+        throw error;
+      }
       const live=this.load(chatId)!;
       const coder=live.frames.at(-1)!;
       this.coderContexts.set(coder,{key:this.coderContextKey(chatId,live,coder)});

@@ -421,6 +421,76 @@ it('preserves all rows on Recovery, stale, omitted and COMMIT-vetoed continuatio
   expect(continuationOf(t)?.precondition).toBe(second.precondition);
 });
 
+it('keeps the committed Resume generation after acknowledgement loss and a fresh Pause',async()=>{
+  const t=await fixture(true);
+  const interrupted=await pausedContinuation(t);
+  const runKey=`run:${t.chat.id}`;
+  const readRun=(store:Store)=>store.getState<RunState>(runKey,null!);
+  const generation=readRun(t.store).generation;
+  const requests=t.requests.length;
+  const executed=vi.spyOn(t.tools,'execute');
+  const processes=vi.spyOn(t.runtime.processes,'start');
+  const original=t.store.transaction.bind(t.store);
+  const lost=new Error('Controlled lost Resume COMMIT acknowledgement');
+  const transaction=vi.spyOn(t.store,'transaction').mockImplementation(work=>{
+    original(work);
+    expect(readRun(t.store).continuationControl?.kind).toBe('resume');
+    throw lost;
+  });
+  try {
+    await expect(t.runtime.control(t.chat.id,'resume',interrupted.precondition)).rejects.toBe(lost);
+  } finally { transaction.mockRestore(); }
+
+  const committed=readRun(t.store), receipt=committed.continuationControl!;
+  expect(committed.generation).toBe(generation+1);
+  expect(receipt).toMatchObject({kind:'resume',generation:committed.generation,
+    frameId:interrupted.frameId,interruptionEventId:interrupted.interruptionEventId});
+  expect(t.store.chat(t.chat.id).status).toBe('running');
+  await t.runtime.wait(t.chat.id);
+  const before=durableRows(t.store);
+  await expect(t.runtime.control(t.chat.id,'resume',interrupted.precondition)).rejects.toMatchObject({statusCode:409});
+  expect(durableRows(t.store)).toEqual(before);
+
+  await t.runtime.control(t.chat.id,'pause');
+  const paused=readRun(t.store), pausedReceipt=paused.continuationControl!;
+  expect(paused.generation).toBe(committed.generation);
+  expect(paused.frames.map(frame=>frame.id)).toEqual(committed.frames.map(frame=>frame.id));
+  expect(pausedReceipt).toMatchObject({kind:'pause',frameId:receipt.frameId,generation:receipt.generation});
+  expect(pausedReceipt.eventId).toBeGreaterThan(receipt.eventId);
+  expect(t.store.chat(t.chat.id).status).toBe('paused');
+  const events=t.store.events(t.chat.id).filter(event=>event.type==='task_continuation_control');
+  expect(events.map(event=>event.id)).toEqual([interrupted.interruptionEventId,receipt.eventId,pausedReceipt.eventId]);
+  expect(events.find(event=>event.id===receipt.eventId)?.data).toMatchObject({
+    kind:'resume',frameId:receipt.frameId,generation:receipt.generation,interruptionEventId:interrupted.interruptionEventId,
+  });
+  expect(t.requests).toHaveLength(requests);
+  expect(executed).not.toHaveBeenCalled();
+  expect(processes).not.toHaveBeenCalled();
+  await t.runtime.close();
+
+  const store=new Store(t.db), tools=new WorkspaceTools();
+  const complete=vi.fn(async()=>{throw Error('Reopening must run no provider');});
+  const provider:ModelProvider={models:async()=>[],complete};
+  store.recover();
+  const recovered=new Runtime(store,provider,tools,t.config,createManagedHooks(provider,store,t.config));
+  const reopenedExecute=vi.spyOn(tools,'execute');
+  const reopenedStart=vi.spyOn(recovered.processes,'start');
+  try {
+    await recovered.wait(t.chat.id);
+    expect(readRun(store)).toEqual(paused);
+    expect(store.chat(t.chat.id).status).toBe('paused');
+    expect(recoveryView(store,t.chat.id,recovered.continuationSettingsBinding()).continuation).toMatchObject({
+      status:'available',interruptionEventId:pausedReceipt.eventId,
+    });
+    const reopened=durableRows(store);
+    await expect(recovered.control(t.chat.id,'resume',interrupted.precondition)).rejects.toMatchObject({statusCode:409});
+    expect(durableRows(store)).toEqual(reopened);
+    expect(complete).not.toHaveBeenCalled();
+    expect(reopenedExecute).not.toHaveBeenCalled();
+    expect(reopenedStart).not.toHaveBeenCalled();
+  } finally {await recovered.close();await tools.dispose();store.close();}
+});
+
 it('consumes the committed interruption once when Resume requests race and at the next pause',async()=>{
   const t=await fixture(true);
   const initial=await pausedContinuation(t);
