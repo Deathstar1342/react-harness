@@ -28,7 +28,6 @@ const text = (max: number) =>
     .min(1)
     .max(max)
     .refine(value=>Buffer.byteLength(value)<=max,'UTF-8 byte limit exceeded')
-    .describe(`Nonblank string, at most ${max} UTF-8 bytes.`)
     .refine(value => value.trim().length > 0, 'Must not be blank');
 
 const path = text(PROTOCOL_LIMITS.pathCharacters).refine(
@@ -277,7 +276,7 @@ const descriptions: Record<string,string> = {
   process_status:'Observe an exact same-task process handle; optionally wait at most 1000 ms. Status cannot reconcile uncertainty or prove tests passed. Architects/critics can inspect only their current same-chat assignment evidence.',
   process_output:'Read up to 16000 retained UTF-8 output bytes using exact byte cursor, with base/end/next offsets and truncation. At most 64000 bytes retained. No process execution or replay.',
   cancel_process:'Stop only the requesting coder frame’s exact already-authorized process handle and await actual namespace cleanup. No additional approval; stop does not roll back effects or prove completion. Interrupted evidence conservatively blocks assignment acceptance.',
-  read_file_range:'Read 1–500 lines with a whole-file hash. Request fewer lines if output is too large. Use a returned planEvidenceCallId to cite those lines. Planning revalidation can cover up to 256 KiB of distinct source files per revision.',
+  read_file_range:'Read 1–500 lines, up to 64000 bytes, with whole-file SHA-256. planEvidenceCallId cites returned lines only.',
   search_page:'Page through bounded literal text matches. Continue using returned revision and nextOffset; a changed scope rejects the cursor. Incomplete means coverage was omitted or limits were reached, never proof of absence.',
   patch_file:'Apply ordered nonoverlapping original-file line intervals using a fresh whole-file baseHash. startLine is one-based, deleteCount counts complete lines, text is literal replacement including intended newline bytes. Insertion at EOF uses original line count + 1. Retains all other bytes.',
   maintain_instructions:'Architect maintenance of only canonical AGENTS.md files: ordered literal line patches for structure, commands, conventions and durable decisions. Preserve user guidance and keep live goals/progress in database. Fresh baseHash, editor leases and ordinary diff/approval checks apply. Planning may draft prose only.',
@@ -285,7 +284,7 @@ const descriptions: Record<string,string> = {
   rename_file:'Move a regular text file to an absent destination, using fresh source baseHash and protecting both editor leases. Exclusive destination creation then source removal prevents overwriting collisions; partial effects remain uncertain. Both paths must be in assignment scope.',
   request_goal_completion:'Request whole-goal completion using the exact current goal and plan revisions and recorded accepted review event IDs. Runtime checks all protected criteria/steps, current evidence and uncertainty. Claims, removed steps and critic PASS alone do not suffice. Must be last in a batch.',
   list_files:'List a confined project directory. Omit path for the root.',
-  read_file:'Read a project file and its current SHA-256 hash. Cite planEvidenceCallId when returned to the Architect. Use read_file_range if the result is truncated. A missing read cannot certify a proposed new file.',
+  read_file:'Read project UTF-8 and SHA-256. Cite planEvidenceCallId when returned. Use read_file_range for truncated output.',
   search:'Search bounded project text. Protected files are excluded.',
   write_file:'Replace a project file using its freshly observed SHA-256 baseHash, or null for a new file. Requires scope, lease, version and approval checks.',
   run_shell:'Run a potentially modifying command in the Linux project sandbox. Requires execution permission and may require approval; an uncertain outcome must not be replayed.',
@@ -293,8 +292,8 @@ const descriptions: Record<string,string> = {
   run_tests:'Run a potentially modifying test command and collect a fresh JUnit report. A command exit alone does not prove the report passed.',
   git_status:'Read confined Git status without hooks or credential access.',
   git_diff:'Read confined Git changes with protected paths excluded.',
-  inspect_new_plan_path:'Check that one confined proposed new file is currently absent. Use its original native call ID in set_plan admission. Existing, excluded, linked and uninspectable paths do not establish absence.',
-  set_plan:'Save plan structure with unique phase and step IDs. Structural changes need admission for every step, with current native read call IDs, explicit new-file observations, and test or inspection outcomes. An unchanged saved structure needs no admission. Must be last in a batch.',
+  inspect_new_plan_path:'Observe absence of a proposed new project file. Cite the returned planEvidenceCallId in set_plan.',
+  set_plan:'Save unique phase and step IDs. Include admission for new or revised steps, or a retained step for removal or reorder. Cite current read/absence IDs and observable checks. Unchanged plans are no-ops. Last in batch.',
   delegate:'Assign one coder a bounded objective, verifiable acceptance criteria and scoped paths. For related planned work bind planStep to exact current identities and revision; omit it for unrelated work. Must be last in a batch.',
   review:'Request an independent read-only review of a concrete focus. This does not accept unrelated plan steps or a whole phase. Must be last in a batch.',
   review_result:'Record a critic verdict with findings from actual files, diffs and verification. Checkpoint is not completion; PASS cannot override failed or uncertain execution, or grant OS/package authority. Must be last in a batch.',
@@ -340,5 +339,9 @@ export function parseToolArguments(name:string,args:string): Action {
   return validateAction({name,args:parseNativeJSON(args) as Record<string,unknown>});
 }
 export function publishedTools(role:ToolRole,mode:ChatMode='execute'): NativeToolDefinition[] {
-  return [...toolRegistry.values()].filter(d=>d.roles.includes(role)&&d.modes.includes(mode)).map(d=>({type:'function',function:{name:d.name,description:d.description,parameters:z.toJSONSchema(d.arguments) as Record<string,unknown>}}));
+  return [...toolRegistry.values()].filter(d=>d.roles.includes(role)&&d.modes.includes(mode)).map(d=>{
+    // The model sees the embedded schema, not a standalone dialect document.
+    const {$schema: _dialect, ...parameters} = z.toJSONSchema(d.arguments);
+    return {type:'function',function:{name:d.name,description:d.description,parameters}};
+  });
 }

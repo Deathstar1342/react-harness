@@ -1,4 +1,4 @@
-import type { Action, ToolResult } from '../shared/types.js';
+import type { Action, Plan, ToolResult } from '../shared/types.js';
 import {
   assertEmptyPlanningRoot, assertReconnaissanceRoot, declarationNames, emptyPlanningRoot,
   observePlanningPath, readPlanningFile, reconnaissanceLimits, reconnaissancePath,
@@ -64,29 +64,47 @@ export function planObservation(
   return {kind: action.name, path: relative, callId, binding, rootIdentity: root.identity, observation: after, hash: data.hash!, at: Date.now()};
 }
 
+const stepKey = (phaseId: string, stepId: string) => JSON.stringify([phaseId, stepId]);
+
+function requiredEvidence(previous: Plan, proposed: Plan) {
+  const prior = new Map(previous.phases.map(phase => [phase.id, {
+    title: phase.title, steps: new Map(phase.steps.map(step => [step.id,step.title])),
+  }]));
+  const required = new Set<string>(), present = new Set<string>();
+  for (const phase of proposed.phases) {
+    if (!phase.steps.length) throw new Error('Every saved phase needs at least one step. Discuss outlines in ordinary chat.');
+    const before = prior.get(phase.id);
+    for (const step of phase.steps) {
+      const key = stepKey(phase.id, step.id);
+      present.add(key);
+      if (!previous.id || before?.title !== phase.title || before.steps.get(step.id) !== step.title) required.add(key);
+    }
+  }
+  return {required, present};
+}
+
 export async function prepareAdmission(
   root: ReconnaissanceRoot,
-  phases: {id: string; steps: {id: string}[]}[],
+  previous: Plan,
+  proposed: Plan,
   steps: PlanStepAdmission[] | undefined,
   lookup: (callId: string) => { observation: PlanObservation; result: ToolResult } | undefined,
   signal: AbortSignal,
 ): Promise<() => void> {
   const end = performance.now() + reconnaissanceLimits.evidenceMs;
   return withinReconnaissance(reconnaissanceLimits.evidenceMs, signal, async budget => {
-    const expected = phases.flatMap(phase => phase.steps.map(step => JSON.stringify([phase.id, step.id])));
-    if (!expected.length || phases.some(phase => !phase.steps.length) || !steps || steps.length !== expected.length) {
-      throw new Error('Give every planned step source or new-file evidence and an observable check. Use ordinary chat to discuss a plan outline.');
+    const {required, present} = requiredEvidence(previous, proposed);
+    if (!steps?.length || steps.length < required.size) {
+      throw new Error('Give every new or revised step source or new-file evidence and an observable check. For a removal or reorder, cite a retained step.');
     }
-
-    const remaining = new Set(expected);
     const paths = new Map<string, {evidence: PlanObservation; content?: string}>();
     let references = 0;
     let remainingBytes: number = reconnaissanceLimits.evidenceBytes;
     let empty: string | undefined;
     for (const step of steps) {
-      if (!remaining.delete(JSON.stringify([step.phaseId, step.stepId]))) {
-        throw new Error('Planning evidence must identify each exact phase and step once.');
-      }
+      const key = stepKey(step.phaseId, step.stepId);
+      if (!present.delete(key)) throw new Error('Each evidence entry must identify an exact proposed phase and step once.');
+      required.delete(key);
       if (!step.sources.length && !step.newFiles.length) throw new Error('Inspect a relevant source or explicitly identify a proposed new file.');
       if (!step.sources.length) empty ??= await emptyPlanningRoot(root, budget);
       const stepPaths = new Map<string, 'file' | 'absent'>();
@@ -147,6 +165,8 @@ export async function prepareAdmission(
         throw new Error('Each step needs a test or inspection with an expected result and a source or proposed-file target in that step.');
       }
     }
+
+    if (required.size) throw new Error('Some new or revised steps have no evidence. Cite every changed step or split the revision.');
 
     return () => {
       signal.throwIfAborted();

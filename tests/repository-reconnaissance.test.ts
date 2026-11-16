@@ -211,6 +211,23 @@ it('admits multiple evidenced steps, including the dependency excerpt and a prop
   await expect(readFile(path.join(t.root,'widget.ts'))).rejects.toMatchObject({code:'ENOENT'});
 });
 
+it.each([true, false])('allows bounded additions to large plans and requires evidence for renamed retained steps, rename = %s', async rename => {
+  const t = await fixture();
+  await t.put('app.ts', source);
+  const prior = {id:'retained',title:'Ongoing work',steps:Array.from({length:18}, (_, index) => ({
+    id:'prior-' + index,title:'Existing step ' + index,status:'pending' as const,
+  }))};
+  const before = t.store.revisePlan(t.chat.id,{phases:[prior]});
+  const retained = structuredClone(prior);
+  if (rename) retained.steps[0].title = 'Reframed existing step';
+  const inspect = read(), proposal = plan([evidence(inspect)],[retained, ...phases]);
+  t.replies.push(inspect,proposal,done);
+  await t.run();
+  expect(resultOf(t.requests.at(-1)!,proposal).ok).toBe(!rename);
+  expect(t.store.plan(t.chat.id).version).toBe(rename ? before.version : before.version! + 1);
+  expect(t.store.plan(t.chat.id).phases[0].steps).toEqual(prior.steps);
+});
+
 it('rolls back a qualifying plan and success result when the SQLite COMMIT fails', async () => {
   const t = await fixture();
   await t.put('app.ts', source);

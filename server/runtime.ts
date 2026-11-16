@@ -689,7 +689,7 @@ export class Runtime {
       try {
         const root = this.planningWorkspace(chatId);
         const recorded = this.store.getState<PlanObservation[]>('plan:observations:' + chatId, []);
-        checkFiles = await prepareAdmission(root, proposed.phases, action.args.admission as PlanStepAdmission[] | undefined, callId => {
+        checkFiles = await prepareAdmission(root, previous, proposed, action.args.admission as PlanStepAdmission[] | undefined, callId => {
           const observation = recorded.find(item => item.callId === callId && item.binding === binding &&
             item.rootIdentity === root.identity);
           if (!observation) return;
