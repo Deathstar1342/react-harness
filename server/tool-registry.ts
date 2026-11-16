@@ -94,6 +94,11 @@ const planAdmission = z.array(z.strictObject({
   sources: z.array(planSource).max(8),
   newFiles: z.array(z.strictObject({path: text(1024), callId: id})).max(8),
   checks: z.array(z.strictObject({method: z.enum(['test','inspection']), target: text(1024), expected: text(600)})).min(1).max(4),
+  task: z.strictObject({
+    objective:text(600),
+    dependsOn:z.array(z.strictObject({phaseId:id,stepId:id})).max(4)
+      .refine(deps => new Set(deps.map(dep => JSON.stringify([dep.phaseId,dep.stepId]))).size === deps.length).optional(),
+  }).optional(),
 })).max(16);
 
 export const actionSchema = z.discriminatedUnion('name', [
@@ -169,6 +174,10 @@ export const actionSchema = z.discriminatedUnion('name', [
       reportPath: path.optional(),
       timeoutMs,
     }),
+  }),
+  z.strictObject({
+    name: z.literal('read_plan'),
+    args: z.strictObject({planId:id,planVersion:z.number().int().positive(),offset:z.number().int().min(0).max(5050)}),
   }),
   z.strictObject({
     name: z.literal('set_plan'),
@@ -293,7 +302,8 @@ const descriptions: Record<string,string> = {
   git_status:'Read confined Git status without hooks or credential access.',
   git_diff:'Read confined Git changes with protected paths excluded.',
   inspect_new_plan_path:'Observe absence of a proposed new project file. Cite the returned planEvidenceCallId in set_plan.',
-  set_plan:'Save unique phase and step IDs. Include admission for new or revised steps, or a retained step for removal or reorder. Cite read/absence IDs and observable checks. To clear an existing plan, use phases: []. Last in batch.',
+  read_plan:'Page the exact revision in order, including empty phases. Start at offset 0 and follow nextOffset until null.',
+  set_plan:'Replace the full ordered outline. Cite native reads/absence and observable checks on changed steps. Optional admission.task saves task metadata. Cite a retained step for reorder or removal. Use phases: [] to clear. Last in batch.',
   delegate:'Assign one coder a bounded objective, verifiable acceptance criteria and scoped paths. For related planned work bind planStep to exact current identities and revision; omit it for unrelated work. Must be last in a batch.',
   review:'Request an independent read-only review of a concrete focus. This does not accept unrelated plan steps or a whole phase. Must be last in a batch.',
   review_result:'Record a critic verdict with findings from actual files, diffs and verification. Checkpoint is not completion; PASS cannot override failed or uncertain execution, or grant OS/package authority. Must be last in a batch.',

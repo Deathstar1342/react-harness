@@ -5,17 +5,18 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Store } from '../server/store.js';
+import type { StoredPlan } from '../server/plan-tasks.js';
 import { Runtime, type RunState } from '../server/runtime.js';
 import { createApp } from '../server/app.js';
 import { readConfig } from '../server/config.js';
 import { roleInstructions } from '../server/prompts.js';
-import type { CompletionResult, Plan, PlanStepRef, ToolService } from '../shared/types.js';
+import type { CompletionResult, PlanStepRef, ToolService } from '../shared/types.js';
 
 const action = (name:string,args:Record<string,unknown>={}):CompletionResult=>(nativeReply(name,args));
 const final = ():CompletionResult=>(nativeReply('submit_completion',{summary:'Fixture conclusion'},'Fixture conclusion'));
 const pass = ()=>action('review_result',{verdict:'pass',findings:[]});
 const fail = ()=>action('review_result',{verdict:'changes_requested',findings:['Missing acceptance evidence']});
-const shape = ():Plan=>({phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement and verify',status:'pending'}]}]});
+const shape = ():StoredPlan=>({phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement and verify',status:'pending'}]}]});
 const cleanups:(()=>Promise<void>)[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const fn of cleanups.splice(0).reverse())await fn();});
 function fixture(filename=':memory:') {

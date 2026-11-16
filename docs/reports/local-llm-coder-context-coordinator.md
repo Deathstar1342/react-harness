@@ -1,0 +1,11 @@
+# Coder Context coordinator review
+
+Coder Context attaches a bounded advisory packet to a fresh planned Coder delegation. It uses current source within the assignment, identifies stale and omitted reads, and checks the live binding again before provider invocation. The existing revisioned SQLite Plan stores task references and checks without creating another ledger. The native tools remain available for further targeted inspection.
+
+Corrected tested source `1cb78c761f0329123a5e237c42b683ad6ef05aa8` has tree `770703c0f58471cf330141cfa025e1bd2d482bf7`. Published handoff `ddf3520b73f53407fc3a1ec115a9a973b6a78ca4` adds only the final [milestone report](local-llm-coder-context.md). The reviewed baseline is `a71098cc377d6110dfb2b1b34c68d59736acd5fe`.
+
+An independent disk-SQLite reproduction held the first candidate because adding eight valid task annotations to a 54-step plan hid all 54 steps in Recovery. The corrected reproduction returned all 54 step entries both before and after annotation, with zero unavailable Plan records. The SQL reader bounds the input and removes private task metadata before returning the legacy outline. Recovery and Inspector retain their existing outline and evidence limits. The original failed receipt and first candidate remain preserved.
+
+Independent Windows validation passed **1,255 tests with 47 platform skips**, both typechecks, and fresh web and Electron builds. The unchanged checkpoint limit passed at 4,188,401 returned bytes and 512 ms using the short verified fixture path. All six required exact-source workflows, ten jobs and 118 ordered steps passed (97 applicable successes and 21 expected skips). The nine artifacts passed independent integrity and semantic checks. Complete Windows artifact 14261292182 contains 10,408 exact members and 10,407 verified manifest hashes. All 42 copied Git files and the lock, source and image provenance matched. Selected Chrome, sandboxed Electron and connected worker screenshots were reviewed.
+
+Integration remains subject to fresh main CI and artifact acceptance. The context budget figures are harness estimates from controlled fixtures. Live local model and GPU performance remain unverified. M21 packaging remains held.

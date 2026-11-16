@@ -1,4 +1,5 @@
-import type { Action, Plan, ToolResult } from '../shared/types.js';
+import type { Action, PlanTaskCheck, PlanTaskDependency, ToolResult } from '../shared/types.js';
+import { taskIntent, taskLimits, type StoredPlan, type StoredPlanTask } from './plan-tasks.js';
 import {
   assertEmptyPlanningRoot, assertReconnaissanceRoot, declarationNames, emptyPlanningRoot,
   observePlanningPath, readPlanningFile, reconnaissanceLimits, reconnaissancePath,
@@ -12,7 +13,8 @@ export interface PlanStepAdmission {
   stepId: string;
   sources: PlanEvidenceReference[];
   newFiles: Pick<PlanEvidenceReference, 'path' | 'callId'>[];
-  checks: {method: 'test' | 'inspection'; target: string; expected: string}[];
+  checks: PlanTaskCheck[];
+  task?: {objective: string; dependsOn?: PlanTaskDependency[]};
 }
 export interface PlanObservation {
   binding: string;
@@ -64,20 +66,50 @@ export function planObservation(
   return {kind: action.name, path: relative, callId, binding, rootIdentity: root.identity, observation: after, hash: data.hash!, at: Date.now()};
 }
 
-const stepKey = (phaseId: string, stepId: string) => JSON.stringify([phaseId, stepId]);
+export const stepKey = (phaseId: string, stepId: string) => JSON.stringify([phaseId, stepId]);
 
-function requiredEvidence(previous: Plan, proposed: Plan) {
+export function prepareTaskProposal(previous: StoredPlan, proposed: StoredPlan, entries: PlanStepAdmission[] | undefined) {
+  const prior = new Map(previous.phases.flatMap(phase => phase.steps.map(step => [step.id, {phase,step}] as const)));
+  const nodes = new Set(proposed.phases.flatMap(phase => phase.steps.map(step => stepKey(phase.id,step.id))));
+  const updates = new Set<string>();
+  const taskEntries = new Map<string, PlanStepAdmission>();
+  for (const entry of entries ?? []) {
+    if (!entry.task) continue;
+    const key = stepKey(entry.phaseId, entry.stepId);
+    if (!nodes.has(key) || taskEntries.has(key)) throw new Error('Task metadata must identify an exact proposed phase and step once.');
+    if (entry.task.dependsOn?.some(dep => {
+      const target = stepKey(dep.phaseId,dep.stepId);
+      return target === key || !nodes.has(target);
+    })) throw new Error('Task dependencies must refer to other steps in the proposed plan.');
+    taskEntries.set(key,entry);
+  }
+  for (const phase of proposed.phases) for (const step of phase.steps) {
+    const old = prior.get(step.id);
+    const key = stepKey(phase.id,step.id);
+    const entry = taskEntries.get(key);
+    const oldTask = old?.step.task;
+    const sameStep = old?.phase.id === phase.id && old.phase.title === phase.title && old.step.title === step.title;
+    if (oldTask && !sameStep && !entry) throw new Error('Supply fresh task metadata when changing the definition of an annotated step.');
+    if (entry?.task && (!sameStep || !oldTask || taskIntent({...entry,...entry.task}) !== taskIntent(oldTask))) updates.add(key);
+    else if (oldTask) step.task = oldTask;
+  }
+  return updates;
+}
+
+function requiredEvidence(previous: StoredPlan, proposed: StoredPlan, updates: Set<string>) {
   const prior = new Map(previous.phases.map(phase => [phase.id, {
     title: phase.title, steps: new Map(phase.steps.map(step => [step.id,step.title])),
   }]));
   const required = new Set<string>(), present = new Set<string>();
   for (const phase of proposed.phases) {
-    if (!phase.steps.length) throw new Error('Every saved phase needs at least one step. Discuss outlines in ordinary chat.');
     const before = prior.get(phase.id);
+    if (!phase.steps.length && (!before || before.steps.size || before.title !== phase.title)) {
+      throw new Error('New or revised phases need at least one step. Discuss outlines in ordinary chat.');
+    }
     for (const step of phase.steps) {
       const key = stepKey(phase.id, step.id);
       present.add(key);
-      if (!previous.id || before?.title !== phase.title || before.steps.get(step.id) !== step.title) required.add(key);
+      if (!previous.id || before?.title !== phase.title || before.steps.get(step.id) !== step.title || updates.has(key)) required.add(key);
     }
   }
   return {required, present};
@@ -85,15 +117,18 @@ function requiredEvidence(previous: Plan, proposed: Plan) {
 
 export async function prepareAdmission(
   root: ReconnaissanceRoot,
-  previous: Plan,
-  proposed: Plan,
+  previous: StoredPlan,
+  proposed: StoredPlan,
   steps: PlanStepAdmission[] | undefined,
+  updates: Set<string>,
+  frameId: string,
   lookup: (callId: string) => { observation: PlanObservation; result: ToolResult } | undefined,
   signal: AbortSignal,
-): Promise<() => void> {
+): Promise<{checkFiles: () => void; tasks: Map<string, StoredPlanTask>}> {
   const end = performance.now() + reconnaissanceLimits.evidenceMs;
   return withinReconnaissance(reconnaissanceLimits.evidenceMs, signal, async budget => {
-    const {required, present} = requiredEvidence(previous, proposed);
+    const {required, present} = requiredEvidence(previous, proposed, updates);
+    const tasks = new Map<string, StoredPlanTask>();
     if (!steps?.length || steps.length < required.size) {
       throw new Error('Give every new or revised step source or new-file evidence and an observable check. For a removal or reorder, cite a retained step.');
     }
@@ -108,6 +143,14 @@ export async function prepareAdmission(
       if (!step.sources.length && !step.newFiles.length) throw new Error('Inspect a relevant source or explicitly identify a proposed new file.');
       if (!step.sources.length) empty ??= await emptyPlanningRoot(root, budget);
       const stepPaths = new Map<string, 'file' | 'absent'>();
+      const task: StoredPlanTask | undefined = updates.has(key) && step.task ? {
+        version:1, admittedAtPlanVersion:(previous.version ?? 0)+1,
+        objective:step.task.objective, ...(step.task.dependsOn?.length ? {dependsOn:step.task.dependsOn} : {}),
+        sources:[], newFiles:[], checks:step.checks,
+      } : undefined;
+      if (task && step.sources.length + step.newFiles.length > taskLimits.references) {
+        throw new Error('A task can store up to eight source or new-file references.');
+      }
 
       for (const [kind, inputs] of [['file', step.sources], ['absent', step.newFiles]] as const) {
         for (const reference of inputs as PlanEvidenceReference[]) {
@@ -158,17 +201,32 @@ export async function prepareAdmission(
               reference.excerpt && !disclosed.includes(reference.excerpt)) {
             throw new Error('The requested declaration-like name or excerpt was outside the delivered source. Read the relevant lines of ' + JSON.stringify(filename) + '.');
           }
+          if (task) {
+            const receipt = {path:filename,callId:reference.callId,frameId};
+            if (kind === 'absent') {
+              if (task.newFiles.some(file => file.path === filename)) throw new Error('Duplicate planned-new task reference.');
+              task.newFiles.push(receipt);
+            } else {
+              const startLine = read.startLine ?? 1;
+              const lineCount = disclosed.match(/[^\n]*\n|[^\n]+$/g)?.length ?? 0;
+              if (task.sources.some(source => source.path === filename && source.startLine === startLine && source.lineCount === lineCount && source.symbol === reference.symbol)) {
+                throw new Error('Duplicate task source span.');
+              }
+              task.sources.push({...receipt,hash:entry.observation.hash!,startLine,lineCount,...(reference.symbol ? {symbol:reference.symbol} : {})});
+            }
+          }
           stepPaths.set(filename, kind);
         }
       }
       if (!step.checks.length || step.checks.some(check => !stepPaths.has(check.target))) {
         throw new Error('Each step needs a test or inspection with an expected result and a source or proposed-file target in that step.');
       }
+      if (task) tasks.set(key,task);
     }
 
     if (required.size) throw new Error('Some new or revised steps have no evidence. Cite every changed step or split the revision.');
 
-    return () => {
+    const checkFiles = () => {
       signal.throwIfAborted();
       assertReconnaissanceRoot(root);
       if (empty !== undefined) assertEmptyPlanningRoot(root, empty);
@@ -181,5 +239,6 @@ export async function prepareAdmission(
       }
       if (performance.now() >= end) throw new Error('Planning evidence expired before commit. Refresh the inspection.');
     };
+    return {checkFiles,tasks};
   });
 }

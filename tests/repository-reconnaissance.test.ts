@@ -11,8 +11,9 @@ import { repositoryOverview, reconnaissanceLimits, reconnaissanceRoot } from '..
 import { Runtime } from '../server/runtime.js';
 import { estimateTokens } from '../server/scheduler.js';
 import { Store } from '../server/store.js';
+import type { StoredPlanPhase } from '../server/plan-tasks.js';
 import { WorkspaceTools } from '../server/tools/index.js';
-import type { CompletionResult, ModelProvider, PlanPhase, ToolResult } from '../shared/types.js';
+import type { CompletionResult, ModelProvider, ToolResult } from '../shared/types.js';
 
 type Request = Parameters<ModelProvider['complete']>[0];
 type Reply = CompletionResult | ((request: Request) => CompletionResult | Promise<CompletionResult>);
@@ -61,7 +62,7 @@ const done: Reply = {text:'Planning reply.', finishReason:'stop'};
 const read = (filename = 'app.ts') => nativeReply('read_file', {path:filename});
 const range = (startLine: number, count = 1) => nativeReply('read_file_range', {path:'app.ts',startLine,count});
 const id = (reply: CompletionResult) => reply.toolCalls![0].id;
-const phases: PlanPhase[] = [{id:'p', title:'Correction', steps:[{id:'s',title:'Update greeting',status:'done'}]}];
+const phases: StoredPlanPhase[] = [{id:'p', title:'Correction', steps:[{id:'s',title:'Update greeting',status:'done'}]}];
 const check = (target: string) => ({method:'inspection',target,expected:'Confirm the greeting uses the requested wording.'});
 const evidence = (reply: CompletionResult, filename = 'app.ts', extra: object = {}) => ({phaseId:'p',stepId:'s',
   sources:[{path:filename,callId:id(reply),...extra}],newFiles:[],checks:[check(filename)]});

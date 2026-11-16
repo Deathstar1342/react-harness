@@ -7,6 +7,10 @@ import {Store} from '../server/store.js';
 import {Runtime,type RunState} from '../server/runtime.js';
 import {readConfig} from '../server/config.js';
 import {recoveryView,RECOVERY_LIMITS} from '../server/recovery.js';
+import {inspectorView} from '../server/inspector.js';
+import {INSPECTOR_LIMITS} from '../server/inspector-records.js';
+import {parseToolArguments} from '../server/tool-registry.js';
+import {taskLimits,type StoredPlanPhase,type StoredPlanTask} from '../server/plan-tasks.js';
 import {createApp} from '../server/app.js';
 import {TransportAuth} from '../server/transport-auth.js';
 import {InstallService} from '../server/installs.js';
@@ -34,7 +38,119 @@ async function fixture(){
   return {root,project,chat,config,tools,runtime,restart,seed,get store(){return store;},read:()=>recoveryView(store,chat.id)};
 }
 
+function envelopePhase(count:number, titleRepeats=81):StoredPlanPhase {
+  return {id:'main-phase',title:'Main phase',steps:Array.from({length:count},(_,i)=>({
+    id:'step-'+i,title:'Review specified behavior '+i+' '+ 'described requirement '.repeat(titleRepeats),status:'pending',
+  }))};
+}
+function envelopeTask(admittedAtPlanVersion:number):StoredPlanTask {
+  const filename=(i:number)=>'managed-directory/review-area-'+i+'/source-file-with-descriptive-name-'+i+'.ts';
+  return {
+    version:1,admittedAtPlanVersion,objective:'Private plan objective '+ 'objective detail '.repeat(30),
+    sources:Array.from({length:8},(_,i)=>({
+      path:filename(i),startLine:1,lineCount:5,callId:'private-receipt-read-'+i,frameId:'private-origin-frame',hash:'a'.repeat(64),
+    })),
+    newFiles:[],checks:Array.from({length:4},(_,i)=>({
+      method:'inspection',target:filename(i),expected:'observable acceptance condition '.repeat(17),
+    })),
+  };
+}
+
 describe('bounded read-only recovery projection, actual disk SQLite and Runtime',()=>{
+  it('preserves an admitted near-cap plan and original step and goal correlations with bounded task metadata',async()=>{
+    const t=await fixture(), outline={phases:[envelopePhase(54)]};
+    parseToolArguments('set_plan',JSON.stringify(outline));
+    const old=t.store.revisePlan(t.chat.id,outline);
+    expect(Buffer.byteLength(JSON.stringify(old))).toBeLessThan(RECOVERY_LIMITS.recordBytes);
+    expect(t.read().entries.filter(entry=>entry.kind==='plan')).toHaveLength(54);
+    const human=t.store.message(t.chat.id,'user','Inspect the declared behavior');
+    createGoal(t.store,t.chat.id,{objective:'Verify planned behavior',acceptanceCriteria:['Inspect behavior']},human.id);
+    const updated=structuredClone(outline);
+    for(const step of updated.phases[0].steps.slice(0,8))step.task=envelopeTask(2);
+    const next=t.store.revisePlan(t.chat.id,updated);
+    expect(Buffer.byteLength(JSON.stringify(next))).toBeGreaterThan(RECOVERY_LIMITS.recordBytes);
+    const ref={planId:next.id!,planVersion:next.version!,phaseId:'main-phase',stepId:'step-0'};
+    t.store.progress(t.chat.id,ref,'tested-delegation','in_progress','started','Observed work');
+    t.store.progress(t.chat.id,ref,'tested-delegation','done','accepted','Observed checks');
+    const eventId=t.store.planStep(t.chat.id,ref)!.evidence!.eventId;
+    const before=logical(t.store),result=t.read();
+    expect(result.plan).toEqual({id:old.id,version:2});
+    expect(result.coverage.find(source=>source.source==='plan')?.unavailable).toBe(0);
+    expect(result.entries.filter(entry=>entry.kind==='plan')).toHaveLength(54);
+    expect(result.entries.find(entry=>entry.planStep?.stepId===ref.stepId)).toMatchObject({
+      status:'completed',planStep:ref,evidence:[{eventId}],
+    });
+    expect(result.goal).toMatchObject({humanMessageId:human.id,eventId:expect.any(Number)});
+    expect(JSON.stringify(result)).not.toMatch(/private-receipt|private-origin-frame|source-file-with-descriptive|Private plan objective|a{64}/);
+    expect(logical(t.store)).toBe(before);
+    expect(t.tools.execute).not.toHaveBeenCalled();
+
+    const evidence=t.store.events(t.chat.id).find(event=>event.id===eventId)!;
+    const invalid={...(evidence.data as object),planVersion:1};
+    t.store.db.prepare('UPDATE events SET data=? WHERE id=?').run(JSON.stringify(invalid),eventId);
+    expect(t.read().entries.find(entry=>entry.planStep?.stepId===ref.stepId)).toMatchObject({status:'unknown',evidence:[]});
+  });
+
+  it('retains the Inspector outline cap after stripping validated private task metadata',async()=>{
+    const t=await fixture();
+    const plan=t.store.revisePlan(t.chat.id,{phases:[envelopePhase(4,75)]});
+    const ref={planId:plan.id!,planVersion:plan.version!,phaseId:'main-phase',stepId:'step-0'};
+    t.store.progress(t.chat.id,ref,'tested-delegation','in_progress','started','Observed work');
+    const original=inspectorView(t.store,t.chat.id);
+    expect(original.links).toHaveLength(1);
+    const annotated=t.store.plan(t.chat.id);
+    annotated.phases[0].steps[0].task=envelopeTask(1);
+    t.store.setState('plan:'+t.chat.id,annotated);
+    expect(Buffer.byteLength(JSON.stringify(annotated))).toBeGreaterThan(INSPECTOR_LIMITS.rowBytes);
+    const view=inspectorView(t.store,t.chat.id);
+    expect(view.links).toEqual(original.links);
+    expect(JSON.stringify(view)).not.toMatch(/private-receipt|private-origin-frame|source-file-with-descriptive|Private plan objective|a{64}/);
+    delete annotated.phases[0].steps[0].task;
+    annotated.phases[0].steps[0].title+='x'.repeat(INSPECTOR_LIMITS.rowBytes);
+    t.store.setState('plan:'+t.chat.id,annotated);
+    expect(inspectorView(t.store,t.chat.id).links).toHaveLength(0);
+  });
+
+  it.each(['per-task','aggregate','malformed','duplicate','noncanonical','old-outline','old-outline-legacy'] as const)(
+    'keeps invalid Plan evidence unavailable while preserving unrelated goal observation, case=%s',async problem=>{
+      const t=await fixture();
+      const human=t.store.message(t.chat.id,'user','Retain original goal');
+      createGoal(t.store,t.chat.id,{objective:'Verify goal',acceptanceCriteria:['Inspect state']},human.id);
+      const size=problem.startsWith('old-outline')?74:problem==='aggregate'?16:1;
+      const phase=envelopePhase(size);
+      if(problem==='aggregate') {
+        for(const step of phase.steps) step.task=envelopeTask(1);
+        expect(phase.steps.reduce((sum,step)=>sum+Buffer.byteLength(JSON.stringify(step.task)),0)).toBeGreaterThan(taskLimits.planBytes);
+      } else if(problem!=='old-outline-legacy') {
+        const task=envelopeTask(1);
+        if(problem==='per-task')task.objective='x'.repeat(taskLimits.bytes);
+        phase.steps[0].task=task;
+      }
+      const plan={id:'saved-plan',version:1,phases:[phase]};
+      parseToolArguments('set_plan',JSON.stringify({phases:[envelopePhase(size)]}));
+      const plain=JSON.stringify(plan);
+      const raw=problem==='duplicate'?plain.replace('"hash":','"\\u0068ash":"b","hash":'):
+        problem==='malformed'?plain.replace('"startLine":1','"startLine":0'):
+        problem==='noncanonical'?plain.replace('"objective":','"objective":'+ ' '.repeat(taskLimits.bytes)):plain;
+      t.store.setState('plan:'+t.chat.id,{});
+      t.store.db.prepare('UPDATE state SET data=? WHERE key=?').run(raw,'plan:'+t.chat.id);
+      const before=logical(t.store),result=t.read();
+      expect(result.plan).toBeUndefined();
+      expect(result.entries.filter(entry=>entry.kind==='plan')).toHaveLength(0);
+      expect(result.coverage.find(source=>source.source==='plan')?.unavailable).toBe(1);
+      expect(result.goal?.humanMessageId).toBe(human.id);
+      expect(logical(t.store)).toBe(before);
+      if(problem==='per-task'||problem==='aggregate'||problem.startsWith('old-outline')){
+        let decodes=0;
+        t.store.db.function('plan_evidence_outline',{deterministic:true},(_raw,_rawLimit,_outlineLimit,_tasks)=>{
+          decodes++;
+          return null;
+        });
+        expect(t.read().coverage.find(source=>source.source==='plan')?.unavailable).toBe(1);
+        expect(decodes).toBe(0);
+      }
+    });
+
   it('preserves a real Runtime proposal across reopen without dispatch and never mutates on observation',async()=>{
     const t=await fixture();t.store.updateChat(t.chat.id,{approvalMode:'review'});
     const {runtime}=t.runtime([nativeReply('delegate',{objective:'Run a synthetic command',acceptanceCriteria:['Retain evidence']}),nativeReply(action.name,action.args)]);

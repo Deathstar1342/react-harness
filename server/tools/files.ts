@@ -4,7 +4,7 @@ import { open, lstat, mkdir, rename, unlink, opendir } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { FileEntry, FileSnapshot } from '../../shared/types.js';
-import { allowed, hash, key, leasePath, scoped, ToolError } from './paths.js';
+import { allowed, hash, key, leasePath, safeRelative, scoped, ToolError } from './paths.js';
 
 const locks = new Map<string, Promise<void>>();
 const leases = new Map<string, { owner: string; expires: number }>();
@@ -69,6 +69,11 @@ export class WorkspaceFiles {
     if (existing && existing.expires > Date.now() && existing.owner !== owner) throw new ToolError('Another editor owns the dirty buffer.', 'CONFLICT');
     if (dirty) leases.set(id, { owner, expires: Date.now() + this.options.leaseMs });
     else if (!existing || existing.owner === owner || existing.expires <= Date.now()) leases.delete(id);
+  }
+  assertCoderContextPath(root: string, relative: string) {
+    const id = key(path.join(root,safeRelative(relative)));
+    if (locks.has(id)) throw new ToolError('A file operation is pending.','CONFLICT');
+    this.checkLease(id);
   }
   private checkLease(id: string, owner?: string): void {
     const lease = leases.get(id);
