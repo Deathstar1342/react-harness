@@ -1500,6 +1500,14 @@ export class Runtime {
           const outcome = await definition.handler({workspace:this.tools, context:this.toolContext(chatId,frame,signal), control:async request => {
             const commit = () => this.controlAction(chatId,state,frame,call,request,review,admission);
             if (review) return runNativeOperation(() => commit());
+            if (request.name==='delegate' && request.args.planStep && (request.args.paths as string[]|undefined)?.length) {
+              return runNativeOperation(()=>{
+                signal.throwIfAborted();
+                if(state.generation!==generation || state.frames.at(-1)!==frame || frame.queuedCalls?.[0]?.id!==call.id)
+                  throw new Error('The Coder delegation changed before commit.');
+                return commit();
+              });
+            }
             if (!admission?.checkWorkspaceAtCommit) return commit();
             // Refresh only the synchronous plan/file check and SQLite transition.
             // The surrounding tool handler and all provider work stay outside.
