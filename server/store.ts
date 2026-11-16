@@ -13,12 +13,13 @@ import { definitionFor } from './tool-registry.js';
 import {recoverProcessJobs} from './process-jobs.js';
 import { addGoalUncertainty, goalOf, goalStatus, protectPlan, saveGoal } from './goals.js';
 import type { RunState } from './runtime.js';
-import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
+import { assertTaskBudget, publicPlan, taskDefinition, type StoredPlan, type StoredPlanStep } from './plan-tasks.js';
+import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
-export function unchangedPlanStructure(previous: Plan, proposed: Plan): boolean {
-  const structure = (plan: Plan) => JSON.stringify(plan.phases.map(phase => ({
-    id: phase.id, title: phase.title, steps: phase.steps.map(step => ({id: step.id, title: step.title})),
+export function unchangedPlanStructure(previous: StoredPlan, proposed: StoredPlan): boolean {
+  const structure = (plan: StoredPlan) => JSON.stringify(plan.phases.map(phase => ({
+    id: phase.id, title: phase.title, steps: phase.steps.map(step => ({id: step.id, title: step.title, task: taskDefinition(step.task)})),
   })));
   return !!previous.id && structure(previous) === structure(proposed);
 }
@@ -273,18 +274,19 @@ export class Store {
       }
     });
   }
-  revisePlan(chatId: string, proposed: Plan): Plan {
+  revisePlan(chatId: string, proposed: StoredPlan): StoredPlan {
     if (!this.transactionEvents) return this.transaction(() => this.revisePlan(chatId, proposed));
     const previous = this.plan(chatId);
     if (unchangedPlanStructure(previous, proposed)) return previous;
-    const plan: Plan = {id: previous.id ?? randomUUID(), version: (previous.version ?? 0) + 1,
+    assertTaskBudget(proposed);
+    const plan: StoredPlan = {id: previous.id ?? randomUUID(), version: (previous.version ?? 0) + 1,
       phases: proposed.phases.map(phase => ({id: phase.id, title: phase.title,
-        steps: phase.steps.map(step => ({id: step.id, title: step.title, status: step.status === 'blocked' ? 'blocked' : 'pending'}))}))};
+        steps: phase.steps.map(step => ({id: step.id, title: step.title, status: step.status === 'blocked' ? 'blocked' : 'pending', ...(step.task ? {task:step.task} : {})}))}))};
     this.setPlan(chatId, plan);
     protectPlan(this,chatId,plan);
     return plan;
   }
-  planStep(chatId: string, ref: PlanStepRef): PlanStep | undefined {
+  planStep(chatId: string, ref: PlanStepRef): StoredPlanStep | undefined {
     const plan = this.plan(chatId);
     if (plan.id !== ref.planId || plan.version !== ref.planVersion) return undefined;
     return plan.phases.find(p => p.id === ref.phaseId)?.steps.find(s => s.id === ref.stepId);
@@ -301,15 +303,15 @@ export class Store {
     step.evidence = {eventId: event.id, delegationId, outcome, summary, ...(sourceEventId ? {sourceEventId} : {})} satisfies PlanEvidence;
     this.setPlan(chatId, plan);
   }
-  plan(chatId: string): Plan { return this.getState(`plan:${chatId}`, { phases: [] }); }
-  setPlan(chatId: string, plan: Plan) { this.setState(`plan:${chatId}`, plan); this.event(chatId,'plan',plan); }
+  plan(chatId: string): StoredPlan { return this.getState(`plan:${chatId}`, { phases: [] }); }
+  setPlan(chatId: string, plan: StoredPlan) { this.setState(`plan:${chatId}`, plan); this.event(chatId,'plan',publicPlan(plan)); }
   testReport(chatId: string, report: TestReport) {
     this.db.prepare('INSERT INTO test_reports VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(report.id,chatId,JSON.stringify(report));
     this.event(chatId,'tests',report);
   }
   detail(chatId: string): ChatDetail {
     const recent = this.recentEvents(chatId,1001);
-    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: this.plan(chatId), goal: goalOf(this,chatId), approvals: this.approvals(chatId), events: recent.slice(-1000), eventsTruncated:recent.length>1000, tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
+    return { chat: this.chat(chatId), messages: this.messages(chatId), plan: publicPlan(this.plan(chatId)), goal: goalOf(this,chatId), approvals: this.approvals(chatId), events: recent.slice(-1000), eventsTruncated:recent.length>1000, tests: this.db.prepare('SELECT data FROM test_reports WHERE chat_id=? ORDER BY rowid').all(chatId).map(row => JSON.parse(String(row.data))) };
   }
   recover():void {
     if(!this.transactionEvents)return this.transaction(()=>this.recover());

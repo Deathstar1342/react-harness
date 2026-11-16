@@ -17,7 +17,19 @@ export interface Chat { mode?: ChatMode; modeVersion?: number; id: string; proje
 export interface Message { id: string; chatId: string; role: 'user' | AgentRole | 'tool' | 'system'; content: string; createdAt: string; metadata?: Record<string, unknown> }
 export interface PlanStepRef { planId: string; planVersion: number; phaseId: string; stepId: string }
 export interface PlanEvidence { eventId: number; delegationId: string; outcome: string; summary: string; sourceEventId?: number }
-export interface PlanStep { evidence?: PlanEvidence; id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }
+export interface PlanTaskDependency { phaseId: string; stepId: string }
+export interface PlanTaskCheck { method: 'test' | 'inspection'; target: string; expected: string }
+export interface PlanTaskSource { path: string; startLine: number; lineCount: number; symbol?: string }
+export interface PlanTask {
+  version: 1;
+  admittedAtPlanVersion: number;
+  objective: string;
+  dependsOn?: PlanTaskDependency[];
+  sources: PlanTaskSource[];
+  newFiles: {path: string}[];
+  checks: PlanTaskCheck[];
+}
+export interface PlanStep { evidence?: PlanEvidence; task?: PlanTask; id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }
 export interface PlanPhase { id: string; title: string; steps: PlanStep[] }
 export interface Plan { id?: string; version?: number; phases: PlanPhase[] }
 export type GoalStatus = 'running' | 'waiting_for_approval' | 'waiting_for_user' | 'paused' | 'blocked' | 'completed';
@@ -80,6 +92,8 @@ export interface TestReport { id: string; runner: string; command: string; creat
 export interface ToolService {
   /** Validate the canonical registered project root for bounded, read-only planning observations. */
   planningRoot?(root: string): string;
+  /** Optional trusted lease and mutation check for an already confined advisory read. */
+  assertCoderContextPath?(root:string, relative:string):void;
   /** Trusted synchronous queue admission observation; no cleanup or dispatch. */
   assertQueueIdle?(root:string):void;
   readonly processLifecycle?: 'sandbox-dispatch-v1';

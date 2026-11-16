@@ -152,7 +152,7 @@ it.each(['start','after-response'])('inspector actual native final COMMIT veto p
  const inspect=new DatabaseSync(filename,{readOnly:true});try{const rows=inspect.prepare('SELECT data FROM inspector_requests').all();expect(rows).toHaveLength(phase==='start'?0:1);if(rows.length)expect(JSON.parse(String(rows[0].data))).toMatchObject({outcome:'pending',stage:'invoked',endedAt:null,usage:null});}finally{inspect.close();}
  }finally{store.close();}
 });
-it.each(['valid', 'identity', 'commit'] as const)('native planning refreshes after HTTP scope expiry and preserves fences, case=%s', async scenario => {
+it.each(['valid', 'identity', 'commit', 'coder-valid', 'coder-identity', 'delegate-commit'] as const)('native planning and Coder preparation preserve freshness and fences, case=%s', async scenario => {
   const t = await peer();
   const fs = await import('node:fs/promises');
   const {default: Fastify} = await import('fastify');
@@ -201,7 +201,7 @@ it.each(['valid', 'identity', 'commit'] as const)('native planning refreshes aft
   const absence = nativeReply('inspect_new_plan_path',{path:'new.ts'});
   const proposal = nativeReply('set_plan',{
     phases:[{id:'p',title:'Greeting',steps:[{id:'s',title:'Update greeting',status:'pending'}]}],
-    admission:[{phaseId:'p',stepId:'s',
+    admission:[{phaseId:'p',stepId:'s',task:{objective:'Update the planned greeting.'},
       sources:[{path:'app.ts',callId:read.toolCalls![0].id,symbol:'greeting'}],
       newFiles:[{path:'new.ts',callId:absence.toolCalls![0].id}],
       checks:[{method:'inspection',target:'new.ts',expected:'Check the new file defines the requested greeting.'}],
@@ -210,17 +210,34 @@ it.each(['valid', 'identity', 'commit'] as const)('native planning refreshes aft
   const updates: string[] = [];
   const publish = store.setPlan.bind(store);
   let attempted = false;
-  if (scenario === 'commit') vi.spyOn(store,'setPlan').mockImplementation((chatId, plan) => {
-    publish(chatId,plan);
-    attempted = true;
-    Atomics.store(t.words,1,Atomics.load(t.words,0)+1);
-  });
+  let denyCoderAuthority = false;
+  let delegationId: string | undefined;
+  const coderPackets: string[] = [];
+  if (scenario === 'coder-identity') attest.mockImplementation(async () => ({
+    ...policy.record, storageId:denyCoderAuthority ? randomUUID() : policy.record.storageId,
+    gateId:'a'.repeat(64),issuedAt:clock,expiresAt:clock+10000,
+  }));
+  if (scenario === 'commit' || scenario === 'delegate-commit' || scenario === 'coder-identity') {
+    vi.spyOn(store,'setPlan').mockImplementation((chatId, plan) => {
+      publish(chatId,plan);
+      const startingCoder = plan.phases[0]?.steps[0].evidence?.outcome === 'started';
+      if (scenario === 'coder-identity' && startingCoder) denyCoderAuthority = true;
+      if (scenario === 'commit' || scenario === 'delegate-commit' && startingCoder) {
+        attempted = true;
+        Atomics.store(t.words,1,Atomics.load(t.words,0)+1);
+      }
+    });
+  }
   let providerCalls = 0;
   const runtime = new Runtime(store,{models:async()=>[],complete:async request => {
     // Expire the original request scope during every provider response.
     clock += 11001;
     updates.push(...request.messages.filter(message => message.role === 'tool').map(message => message.content));
-    expect(request.messages.some(message => message.content.startsWith('Repository overview from the start') && message.content.includes('app.ts'))).toBe(true);
+    const coder = request.messages.find(message=>message.content.startsWith('Advisory Coder context.'));
+    if (coder) coderPackets.push(coder.content);
+    if (providerCalls < 6) {
+      expect(request.messages.some(message => message.content.startsWith('Repository overview from the start') && message.content.includes('app.ts'))).toBe(true);
+    }
     switch (++providerCalls) {
       case 1: return {text:'Ordinary response.',finishReason:'stop'};
       case 2: return read;
@@ -232,7 +249,17 @@ it.each(['valid', 'identity', 'commit'] as const)('native planning refreshes aft
           await fs.writeFile(path.join(root,'app.ts'),file);
         }
         return proposal;
-      default: return {text:'Planning response.',finishReason:'stop'};
+      case 5: return {text:'Planning response.',finishReason:'stop'};
+      case 6: {
+        const plan = store.plan(planning.id);
+        const delegation = nativeReply('delegate',{objective:'Update greeting',acceptanceCriteria:['Inspect the result'],
+          paths:['app.ts','new.ts'],planStep:{planId:plan.id,planVersion:plan.version,phaseId:'p',stepId:'s'}});
+        delegationId = delegation.toolCalls![0].id;
+        return delegation;
+      }
+      case 7: return nativeReply('submit_completion',{summary:'Fixture coder complete.'});
+      case 8: return nativeReply('review_result',{verdict:'pass',findings:[]});
+      default: return {text:'Build fixture finished.',finishReason:'stop'};
     }
   }},tools,readConfig({HARNESS_HOME:path.join(base,'home'),HARNESS_DATA_DIR:state,HARNESS_WORKSPACE_ROOT:workspace}),{instructions:()=>''});
   authority.registerNativeStorageScope(app);
@@ -252,7 +279,7 @@ it.each(['valid', 'identity', 'commit'] as const)('native planning refreshes aft
 
     expect((await dispatch(planning.id,'/plan Prepare the greeting change')).statusCode).toBe(200);
     const settled = runtime.wait(planning.id);
-    if (scenario === 'valid') {
+    if (scenario !== 'identity' && scenario !== 'commit') {
       await settled;
       expect(store.chat(planning.id).status).toBe('idle');
       expect(store.plan(planning.id)).toMatchObject({version:1, phases:[{steps:[{status:'pending'}]}]});
@@ -261,6 +288,31 @@ it.each(['valid', 'identity', 'commit'] as const)('native planning refreshes aft
       expect(await fs.readFile(path.join(root,'app.ts'),'utf8')).toBe(file);
       await expect(fs.readFile(path.join(root,'new.ts'))).rejects.toMatchObject({code:'ENOENT'});
       expect(providerCalls).toBe(5);
+      if (scenario !== 'valid') {
+        const plan = store.plan(planning.id), mode = store.chat(planning.id).modeVersion!;
+        expect(plan.phases[0].steps[0].task?.sources[0].hash).toMatch(/^[a-f0-9]{64}$/);
+        await authority.runNativeOperation(()=>runtime.startBuilding(planning.id,{planId:plan.id!,planVersion:plan.version!,modeVersion:mode}));
+        const built = runtime.wait(planning.id);
+        if (scenario === 'coder-valid') {
+          await built;
+          expect(providerCalls).toBe(9);
+          expect(coderPackets).toHaveLength(1);
+          expect(coderPackets[0]).toContain('return \\"hello\\"');
+          expect(coderPackets[0]).toContain('"state":"planned-new"');
+          expect(store.chat(planning.id).status).toBe('idle');
+        } else {
+          await built.catch(()=>{});
+          expect(providerCalls).toBe(6);
+          expect(coderPackets).toHaveLength(0);
+          expect(attempted).toBe(scenario === 'delegate-commit');
+          const durable = new DatabaseSync(filename,{readOnly:true});
+          try {
+            const result = durable.prepare("SELECT key FROM state WHERE key LIKE ?").get('%:'+delegationId);
+            expect(!!result).toBe(scenario === 'coder-identity');
+          } finally {durable.close();}
+          expect(()=>store.setState('coder:must-not-write',true)).toThrow(/recovery/);
+        }
+      }
     } else {
       await settled.catch(() => {});
       expect(providerCalls).toBe(4);

@@ -5,15 +5,17 @@ import {observeRequest} from './inspector-records.js';
 import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
-import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef } from '../shared/types.js';
+import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, NativeToolDefinition, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef } from '../shared/types.js';
 import type { Config } from './config.js';
 import { Store, unchangedPlanStructure } from './store.js';
-import { nativeResultFits, planningRead, planObservation, prepareAdmission, type PlanObservation, type PlanStepAdmission } from './plan-admission.js';
+import { nativeResultFits, planningRead, planObservation, prepareAdmission, prepareTaskProposal, stepKey, type PlanObservation, type PlanStepAdmission } from './plan-admission.js';
 import { observePlanningPath, reconnaissanceRoot, reconnaissancePath, repositoryOverview, reconnaissanceLimits } from './repository-reconnaissance.js';
 import { estimateTokens } from './scheduler.js';
-import { runNativeOperation } from './native-storage.js';
+import { assertTaskBudget, planOutline, type StoredPlan } from './plan-tasks.js';
+import { nativeStorageActive, runNativeOperation } from './native-storage.js';
+import { advisoryEstimate, coderAdvisory, coderScopes, historicalCoderSources, loadCoderSources, recheckCoderSources, type CoderSourceContext } from './coder-context.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
-import { hash, safeRelative } from './tools/paths.js';
+import { hash, inAssignedPath, safeRelative } from './tools/paths.js';
 import { definitionFor, parseToolArguments, publishedTools, toolRegistry, validateAction, validateToolResult, skillControls } from './tool-registry.js';
 import {Skills,skillsPolicy,skillSelectionInput,skillDraftInput} from './skills.js';
 import type {SkillDocument} from './skill-files.js';
@@ -41,11 +43,13 @@ export interface RunState {
   instructionsHash?: string | null;
   instructionTargets?: string[];
 }
+type BeforeProvider = (signal: AbortSignal) => Promise<ModelMessage[]>;
+interface CoderContextBinding { key: string; previous?: CoderSourceContext }
 export interface RuntimeHooks {
   scheduled?:boolean;
   instructions(role: AgentRole): string;
   prepareMessages?: (chatId: string, frame: Frame, messages: ModelMessage[], signal: AbortSignal) => Promise<ModelMessage[]>;
-  complete?: (role: AgentRole, input: Parameters<ModelProvider['complete']>[0]) => Promise<CompletionResult>;
+  complete?: (role: AgentRole, input: Parameters<ModelProvider['complete']>[0], beforeProvider?: BeforeProvider) => Promise<CompletionResult>;
 }
 
 const readTools = new Set([...toolRegistry.values()].filter(tool=>tool.kind==='workspace' && tool.effect==='read').map(tool=>tool.name));
@@ -98,6 +102,7 @@ export class Runtime {
   private decisions = new Map<string, number>();
   private closePromise?: Promise<void>;
   private readonly planningEpoch = randomUUID();
+  private readonly coderContexts = new WeakMap<Frame,CoderContextBinding>();
   private readonly repositoryOverviews = new WeakMap<RunState, {identity: string; message: ModelMessage}>();
 
   private assertAvailable(chatId: string) {
@@ -553,6 +558,7 @@ export class Runtime {
     for (const frame of this.load(chatId)?.frames ?? []) this.store.progress(chatId, frame.planStep, frame.id, 'blocked', action, 'Work stopped; completion has not been accepted.');
     this.store.invalidateApprovals(chatId);
     });
+    for (const frame of this.load(chatId)?.frames ?? []) this.coderContexts.delete(frame);
     running?.controller.abort(new Error(`Task ${action} requested`));
     this.processes.stopChat(chatId);
     await running?.promise;
@@ -673,7 +679,8 @@ export class Runtime {
   }
 
   private async preparePlanControl(chatId: string, state: RunState, frame: Frame, call: NativeToolCall, action: Action, signal: AbortSignal) {
-    const proposed = {phases: action.args.phases as import('../shared/types.js').PlanPhase[]};
+    const proposed: StoredPlan = {phases: structuredClone(action.args.phases as StoredPlan['phases'])};
+    const entries = action.args.admission as PlanStepAdmission[] | undefined;
     const previous = this.store.plan(chatId);
     const goalVersion = () => {
       const goal = goalOf(this.store, chatId);
@@ -689,13 +696,14 @@ export class Runtime {
     const clearsExistingPlan = !!previous.id && previous.phases.length > 0 && proposed.phases.length === 0;
     let checkFiles: (() => void) | undefined;
     let refusal: string | undefined;
-    if (!clearsExistingPlan && !unchangedPlanStructure(previous, proposed)) {
-      try {
-        checkFiles = await runNativeOperation(() => {
+    try {
+      const updates = prepareTaskProposal(previous, proposed, entries);
+      if (!clearsExistingPlan && (updates.size || !unchangedPlanStructure(previous, proposed))) {
+        const prepared = await runNativeOperation(() => {
           signal.throwIfAborted();
           const root = this.planningWorkspace(chatId);
           const recorded = this.store.getState<PlanObservation[]>('plan:observations:' + chatId, []);
-          return prepareAdmission(root, previous, proposed, action.args.admission as PlanStepAdmission[] | undefined, callId => {
+          return prepareAdmission(root, previous, proposed, entries, updates, frame.id, callId => {
             const observation = recorded.find(item => item.callId === callId && item.binding === binding &&
               item.rootIdentity === root.identity);
             if (!observation) return;
@@ -703,13 +711,19 @@ export class Runtime {
             return result?.ok && nativeResultFits(result) ? {observation, result} : undefined;
           }, signal);
         });
-      } catch (error) {
-        signal.throwIfAborted();
-        refusal = planningRefusal(error);
+        for (const phase of proposed.phases) for (const step of phase.steps) {
+          const task = prepared.tasks.get(stepKey(phase.id,step.id));
+          if (task) step.task = task;
+        }
+        assertTaskBudget(proposed);
+        checkFiles = prepared.checkFiles;
       }
+    } catch (error) {
+      signal.throwIfAborted();
+      refusal = planningRefusal(error);
     }
     return {
-      current,
+      current, proposed,
       checkWorkspaceAtCommit: !!checkFiles,
       rejection: () => {
         if (!current() || plan !== JSON.stringify(this.store.plan(chatId)) || goal !== goalVersion()) {
@@ -725,6 +739,88 @@ export class Runtime {
         catch (error) { return planningRefusal(error); }
       },
     };
+  }
+
+  private coderContextKey(chatId: string, state: RunState, frame: Frame) {
+    const goal = goalOf(this.store,chatId);
+    return JSON.stringify([this.planningBinding(chatId,state,frame),frame.planStep,frame.assignment,frame.scope,
+      goal && [goal.id,goal.revision,goal.generation,goal.status]]);
+  }
+
+  private async prepareCoderRequest(
+    chatId: string, state: RunState, frame: Frame, messages: ModelMessage[], tools: NativeToolDefinition[], signal: AbortSignal,
+  ): Promise<{messages:ModelMessage[]; beforeProvider:BeforeProvider} | undefined> {
+    const binding = this.coderContexts.get(frame), ref = frame.planStep;
+    if (!binding || !ref || frame.role !== 'coder') return;
+    const live = () => state.frames.at(-1) === frame && !state.steering.length && !state.planOnly &&
+      this.coderContextKey(chatId,state,frame) === binding.key && this.store.planStep(chatId,ref)?.task;
+    const task = live();
+    if (!task) return;
+    const base = estimateTokens(messages,tools);
+    const limit = this.config.contextLimits.coder;
+    const room = advisoryEstimate(limit-this.config.maxOutputTokens-Math.min(8192,Math.floor(limit*0.1))-base);
+    const plan = this.store.plan(chatId);
+    const prefix = messages.length-frame.messages.length;
+    const absent: CoderSourceContext = {cards:[],outsideScope:task.sources.length+task.newFiles.length,observation:'unavailable'};
+    const render = (context: CoderSourceContext, budget: number) => {
+      const advisory = coderAdvisory(task,ref,plan,context,budget);
+      if (!advisory) return messages;
+      return [...messages.slice(0,prefix),advisory,...messages.slice(prefix)];
+    };
+    if (render(absent,room) === messages) return;
+    const chat = this.store.chat(chatId);
+    const guard = (root: string, filename: string) => {
+      this.processes.assertIdle(chat.projectId);
+      if (!this.tools.assertCoderContextPath) throw Object.assign(new Error('Workspace lease check unavailable.'),{code:'CONFLICT'});
+      this.tools.assertCoderContextPath(root,filename);
+    };
+
+    const scopes = coderScopes(frame.scope);
+    let context = binding.previous ?? absent;
+    let identity: string | undefined;
+    if (!binding.previous && scopes.length && this.tools.assertCoderContextPath) {
+      try {
+        context = await runNativeOperation(async () => {
+          signal.throwIfAborted();
+          if (!live()) return absent;
+          const root = this.planningWorkspace(chatId);
+          identity = root.identity;
+          return loadCoderSources(root,task,scopes,filename=>guard(root.path,filename),signal);
+        });
+      } catch {
+        signal.throwIfAborted();
+        nativeStorageActive();
+        context = absent;
+      }
+    }
+    signal.throwIfAborted();
+    if (!live()) return;
+    const preview = render(context,room);
+    const charged = estimateTokens(preview,tools)-base;
+    return {messages:preview,beforeProvider:async dispatchSignal => {
+      dispatchSignal.throwIfAborted();
+      if (!live()) return messages;
+      let checked = context;
+      if (context.observation === 'initial' && identity) {
+        try {
+          checked = await runNativeOperation(() => {
+            dispatchSignal.throwIfAborted();
+            if (!live()) return absent;
+            const root = this.planningWorkspace(chatId);
+            if (root.identity !== identity) return absent;
+            return recheckCoderSources(root,context,filename=>guard(root.path,filename));
+          });
+        } catch {
+          dispatchSignal.throwIfAborted();
+          nativeStorageActive();
+          checked = absent;
+        }
+      }
+      dispatchSignal.throwIfAborted();
+      if (!live()) return messages;
+      binding.previous = historicalCoderSources(checked);
+      return render(checked,charged);
+    }};
   }
 
   private toolContext(
@@ -803,6 +899,7 @@ export class Runtime {
       }
       for(const content of guidance)this.store.event(chatId,'steering',{content,delivered:true});
     });
+    for (const frame of state.frames) this.coderContexts.delete(frame);
   }
   private discardPrepared(chatId:string,state:RunState) {
     this.commitRunTransition(chatId,state,draft=>{
@@ -985,12 +1082,24 @@ export class Runtime {
       await this.refreshInstructions(chatId,state,signal);
       if(state.generation!==generation)continue;
       if(preparedFrame && JSON.stringify(preparedFrame.messages)!==JSON.stringify(frame.messages))this.commitRunTransition(chatId,state,draft=>{draft.frames.find(item=>item.id===frame.id)!.messages=preparedFrame!.messages;});
+      const tools = publishedTools(frame.role,state.planOnly?'plan':'execute');
+      const coderRequest = await this.prepareCoderRequest(chatId,state,frame,messages,tools,signal);
+      signal.throwIfAborted();
+      if (state.generation!==generation || state.frames.at(-1)!==frame) continue;
       this.save(chatId,state);
       const deltas=nativeOutputBuffer(text=>this.store.event(chatId,'delta',{role:frame.role,text}));
-      const input = {model:this.store.chatModels(chatId)[frame.role],messages,tools:publishedTools(frame.role,state.planOnly?'plan':'execute'),signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
+      const input = {model:this.store.chatModels(chatId)[frame.role],messages:coderRequest?.messages ?? messages,tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
       this.commitRunTransition(chatId,state,()=>{this.queue?.beforeProvider(chatId,state);const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
       this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...promptIdentity(messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
-      const completion = await observeRequest(this.store,{chatId,projectId:this.store.chat(chatId).projectId,runId:state.frames[0].id,taskId:frame.id,generation,ordinal:state.steps,role:frame.role,humanMessageIds:state.humanMessageIds??[],...(frame.planStep?{planStep:frame.planStep}:{})},input,observed=>this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed),this.hooks.scheduled??false).finally(()=>deltas.flush());
+      const completion = await observeRequest(this.store,{chatId,projectId:this.store.chat(chatId).projectId,runId:state.frames[0].id,taskId:frame.id,generation,ordinal:state.steps,role:frame.role,humanMessageIds:state.humanMessageIds??[],...(frame.planStep?{planStep:frame.planStep}:{})},input,async observed => {
+        if (this.hooks.scheduled && this.hooks.complete) return this.hooks.complete(frame.role,observed,coderRequest?.beforeProvider);
+        if (coderRequest) {
+          const checked = await coderRequest.beforeProvider(signal);
+          observed = {...observed,messages:checked};
+          observed.onObservation?.({type:'invoked'});
+        }
+        return this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed);
+      },this.hooks.scheduled || !!coderRequest).finally(()=>deltas.flush());
       signal.throwIfAborted();
       this.store.event(chatId,'provider_request',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,model:input.model,finishReason:completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
       if (completion.usage) this.store.event(chatId,'usage',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,...completion.usage});
@@ -1104,20 +1213,7 @@ export class Runtime {
 
           if (definition.fileMutation && frame.scope?.length) {
             for (const filename of definition.affectedPaths(action)) {
-            const target = filename
-              .replaceAll('\\', '/')
-              .replace(/^\.\//, '');
-
-            if (
-              !frame.scope.some(item => {
-                const scope = item
-                  .replaceAll('\\', '/')
-                  .replace(/\/$/, '')
-                  .replace(/^\.\//, '');
-
-                return target === scope || target.startsWith(`${scope}/`);
-              })
-            ) {
+            if (!frame.scope.some(item => inAssignedPath(filename,item))) {
               throw new Error(
                 'This edit exceeds the assigned file scope. Report the scope expansion to the architect before proceeding.',
               );
@@ -1732,7 +1828,7 @@ export class Runtime {
     });
   }
 
-  private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot, admission?: {rejection: () => string | undefined}):ToolResult {
+  private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot, admission?: {proposed: StoredPlan; rejection: () => string | undefined}):ToolResult {
     if(['submit_completion','review_result'].includes(action.name))this.skills.assertCertain(chatId);
     if(['submit_completion','review_result','delegate'].includes(action.name)) {
       const projectId=this.store.chat(chatId).projectId;
@@ -1740,6 +1836,7 @@ export class Runtime {
       else this.processes.assertQuiescent(projectId);
     }
     let paused=false;
+    let preparedCoder: Frame | undefined;
     this.commitRunTransition(chatId,state,draft=>{
       const frame=draft.frames.find(item=>item.id===original.id)!;
       if(action.name==='delegate')this.processes.assertIdle(this.store.chat(chatId).projectId);
@@ -1753,16 +1850,31 @@ export class Runtime {
           this.store.message(chatId,'architect',String(action.args.question));
           this.store.progress(chatId,frame.planStep,frame.id,'blocked','awaiting_user',String(action.args.question).slice(0,2000));
           this.store.updateChat(chatId,{status:'paused'});goalStatus(this.store,chatId,'waiting_for_user',String(action.args.question));paused=true;break;
+        case 'read_plan': {
+          const plan = this.store.plan(chatId);
+          const offset = Number(action.args.offset);
+          if (plan.id !== action.args.planId || plan.version !== action.args.planVersion) {
+            this.resolveCall(chatId, frame, call.id, {ok:false,output:'The plan revision changed. Start paging the current outline at offset 0.',
+              data:{id:plan.id,version:plan.version}});
+            break;
+          }
+          const page = planOutline(plan,offset);
+          if (offset > page.total) {
+            this.resolveCall(chatId,frame,call.id,{ok:false,output:'Outline offset is past the end.'});
+            break;
+          }
+          resolve('Current plan outline page. Follow nextOffset before submitting a full replacement.',page);
+          break;
+        }
         case 'set_plan': {
-          const proposed = {phases: action.args.phases as import('../shared/types.js').PlanPhase[]};
-          const refusal = admission ? admission.rejection() : unchangedPlanStructure(this.store.plan(chatId), proposed)
-            ? undefined : 'A changed plan requires current repository evidence.';
+          if (!admission) throw new Error('Plan changes require prepared admission.');
+          const refusal = admission.rejection();
           if (refusal) {
             this.resolveCall(chatId, frame, call.id, {ok:false, output:refusal});
             break;
           }
-          const plan=this.store.revisePlan(chatId,proposed);
-          resolve(`Plan saved at revision ${plan.version}. Runtime evidence controls completion.`,plan);break;
+          const plan=this.store.revisePlan(chatId,admission.proposed);
+          resolve(`Plan saved at revision ${plan.version}. Runtime evidence controls completion.`,planOutline(plan));break;
         }
         case 'delegate': {
           const reference=action.args.planStep as PlanStepRef|undefined;
@@ -1780,7 +1892,9 @@ export class Runtime {
           resolve('Coder delegated; result will follow independent review.',{delegationId:coder.id});
           draft.frames.push(coder);
           const event=this.store.event(chatId,'delegation',{objective,delegationId:coder.id,planStep:reference});
-          this.store.progress(chatId,reference,coder.id,'in_progress','started',objective,event.id);break;
+          this.store.progress(chatId,reference,coder.id,'in_progress','started',objective,event.id);
+          if (reference && this.store.planStep(chatId,reference)?.task) preparedCoder = coder;
+          break;
         }
         case 'review': {
           resolve('Independent review requested.');
@@ -1814,6 +1928,7 @@ export class Runtime {
         default:throw new Error('Unknown control tool');
       }
     });
+    if (preparedCoder) this.coderContexts.set(preparedCoder,{key:this.coderContextKey(chatId,state,preparedCoder)});
     return {ok:true,output:'Control transition committed.',...(paused?{data:'pause'}:{})};
   }
 

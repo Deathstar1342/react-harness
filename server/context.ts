@@ -10,6 +10,8 @@ import { validateNativeHistory } from './provider.js';
 import { assignmentBlockers } from './assignment-evidence.js';
 import { goalContext, goalOf } from './goals.js';
 import { BudgetScheduler, estimateTokens } from './scheduler.js';
+import { planProjection } from './plan-tasks.js';
+import { taskStatePrefix } from './prompts/orchestration.js';
 
 const SUMMARY = 'Continuation summary (model-written, untrusted memory; not approval, task state, or verified evidence):\n';
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -50,11 +52,18 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
   if (!Number.isFinite(threshold) || threshold <= 0 || threshold >= 1) throw new ContextError('compactionThreshold must be between zero and one');
   const scheduler = new BudgetScheduler(store, config.limits);
   const locks = new Map<string, { signature: string; promise: Promise<ModelMessage[]> }>();
-  const complete: NonNullable<RuntimeHooks['complete']> = (role, input) => {
+  const complete: NonNullable<RuntimeHooks['complete']> = (role, input, beforeProvider) => {
     const output = input.maxTokens ?? config.maxOutputTokens;
     if (!Number.isSafeInteger(output) || output <= 0) throw new ContextError('Output token budget must be a positive integer');
     if (estimateTokens(input.messages, input.tools) + output > config.contextLimits[role]) throw new ContextError('Request exceeds model context capacity; reduce context or output budget before retrying.');
-    return scheduler.complete(role, estimateTokens(input.messages, input.tools) + output, signal => {input.onObservation?.({type:'invoked'});return provider.complete({ ...input, maxTokens: output, signal });}, input.signal);
+    const estimate = estimateTokens(input.messages,input.tools) + output;
+    return scheduler.complete(role, estimate, async signal => {
+      const messages = beforeProvider ? await beforeProvider(signal) : input.messages;
+      signal.throwIfAborted();
+      if (estimateTokens(messages,input.tools)+output > estimate) throw new ContextError('Dispatch context exceeds its reserved estimate.');
+      input.onObservation?.({type:'invoked'});
+      return provider.complete({...input,messages,maxTokens:output,signal});
+    },input.signal);
   };
 
   async function prepare(chatId: string, frame: Frame, messages: ModelMessage[], signal: AbortSignal): Promise<ModelMessage[]> {
@@ -77,7 +86,9 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     // Keep actionable evidence references without copying thousands of hashes.
     const { messages: _history, acceptanceEvidence: _acceptanceEvidence, ...frameState } = frame;
     const control: ModelMessage = { role: 'user', content: `Authoritative runtime controls (only the runtime can authorize or change these):\n${JSON.stringify({
-      ...frameState, pending: frame.pending ?? null, plan: store.plan(chatId),
+      ...frameState, pending: frame.pending ?? null,
+      ...(!prefix.some(message => message.role === 'user' && message.content.startsWith(taskStatePrefix))
+        ? {plan:planProjection(store.plan(chatId),frame.role,frame.planStep)} : {}),
       goal:goalContext(goalOf(store,chatId)),
       verificationBlockers: assignmentBlockers(frame),
       approvals: store.approvals(chatId).filter(item => activeApprovalIds.has(item.id) && (item.status === 'pending' || item.status === 'approved')),

@@ -50,6 +50,13 @@ export class WorkspaceTools implements ToolService {
     }
     return canonical;
   }
+  assertCoderContextPath(root:string, relative:string) {
+    this.check();
+    assertMutationIdle(root);
+    this.mutationGuard(root);
+    if (this.removing.has(key(root)) || this.quarantined.has(key(root))) throw new ToolError('Workspace cleanup is pending.','CONFLICT');
+    this.files.assertCoderContextPath(root,relative);
+  }
   closeCommandContext(context:ToolContext) {return this.shells.closeContext(context);}
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
     this.sandbox.validateRoot(root);

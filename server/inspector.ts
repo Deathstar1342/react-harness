@@ -5,10 +5,11 @@ import type {InspectorView,InspectorLink} from '../shared/types.js';
 import {INSPECTOR_LIMITS as L,parseInspector} from './inspector-records.js';
 import {parseNativeJSON} from './native-json.js';
 import {nativePrivateUnit} from './native-storage.js';
+import {taskLimits} from './plan-tasks.js';
 const identity=z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/),int=z.number().safe().int().nonnegative();
 const cursorSchema=z.object({v:z.literal(1),chatId:identity,revision:z.string().regex(/^[a-f0-9]{64}$/),upper:int,before:int}).strict();
 const fail=(code:number)=>Object.assign(Error(code===409?'Inspector changed. Reload the observation.':code===404?'Inspector evidence unavailable.':'Inspector observation could not be read.'),{statusCode:code});
-const parse=(raw:unknown,max=L.rowBytes):Record<string,unknown>|null=>{if(typeof raw!=='string'||Buffer.byteLength(raw)>max)return null;try{const v=parseNativeJSON(raw,max);return v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:null;}catch{return null;}};
+const parse=(raw:unknown,max:number=L.rowBytes):Record<string,unknown>|null=>{if(typeof raw!=='string'||Buffer.byteLength(raw)>max)return null;try{const v=parseNativeJSON(raw,max);return v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:null;}catch{return null;}};
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 function checkedPlan(plan:Record<string,unknown>|null):boolean {
  if(!plan||!identity.safeParse(plan.id).success||!int.safeParse(plan.version).success||!Array.isArray(plan.phases)||plan.phases.length>100)return false;
@@ -47,7 +48,15 @@ function observe(store:Store,chatId:string,cursor?:string):InspectorView{
  // Original evidence is bounded before parsing; no test bodies/frames/ledgers are fetched.
  const events=store.db.prepare(`WITH recent AS (SELECT id,type,data,length(CAST(data AS BLOB)) AS bytes FROM events WHERE chat_id=? AND type IN ('file_changed','tests','plan_progress') ORDER BY id DESC LIMIT ?),bounded AS (SELECT *,SUM(CASE WHEN bytes<=? THEN bytes ELSE 0 END) OVER(ORDER BY id DESC) AS total FROM recent) SELECT id,type,CASE WHEN bytes<=? AND total<=? THEN data END AS data FROM bounded ORDER BY id DESC`).all(chatId,L.evidenceRows,L.rowBytes,L.rowBytes,L.evidenceBytes);
  const validPath=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=1024&&!v.includes('\\')&&!v.startsWith('/')&&!v.split('/').some(p=>!p||p==='.'||p==='..')&&!/[:\u0000-\u001f]/.test(v);
- const state=store.db.prepare('SELECT CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM state WHERE key=?').get(L.rowBytes,'plan:'+chatId),parsedPlan=parse(state?.data),plan=checkedPlan(parsedPlan)?parsedPlan:null;
+ const planBytes=L.rowBytes+taskLimits.planBytes+1000;
+ const state=store.db.prepare('SELECT CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM state WHERE key=?').get(planBytes,'plan:'+chatId);
+ const parsedPlan=parse(state?.data,planBytes);
+ const outline:Record<string,unknown>|false=checkedPlan(parsedPlan)&&{
+   ...parsedPlan!,phases:(parsedPlan!.phases as {steps:Record<string,unknown>[]}[]).map(phase=>({
+     ...phase,steps:phase.steps.map(({task:_task,...step})=>step),
+   })),
+ };
+ const plan=outline && Buffer.byteLength(JSON.stringify(outline))<=L.rowBytes ? outline : null;
  for(const e of events){if(links.length>=L.links){linksUnavailable++;continue;}const d=parse(e.data);if(!d){linksUnavailable++;continue;}const eventId=Number(e.id);
  if(e.type==='file_changed'&&validPath(d.path)&&d.source==='agent'){const original=identity.safeParse(d.changeId).success?store.db.prepare("SELECT id,CASE WHEN typeof(status)='text' AND length(CAST(status AS BLOB))<=16 AND status IN ('recording','confirmed','rejected','unknown','undoing','undone') THEN status END AS status,CASE WHEN length(CAST(summary AS BLOB))<=? THEN summary END AS data FROM file_changes WHERE id=? AND project_id=?").get(L.rowBytes,String(d.changeId),projectId):undefined,f=parse(original?.data);if(f&&f.id===original?.id&&f.projectId===projectId&&f.chatId===chatId&&(f.path===d.path||f.destinationPath===d.path)&&original?.status==='confirmed')links.push({kind:'files',id:String(f.id),eventId,path:d.path});else linksUnavailable++;}
  else if(e.type==='tests'&&identity.safeParse(d.id).success){const original=store.db.prepare('SELECT id,chat_id,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM test_reports WHERE id=? AND chat_id=?').get(L.rowBytes,String(d.id),chatId),t=parse(original?.data);if(t&&t.id===original?.id&&original?.chat_id===chatId&&same(t,d))links.push({kind:'tests',id:String(d.id),eventId});else linksUnavailable++;}

@@ -17,6 +17,12 @@ export function safeRelative(input: string, allowRoot = false): string {
   if (clean.some(isProtected)) throw new ToolError('Protected Git or credential path.');
   return clean.join('/');
 }
+/** Existing assignment comparison for canonical file targets. */
+export function inAssignedPath(filename:string, item:string): boolean {
+  const target = filename.replaceAll('\\','/').replace(/^\.\//,'');
+  const scope = item.replaceAll('\\','/').replace(/\/$/,'').replace(/^\.\//,'');
+  return target === scope || target.startsWith(`${scope}/`);
+}
 export function isProtected(part: string): boolean {
   return /^(?:\.git(?:$|\.)|\.env|\.ssh$|\.aws$|\.azure$|\.docker$|\.kube$|application_default_credentials\.json$|\.config$|\.gnupg$|\.npmrc$|\.netrc$|\.pypirc$|\.gitconfig$|credentials(?:$|\.)|secrets?(?:$|\.)|id_(?:rsa|dsa|ecdsa|ed25519)(?:$|\.))/i.test(part) || /\.(?:pem|key|p12|pfx|keystore)$/i.test(part);
 }
