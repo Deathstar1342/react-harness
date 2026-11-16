@@ -4,6 +4,7 @@ import type {RecoveryEntry,RecoveryStatus,RecoveryView,ChatStatus,GoalStatus,Pla
 import {toolRegistry,parseToolArguments} from './tool-registry.js';
 import {helperCanonical} from './package-helper.js';
 import {parseNativeJSON} from './native-json.js';
+import {readPlanEvidence} from './plan-evidence.js';
 
 export const RECOVERY_LIMITS={events:500,installs:100,processes:64,calls:100,steps:100,entries:200,evidence:8,
   eventBytes:131072,recordBytes:131072,runBytes:2097152,sourceBytes:4194304} as const;
@@ -252,7 +253,10 @@ function observe(store:Store,chatId:string):RecoveryView {
     for(const source of sources)eventEvidence(entry,source.id,source.created_at);
     if(receiptEventId){const source=store.db.prepare('SELECT created_at FROM events WHERE id=? AND chat_id=?').get(receiptEventId,chatId);eventEvidence(entry,receiptEventId,source?.created_at);}
   }
-  const rawGoal=state(`goal:${chatId}`,RECOVERY_LIMITS.recordBytes,'goal'),rawPlan=state(`plan:${chatId}`,RECOVERY_LIMITS.recordBytes,'plan');
+  const rawGoal=state(`goal:${chatId}`,RECOVERY_LIMITS.recordBytes,'goal');
+  const planSource=cover('plan',1),planObservation=readPlanEvidence(store.db,chatId,RECOVERY_LIMITS.recordBytes);
+  if(planObservation.status==='unavailable') planSource.unavailable++;
+  const rawPlan=planObservation.outline;
   let goal:RecoveryView['goal'],plan:RecoveryView['plan'];
   if(rawGoal){
     const id=identity(rawGoal.id),revision=integer(rawGoal.revision),s=String(rawGoal.status),human=identity(rawGoal.humanMessageId);

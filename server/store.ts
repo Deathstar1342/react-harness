@@ -14,6 +14,7 @@ import {recoverProcessJobs} from './process-jobs.js';
 import { addGoalUncertainty, goalOf, goalStatus, protectPlan, saveGoal } from './goals.js';
 import type { RunState } from './runtime.js';
 import { assertTaskBudget, publicPlan, taskDefinition, type StoredPlan, type StoredPlanStep } from './plan-tasks.js';
+import {installPlanEvidenceReader} from './plan-evidence.js';
 import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
@@ -81,6 +82,7 @@ export class Store {
     catch(error){database.exec('ROLLBACK');throw error;}
     database.exec('BEGIN IMMEDIATE');
     try {installInspector({db:database} as Store);installQueue({db:database} as Store);database.exec('COMMIT');}catch(error){database.exec('ROLLBACK');throw error;}
+    installPlanEvidenceReader(database);
     database.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run('prototype:protocol',JSON.stringify('native-tools-v1'));
     return database;
     }catch(error){database.close();throw error;}
