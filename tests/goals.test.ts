@@ -58,7 +58,13 @@ describe('M24 durable goals with synthetic provider and real runtime/store/files
     const t=await fixture(2);await t.seed();
     const phases=structuredClone(t.plan.phases);
     if(edit==='removed')phases.pop();else if(edit==='renamed')phases[1].steps[0].title='Pretend completed';else phases[1].steps=[];
-    t.replies.push(call('set_plan',{phases}),request({reviewEventIds:[999]}),ask());await run(t);
+    const read = inspect();
+    const admission = phases.flatMap(phase=>phase.steps.map(step=>({
+      phaseId:phase.id,stepId:step.id,sources:[{path:'result.txt',callId:read.toolCalls![0].id}],newFiles:[],
+      checks:[{method:'inspection',target:'result.txt',expected:'Report current observed file content.'}],
+    })));
+    t.replies.push(read,call('set_plan',{phases,admission}),request({reviewEventIds:[999]}),ask());await run(t);
+    expect(t.store.plan(t.chat.id).version).toBe(edit === 'same-id-shrink' ? t.plan.version : t.plan.version! + 1);
     expect(goal(t).requiredSteps.some(step=>step.title==='Deliver phase 2')).toBe(true);
     expect(goal(t).status).toBe('waiting_for_user');expect(goal(t).completion).toBeUndefined();
   });

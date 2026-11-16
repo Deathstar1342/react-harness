@@ -100,9 +100,10 @@ describe('durable architect orchestration',()=> {
     expect(t.store.events(t.chat.id).filter(event=>event.type==='review')).toHaveLength(3);
     expect(t.store.messages(t.chat.id).at(-1)?.content).toBe('Unresolved verification remains');
   });
-  it('does not accept model-authored completion without associated work',async()=> {
-    const plan = {phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement',status:'done'}]}]};
+  it('preserves the saved status when the model re-emits the plan as done',async()=> {
+    const plan = {phases:[{id:'phase',title:'Build',steps:[{id:'step',title:'Implement',status:'done' as const}]}]};
     const t = setup([action('set_plan',plan),final('Work remains')]);
+    t.store.revisePlan(t.chat.id,plan);
     await t.runtime.submit(t.chat.id,'Build it');await t.runtime.wait(t.chat.id);
     expect(t.store.plan(t.chat.id).phases[0].steps[0].status).toBe('pending');
     expect(t.store.events(t.chat.id).filter(event=>event.type==='review')).toHaveLength(0);

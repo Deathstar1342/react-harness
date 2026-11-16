@@ -152,6 +152,139 @@ it.each(['start','after-response'])('inspector actual native final COMMIT veto p
  const inspect=new DatabaseSync(filename,{readOnly:true});try{const rows=inspect.prepare('SELECT data FROM inspector_requests').all();expect(rows).toHaveLength(phase==='start'?0:1);if(rows.length)expect(JSON.parse(String(rows[0].data))).toMatchObject({outcome:'pending',stage:'invoked',endedAt:null,usage:null});}finally{inspect.close();}
  }finally{store.close();}
 });
+it.each(['valid', 'identity', 'commit'] as const)('native planning refreshes after HTTP scope expiry and preserves fences, case=%s', async scenario => {
+  const t = await peer();
+  const fs = await import('node:fs/promises');
+  const {default: Fastify} = await import('fastify');
+  const {nativeReply} = await import('./native-fixture.js');
+  const temp = realpathSync(tmpdir()), base = mkdtempSync(path.join(temp,'native-plan-'));
+  const state = path.join(base,'state'), workspace = path.join(base,'workspace');
+  const root = path.join(workspace,randomUUID()), filename = path.join(state,'state.sqlite');
+  mkdirSync(state);
+  mkdirSync(root,{recursive:true});
+  const file = 'export function greeting() { return "hello"; }\n';
+  await fs.writeFile(path.join(root,'app.ts'),file);
+  const identity = lstatSync(workspace,{bigint:true});
+  let clock = Date.now();
+  vi.spyOn(Date,'now').mockImplementation(() => clock);
+  if (process.platform === 'win32') {
+    // The real controller runs on Linux. Adapt only native POSIX parsing
+    // for the temporary Windows fixtures, as in the other observer tests.
+    vi.spyOn(path.posix,'isAbsolute').mockImplementation(path.isAbsolute.bind(path));
+    vi.spyOn(path.posix,'normalize').mockImplementation(value => value);
+    vi.spyOn(path.posix,'dirname').mockImplementation(path.dirname.bind(path));
+  }
+  const authority = await import('../server/native-storage.js');
+  const policy = {
+    record:{storageId:t.descriptor.storageId, launchId:t.descriptor.launchId},
+    roots:{state,workspace,config:path.join(base,'config'),control:path.join(base,'control')},
+    verifyRoots: () => {
+      const live = lstatSync(workspace,{bigint:true});
+      if (live.ino !== identity.ino || live.dev !== identity.dev) throw new Error('Workspace bind identity changed.');
+    },
+    permits: (input: string, privateClass: boolean) => {
+      const location = privateClass ? state : workspace;
+      return input === location || input.startsWith(location + path.sep);
+    },
+  } as unknown as NativeBindPolicy;
+  const attest = vi.fn(async () => ({...policy.record,gateId:'a'.repeat(64),issuedAt:clock,expiresAt:clock+10000}));
+  authority.installNativeStorage(policy,attest,t.descriptor);
+
+  const {Store} = await import('../server/store.js');
+  const {Runtime} = await import('../server/runtime.js');
+  const {WorkspaceTools} = await import('../server/tools/index.js');
+  const {readConfig} = await import('../server/config.js');
+  const store = new Store(filename), tools = new WorkspaceTools(), app = Fastify();
+  const project = store.createProject('Native planning',root);
+  const ordinary = store.createChat(project.id,'Ordinary','review'), planning = store.createChat(project.id,'Plan','review');
+  const read = nativeReply('read_file_range',{path:'app.ts',startLine:1,count:1});
+  const absence = nativeReply('inspect_new_plan_path',{path:'new.ts'});
+  const proposal = nativeReply('set_plan',{
+    phases:[{id:'p',title:'Greeting',steps:[{id:'s',title:'Update greeting',status:'pending'}]}],
+    admission:[{phaseId:'p',stepId:'s',
+      sources:[{path:'app.ts',callId:read.toolCalls![0].id,symbol:'greeting'}],
+      newFiles:[{path:'new.ts',callId:absence.toolCalls![0].id}],
+      checks:[{method:'inspection',target:'new.ts',expected:'Check the new file defines the requested greeting.'}],
+    }],
+  });
+  const updates: string[] = [];
+  const publish = store.setPlan.bind(store);
+  let attempted = false;
+  if (scenario === 'commit') vi.spyOn(store,'setPlan').mockImplementation((chatId, plan) => {
+    publish(chatId,plan);
+    attempted = true;
+    Atomics.store(t.words,1,Atomics.load(t.words,0)+1);
+  });
+  let providerCalls = 0;
+  const runtime = new Runtime(store,{models:async()=>[],complete:async request => {
+    // Expire the original request scope during every provider response.
+    clock += 11001;
+    updates.push(...request.messages.filter(message => message.role === 'tool').map(message => message.content));
+    expect(request.messages.some(message => message.content.startsWith('Repository overview from the start') && message.content.includes('app.ts'))).toBe(true);
+    switch (++providerCalls) {
+      case 1: return {text:'Ordinary response.',finishReason:'stop'};
+      case 2: return read;
+      case 3: return absence;
+      case 4:
+        if (scenario === 'identity') {
+          await fs.rename(workspace,workspace+'-retained');
+          await fs.mkdir(root,{recursive:true});
+          await fs.writeFile(path.join(root,'app.ts'),file);
+        }
+        return proposal;
+      default: return {text:'Planning response.',finishReason:'stop'};
+    }
+  }},tools,readConfig({HARNESS_HOME:path.join(base,'home'),HARNESS_DATA_DIR:state,HARNESS_WORKSPACE_ROOT:workspace}),{instructions:()=>''});
+  authority.registerNativeStorageScope(app);
+  app.post<{Params:{id:string};Body:{text:string}}>('/test-chat/:id',async request => {
+    // The initial Architect snapshot likewise starts after preHandler expiry.
+    clock += 11001;
+    await runtime.submit(request.params.id,request.body.text);
+    return {started:true};
+  });
+  const dispatch = (id: string, text: string) => app.inject({method:'POST',url:'/test-chat/'+id,payload:{text}});
+  try {
+    expect((await dispatch(ordinary.id,'Describe this repository')).statusCode).toBe(200);
+    await runtime.wait(ordinary.id);
+    expect(store.chat(ordinary.id).status).toBe('idle');
+    expect(store.messages(ordinary.id).at(-1)?.content).toBe('Ordinary response.');
+    const before = attest.mock.calls.length;
+
+    expect((await dispatch(planning.id,'/plan Prepare the greeting change')).statusCode).toBe(200);
+    const settled = runtime.wait(planning.id);
+    if (scenario === 'valid') {
+      await settled;
+      expect(store.chat(planning.id).status).toBe('idle');
+      expect(store.plan(planning.id)).toMatchObject({version:1, phases:[{steps:[{status:'pending'}]}]});
+      expect(updates.some(line => JSON.parse(line).data?.planEvidenceCallId === read.toolCalls![0].id)).toBe(true);
+      expect(updates.some(line => JSON.parse(line).data?.planEvidenceCallId === absence.toolCalls![0].id)).toBe(true);
+      expect(await fs.readFile(path.join(root,'app.ts'),'utf8')).toBe(file);
+      await expect(fs.readFile(path.join(root,'new.ts'))).rejects.toMatchObject({code:'ENOENT'});
+      expect(providerCalls).toBe(5);
+    } else {
+      await settled.catch(() => {});
+      expect(providerCalls).toBe(4);
+      expect(attempted).toBe(scenario === 'commit');
+      const durable = new DatabaseSync(filename,{readOnly:true});
+      try {
+        expect(durable.prepare('SELECT data FROM state WHERE key=?').get('plan:'+planning.id)).toBeUndefined();
+        const rows = durable.prepare("SELECT key FROM state WHERE key LIKE ?").all('%:'+proposal.toolCalls![0].id);
+        expect(rows).toHaveLength(0);
+      } finally { durable.close(); }
+      expect(() => store.setState('planning:must-not-write',true)).toThrow(/recovery/);
+    }
+    expect(attest.mock.calls.length).toBeGreaterThan(before + 4);
+  } finally {
+    await runtime.close().catch(()=>{});
+    await app.close();
+    await tools.dispose();
+    store.close();
+    vi.restoreAllMocks();
+    if (path.dirname(base) !== temp || !path.basename(base).startsWith('native-plan-')) throw new Error('Unsafe cleanup route');
+    await fs.rm(base,{recursive:true,force:true});
+  }
+}, 30000);
+
 it.each(['claim','dispatch','terminal'])('M37 queue exact native observer final COMMIT veto; phase=%s',async phase=>{
  const t=await peer(),root=mkdtempSync(path.join(realpathSync(tmpdir()),'native-queue-')),state=path.join(root,'state'),workspace=path.join(root,'workspace'),projectRoot=path.join(workspace,randomUUID());mkdirSync(state);mkdirSync(projectRoot,{recursive:true});
  const dirname=process.platform==='win32'?vi.spyOn(path.posix,'dirname').mockImplementation(path.dirname.bind(path)):undefined,absolute=process.platform==='win32'?vi.spyOn(path.posix,'isAbsolute').mockImplementation(path.isAbsolute.bind(path)):undefined,normalize=process.platform==='win32'?vi.spyOn(path.posix,'normalize').mockImplementation(value=>value):undefined;

@@ -1,0 +1,11 @@
+# Local LLM repository reconnaissance coordinator review
+
+The first local LLM milestone adds a bounded repository overview for the Architect and requires current native file observations for new or revised plan steps. The existing revisioned SQLite Plan remains authoritative. The review covered fresh native storage authority and explicit clearing of an existing plan, including exact goal and transaction boundaries.
+
+Tested source `e1409eee7aad9fe8db923d41b7ed92d85e503bdf` has tree `8648a262f1610584f85ae3f58287921aaf3eecec`. Published handoff `07edba13ac928e64d136366877cd9a6bc57a2e1f` changes only the [milestone report](local-llm-reconnaissance.md). Reviewed baseline main is `9c6f66f86e956db370fa12c275f064d6eb71564f`.
+
+Independent Windows validation passed **1,229 tests with 47 platform skips**, both typechecks, and fresh web and Electron builds. The 117 focused checks also passed with one skip. With the shorter verified fixture root, the unchanged checkpoint limit passed at 4,188,151 returned bytes in the focused test. The child's long-path failures on both the baseline and candidate remain recorded. A first restricted coordinator run encountered hard-link and native observer errors. Running the same focused tests with normal access in the verified workspace resolved those errors without changing the test or product.
+
+Authenticated exact-source review verified all ten jobs across six workflows and all 118 declared steps, including 97 applicable successes and 21 expected skips. The nine published archives were downloaded and checked for exact digest and size, safe unique paths, regular members and all CRCs. The Windows payload contains 10,405 members and all 10,404 manifest hashes verified. Exact membership, 42 copied Git files, lock, source and image provenance matched. The Desktop receipts cover browser and sandboxed Electron regressions. The Container archive verifies the connected browser and owned worker. Exported Linux lifecycle evidence uses synthetic dialogs, and the relocated Windows payload proves its dependency closure.
+
+Integration is pending fresh exact-main workflow and artifact acceptance. The next local LLM milestone is task-specific source context. M21 remains held. Actual local-model quality and GPU behavior remain unverified.
