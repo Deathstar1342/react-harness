@@ -70,6 +70,39 @@ it('gives a completion Critic a bounded current receipt-relative patch and exact
   expect(JSON.stringify(test.store.db.prepare("SELECT data FROM state WHERE key LIKE 'native:frame:%'").all())).not.toContain(criticEvidencePrefix);
 });
 
+it('limits managed check hints to the exact normalized delegation inside the wider Plan',async()=>{
+  const test=await fixture(()=>{});
+  const outside='result.txt.sibling';
+  await test.seed('result.txt','In-scope fixture text\n');
+  await test.seed(outside,'OUTSIDE_SOURCE_BODY\n');
+  const insideRead=read(), outsideRead=call('read_file',{path:outside});
+  const plan=call('set_plan',{
+    phases:[{id:'phase-1',title:'Inspect sources',steps:[{id:'step-1',title:'Review implementation',status:'pending'}]}],
+    admission:[{phaseId:'phase-1',stepId:'step-1',
+      sources:[{path:'result.txt',callId:insideRead.toolCalls![0].id},{path:outside,callId:outsideRead.toolCalls![0].id}],
+      newFiles:[],task:{objective:'Inspect the admitted Plan inputs.'},
+      checks:[{method:'inspection',target:outside,expected:'OUTSIDE_CHECK_EXPECTED'},
+        {method:'inspection',target:'result.txt',expected:'IN_SCOPE_CHECK_EXPECTED'}]}],
+  });
+  test.replies.push(insideRead,outsideRead,plan,()=>{
+    const {id,version}=test.store.plan(test.chat.id);
+    return test.delegate(1,{paths:['./result.txt'],planStep:{planId:id,planVersion:version,phaseId:'phase-1',stepId:'step-1'}});
+  },read(),complete(),input=>{
+    const packet=evidence(input)!;
+    expect(packet.content).toContain('IN_SCOPE_CHECK_EXPECTED');
+    expect(packet.content).toContain('"target":"result.txt"');
+    expect(JSON.stringify(input.messages)).not.toMatch(/result\.txt\.sibling|OUTSIDE_CHECK_EXPECTED|OUTSIDE_SOURCE_BODY/);
+    expect(stateOf(input).assignment.paths).toEqual(['./result.txt']);
+    return pass();
+  },complete());
+  await test.run();
+  expect(review(test)).toEqual([expect.objectContaining({disposition:'accepted'})]);
+  expect(test.requests).toHaveLength(8);
+  expect(test.executed.map(action=>[action.name,action.args.path])).toEqual([
+    ['read_file','result.txt'],['read_file',outside],['read_file','result.txt'],
+  ]);
+});
+
 it('drops a once-current source body after the managed scheduler boundary',async()=>{
   let test: Fixture;
   test = await fixture(()=>test.seed('result.txt','external-line\n'));
@@ -176,6 +209,25 @@ it('uses both confirmed move paths for a scoped assignment-relative patch',async
   await test.run();
   expect(step(test).status).toBe('done');
   expect(review(test)).toEqual([expect.objectContaining({disposition:'accepted'})]);
+});
+
+it('requires the original result for every relied-on passing check even with a separate current read',async()=>{
+  const test=await fixture();
+  await test.seed();
+  test.commandResults.push(testResult('passed'),testResult('passed'));
+  test.replies.push(test.delegate(),verification(),read(),complete(),()=>{
+    const id=receipt(test,'run_tests')!;
+    test.store.db.prepare("UPDATE events SET data=json_set(data,'$.reviewReceipt.origin','foreign') WHERE id=?").run(id);
+    return pass();
+  },input=>{
+    expect(stateOf(input).role).toBe('coder');
+    expect(input.messages.at(-1)?.content).toContain('current original native result is unavailable');
+    expect(step(test).status).toBe('blocked');
+    return verification();
+  },complete(),pass(),complete());
+  await test.run();
+  expect(review(test)).toEqual(['local_repair','accepted'].map(disposition=>expect.objectContaining({disposition})));
+  expect(test.executed.map(action=>action.name)).toEqual(['run_tests','read_file','run_tests']);
 });
 
 it('accepts the same successful exact legacy read and raw pass shape',async()=>{

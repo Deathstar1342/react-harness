@@ -882,7 +882,14 @@ export class Runtime {
     const live = () => this.completionParent(chatId,state,frame) === parent && this.reviewOrigin(chatId,state,parent) === origin;
     const evidence = this.collectReviewEvidence(chatId,state,parent,frame,reviewLimits.rows);
     const chat = this.store.chat(chatId);
-    const checks = parent.planStep ? this.store.planStep(chatId,parent.planStep)?.task?.checks ?? [] : [];
+    const scopes = coderScopes(parent.scope).map(path=>safeRelative(path));
+    const task = parent.planStep ? this.store.planStep(chatId,parent.planStep)?.task : undefined;
+    const checks = task?.checks.filter(check=>{
+      try {
+        const target = reconnaissancePath(check.target);
+        return scopes.some(scope=>inAssignedPath(target,scope));
+      } catch { return false; }
+    }) ?? [];
     const render = (context: ReturnType<typeof unavailableReview>, budget: number) => {
       const advisory = renderReviewEvidence(evidence,context,checks,budget);
       if (!advisory) return messages;
@@ -890,7 +897,7 @@ export class Runtime {
       return [...messages.slice(0,insert),advisory,...messages.slice(insert)];
     };
     let context = unavailableReview();
-    if (!this.reviewedContext.has(frame) && coderScopes(parent.scope).length) {
+    if (!this.reviewedContext.has(frame) && scopes.length) {
       try {
         context = await runNativeOperation(async () => {
           signal.throwIfAborted();
@@ -946,7 +953,7 @@ export class Runtime {
     const evidence = this.collectReviewEvidence(chatId,state,parent,reviewer);
     const candidates = reviewFileCandidates(evidence.receipts).reverse();
     let files: ReviewFileObservation = {files:[]}, workspaceIdentity: string|undefined;
-    if (candidates.length || reviewReplan(action.args)) {
+    if (candidates.length || parent.acceptanceEvidence?.checks.length || reviewReplan(action.args)) {
       try {
         files = await runNativeOperation(() => {
           const root = this.planningWorkspace(chatId);
@@ -2151,7 +2158,7 @@ export class Runtime {
     }
     const currentFiles = currentReceiptFiles(evidence.receipts,files,this.store,chat.projectId,chatId);
     const currentCheck = (receipt: typeof evidence.receipts[number]) => {
-      if (receipt.role!=='coder' || receipt.legacy || receipt.tool!=='run_tests' || scope?.status!=='observed') return false;
+      if (!currentWorkspace || receipt.role!=='coder' || receipt.legacy || receipt.tool!=='run_tests' || scope?.status!=='observed') return false;
       const check = parent.acceptanceEvidence?.checks.find(item=>item.eventId===receipt.id);
       return !!check && check.scopeDigest===scope.digest;
     };
@@ -2164,6 +2171,12 @@ export class Runtime {
     const findings = rawFindings.slice(0,8).map(item=>boundedReviewText(item).slice(0,768));
     const processBlockers = this.processes.blockers(chat.projectId,parent.id);
     const blockers = [...assignmentBlockers(parent),...processBlockers];
+    const observedIds = new Set(observed.map(receipt=>receipt.id));
+    for (const check of parent.acceptanceEvidence?.checks ?? []) {
+      if (check.status==='passed' && !observedIds.has(check.eventId)) {
+        blockers.push('Verification event '+check.eventId+': current original native result is unavailable. Repeat the same bounded check with complete observed evidence.');
+      }
+    }
     const goal = goalOf(this.store,chatId), binding = parent.assignment?.goal;
     const goalBound = !!goal && goal.status!=='completed' && binding?.goalId===goal.id && binding.goalRevision===goal.revision && !!parent.planStep;
     const goalUncertain = goal && (goal.uncertaintyOverflow || goal.evidenceOverflow || unresolvedGoalEvents(this.store,chatId,goal).length>0);
