@@ -38,7 +38,7 @@ function fixture(filename=':memory:') {
       executed.push(a.name);
       return a.name==='read_file' ? workspace.execute(context,a) : {ok:true,output:'Observed fixture result'};
     },
-    read:workspace.read.bind(workspace),list:async()=>[],save:async()=>{throw new Error('unused');},setDirty:()=>{},dispose:workspace.dispose.bind(workspace),
+    read:workspace.read.bind(workspace),list:workspace.list.bind(workspace),save:async()=>{throw new Error('unused');},setDirty:()=>{},dispose:workspace.dispose.bind(workspace),
   };
   const provider={models:async()=>['fixture'],complete:async()=>{const value=queue.shift();if(!value)throw new Error('Unexpected fixture request');return (typeof value==='function'?await value():value);}};
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'synthetic-test-only'});
