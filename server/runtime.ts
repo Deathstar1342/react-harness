@@ -11,6 +11,7 @@ import { Store, unchangedPlanStructure } from './store.js';
 import { nativeResultFits, planningRead, planObservation, prepareAdmission, type PlanObservation, type PlanStepAdmission } from './plan-admission.js';
 import { observePlanningPath, reconnaissanceRoot, reconnaissancePath, repositoryOverview, reconnaissanceLimits } from './repository-reconnaissance.js';
 import { estimateTokens } from './scheduler.js';
+import { runNativeOperation } from './native-storage.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
 import { hash, safeRelative } from './tools/paths.js';
 import { definitionFor, parseToolArguments, publishedTools, toolRegistry, validateAction, validateToolResult, skillControls } from './tool-registry.js';
@@ -655,13 +656,16 @@ export class Runtime {
 
   private async initialRepositoryOverview(chatId: string, state: RunState, signal: AbortSignal): Promise<ModelMessage> {
     try {
-      const root = this.planningWorkspace(chatId);
-      const identity = JSON.stringify([root.path, root.identity, state.frames[0]?.id]);
-      const cached = this.repositoryOverviews.get(state);
-      if (cached?.identity === identity) return cached.message;
-      const message = await repositoryOverview(root, signal);
-      this.repositoryOverviews.set(state, {identity, message});
-      return message;
+      return await runNativeOperation(async () => {
+        signal.throwIfAborted();
+        const root = this.planningWorkspace(chatId);
+        const identity = JSON.stringify([root.path, root.identity, state.frames[0]?.id]);
+        const cached = this.repositoryOverviews.get(state);
+        if (cached?.identity === identity) return cached.message;
+        const message = await repositoryOverview(root, signal);
+        this.repositoryOverviews.set(state, {identity, message});
+        return message;
+      });
     } catch {
       signal.throwIfAborted();
       return {role:'user', content:'Repository overview unavailable. Use confined native reads before saving a changed plan.'};
@@ -682,20 +686,23 @@ export class Runtime {
       return state.frames.at(-1) === frame && frame.role === 'architect' && frame.queuedCalls?.[0]?.id === call.id &&
         !state.steering.length && this.planningBinding(chatId, state, frame) === binding;
     };
-    const noChange = unchangedPlanStructure(previous, proposed);
+    const clearsExistingPlan = !!previous.id && previous.phases.length > 0 && proposed.phases.length === 0;
     let checkFiles: (() => void) | undefined;
     let refusal: string | undefined;
-    if (!noChange) {
+    if (!clearsExistingPlan && !unchangedPlanStructure(previous, proposed)) {
       try {
-        const root = this.planningWorkspace(chatId);
-        const recorded = this.store.getState<PlanObservation[]>('plan:observations:' + chatId, []);
-        checkFiles = await prepareAdmission(root, previous, proposed, action.args.admission as PlanStepAdmission[] | undefined, callId => {
-          const observation = recorded.find(item => item.callId === callId && item.binding === binding &&
-            item.rootIdentity === root.identity);
-          if (!observation) return;
-          const result = this.store.getState<ToolResult | null>('native:result:' + chatId + ':' + frame.id + ':' + callId, null);
-          return result?.ok && nativeResultFits(result) ? {observation, result} : undefined;
-        }, signal);
+        checkFiles = await runNativeOperation(() => {
+          signal.throwIfAborted();
+          const root = this.planningWorkspace(chatId);
+          const recorded = this.store.getState<PlanObservation[]>('plan:observations:' + chatId, []);
+          return prepareAdmission(root, previous, proposed, action.args.admission as PlanStepAdmission[] | undefined, callId => {
+            const observation = recorded.find(item => item.callId === callId && item.binding === binding &&
+              item.rootIdentity === root.identity);
+            if (!observation) return;
+            const result = this.store.getState<ToolResult | null>('native:result:' + chatId + ':' + frame.id + ':' + callId, null);
+            return result?.ok && nativeResultFits(result) ? {observation, result} : undefined;
+          }, signal);
+        });
       } catch (error) {
         signal.throwIfAborted();
         refusal = planningRefusal(error);
@@ -703,6 +710,7 @@ export class Runtime {
     }
     return {
       current,
+      checkWorkspaceAtCommit: !!checkFiles,
       rejection: () => {
         if (!current() || plan !== JSON.stringify(this.store.plan(chatId)) || goal !== goalVersion()) {
           return 'The active plan, goal, or run changed. Use the current task and inspect its source again.';
@@ -1063,7 +1071,13 @@ export class Runtime {
             await this.refreshInstructions(chatId, state, signal);
             if (!admission.current()) continue;
           }
-          const outcome=await definition.handler({workspace:this.tools,context:this.toolContext(chatId,frame,signal),control:async request=>this.controlAction(chatId,state,frame,call,request,reviewedScope,admission)},action);
+          const outcome = await definition.handler({workspace:this.tools, context:this.toolContext(chatId,frame,signal), control:async request => {
+            const commit = () => this.controlAction(chatId,state,frame,call,request,reviewedScope,admission);
+            if (!admission?.checkWorkspaceAtCommit) return commit();
+            // Refresh only the synchronous plan/file check and SQLite transition.
+            // The surrounding tool handler and all provider work stay outside.
+            return runNativeOperation(() => admission.current() ? commit() : {ok:false,output:'The plan proposal was superseded before commit.'});
+          }}, action);
           if(outcome.data==='pause')return;
           continue;
         }
@@ -1458,18 +1472,25 @@ export class Runtime {
         let executionResult:ToolResult;
         try {
           validateAction(pending.action,frame.role,state.planOnly?'plan':'execute');
-          const capture = frame.role === 'architect' && pending.callId && planningRead(pending.action.name) ? (() => {
-            try {
-              const root = this.planningWorkspace(chatId);
-              if (root.path !== context.projectRoot) return;
-              const filename = reconnaissancePath(String(pending.action.args.path));
-              return {root, before: observePlanningPath(root, filename), binding: this.planningBinding(chatId, state, frame)};
-            } catch { return; }
-          })() : undefined;
+          const capture = frame.role === 'architect' && pending.callId && planningRead(pending.action.name)
+            ? await runNativeOperation(() => {
+              signal.throwIfAborted();
+              try {
+                const root = this.planningWorkspace(chatId);
+                if (root.path !== context.projectRoot) return;
+                const filename = reconnaissancePath(String(pending.action.args.path));
+                return {root, before: observePlanningPath(root, filename), binding: this.planningBinding(chatId, state, frame)};
+              } catch { return; }
+            })
+            : undefined;
           executionResult = await definitionFor(pending.action.name).handler({workspace:this.tools,context,process:action=>this.processAction(chatId,state,frame,pending,action),control:async()=>{throw new Error('Not a workspace call');}},pending.action);
           if (capture && !signal.aborted && capture.binding === this.planningBinding(chatId, state, frame)) {
             try {
-              observedForPlan = planObservation(pending.action, executionResult, pending.callId!, capture.binding, capture.root, capture.before);
+              observedForPlan = await runNativeOperation(() => {
+                signal.throwIfAborted();
+                if (capture.binding !== this.planningBinding(chatId, state, frame)) return;
+                return planObservation(pending.action, executionResult, pending.callId!, capture.binding, capture.root, capture.before);
+              });
               if (observedForPlan) {
                 const annotated = {...executionResult, data: {...executionResult.data as object, planEvidenceCallId: pending.callId}};
                 if (nativeResultFits(annotated)) executionResult = annotated;

@@ -48,7 +48,7 @@ async function fixture() {
     }
     await rm(base, {recursive: true, force: true});
   });
-  return {base, root, store, tools, project, chat, requests, replies, filename,
+  return {base, root, store, tools, project, chat, requests, replies, filename, runtime,
     put: (name: string, content: string) => writeFile(path.join(root, name), content),
     run: async (text = '/plan Plan the requested correction', chatId = chat.id) => {
       await runtime.submit(chatId, text);
@@ -254,6 +254,35 @@ it('rolls back a qualifying plan and success result when the SQLite COMMIT fails
   expect(resultOf(t.requests.at(-1)!, proposal).ok).toBe(false);
   expect(t.store.plan(t.chat.id)).toEqual({phases:[]});
   expect(t.store.events(t.chat.id).filter(event => event.type === 'plan')).toEqual([]);
+});
+
+it('clears a saved plan without granting building or erasing protected goal requirements and plan history', async () => {
+  const t = await fixture();
+  const original = t.store.revisePlan(t.chat.id,{phases});
+  const ref = {planId:original.id!,planVersion:original.version!,phaseId:'p',stepId:'s'};
+  t.store.progress(t.chat.id,ref,'original','in_progress','started','Original work');
+  t.store.progress(t.chat.id,ref,'original','done','accepted','Original accepted evidence');
+  const events = t.store.events(t.chat.id).filter(event => event.type === 'plan_progress');
+  t.replies.push(done,done);
+  await t.run('/plan Retain planning mode');
+  await t.run('/goal Preserve original obligations\n- Keep original evidence');
+  const originalGoal = goalOf(t.store,t.chat.id)!;
+  const clear = nativeReply('set_plan',{phases:[]});
+  t.replies.push(clear,done);
+  await t.run('/plan Clear the saved plan');
+  expect(resultOf(t.requests.at(-1)!,clear).ok).toBe(true);
+  const saved = t.store.plan(t.chat.id);
+  expect(saved).toEqual({id:original.id,version:original.version! + 1,phases:[]});
+  expect(goalOf(t.store,t.chat.id)?.requiredSteps).toEqual(originalGoal.requiredSteps);
+  expect(goalOf(t.store,t.chat.id)?.criteria).toEqual(originalGoal.criteria);
+  expect(t.store.events(t.chat.id).filter(event => event.type === 'plan_progress')).toEqual(events);
+  const modeVersion = t.store.chat(t.chat.id).modeVersion!;
+  await expect(t.runtime.startBuilding(t.chat.id,{planId:original.id!,planVersion:original.version!,modeVersion})).rejects.toMatchObject({statusCode:409});
+  await expect(t.runtime.startBuilding(t.chat.id,{planId:saved.id!,planVersion:saved.version!,modeVersion})).rejects.toMatchObject({statusCode:409});
+  await expect(t.runtime.submit(t.chat.id,'Start building')).rejects.toMatchObject({statusCode:409});
+  expect(t.store.chat(t.chat.id).mode).toBe('plan');
+  expect(t.store.getState('build:'+t.chat.id,null)).toBeNull();
+  expect(t.store.events(t.chat.id).filter(event => event.type === 'delegation')).toEqual([]);
 });
 
 it('preserves the current successful plan revision and exact acceptance on a no-op without receipts', async () => {

@@ -293,7 +293,7 @@ const descriptions: Record<string,string> = {
   git_status:'Read confined Git status without hooks or credential access.',
   git_diff:'Read confined Git changes with protected paths excluded.',
   inspect_new_plan_path:'Observe absence of a proposed new project file. Cite the returned planEvidenceCallId in set_plan.',
-  set_plan:'Save unique phase and step IDs. Include admission for new or revised steps, or a retained step for removal or reorder. Cite current read/absence IDs and observable checks. Unchanged plans are no-ops. Last in batch.',
+  set_plan:'Save unique phase and step IDs. Include admission for new or revised steps, or a retained step for removal or reorder. Cite read/absence IDs and observable checks. To clear an existing plan, use phases: []. Last in batch.',
   delegate:'Assign one coder a bounded objective, verifiable acceptance criteria and scoped paths. For related planned work bind planStep to exact current identities and revision; omit it for unrelated work. Must be last in a batch.',
   review:'Request an independent read-only review of a concrete focus. This does not accept unrelated plan steps or a whole phase. Must be last in a batch.',
   review_result:'Record a critic verdict with findings from actual files, diffs and verification. Checkpoint is not completion; PASS cannot override failed or uncertain execution, or grant OS/package authority. Must be last in a batch.',

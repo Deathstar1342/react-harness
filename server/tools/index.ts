@@ -182,7 +182,10 @@ export class WorkspaceTools implements ToolService {
         case 'inspect_new_plan_path': {
           try {
             const relative = reconnaissancePath(args.path);
-            const observation = observePlanningPath(reconnaissanceRoot(this.planningRoot(context.projectRoot)), relative);
+            const observation = await runNativeOperation(() => {
+              context.signal?.throwIfAborted();
+              return observePlanningPath(reconnaissanceRoot(this.planningRoot(context.projectRoot)), relative);
+            });
             return observation.state === 'absent'
               ? {ok: true, output: 'Proposed file is currently absent.', data: {path: relative, state: 'absent'}}
               : {ok: false, output: 'This file already exists. Read it and cite it as existing source.'};
