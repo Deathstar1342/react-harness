@@ -13,6 +13,7 @@ import { definitionFor } from './tool-registry.js';
 import {recoverProcessJobs} from './process-jobs.js';
 import { addGoalUncertainty, goalOf, goalStatus, protectPlan, saveGoal } from './goals.js';
 import type { RunState } from './runtime.js';
+import {recordContinuationControl} from './task-continuation.js';
 import { assertTaskBudget, publicPlan, taskDefinition, type StoredPlan, type StoredPlanStep } from './plan-tasks.js';
 import {installPlanEvidenceReader} from './plan-evidence.js';
 import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
@@ -70,6 +71,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS messages_chat ON messages(chat_id,seq);
       CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS approvals_chat ON approvals(chat_id);
       CREATE TABLE IF NOT EXISTS test_reports (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS file_changes (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, snapshots TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS file_changes_project ON file_changes(project_id);
@@ -344,7 +346,21 @@ export class Store {
       }
       this.invalidateApprovals(chat.id);
       for(const frame of run?.frames ?? []) {
-        if(frame.pending?.stage==='prepared' && frame.pending.action.name!=='recommend_packages') {frame.pending.stage='done';frame.pending.result={ok:false,output:'Backend restarted before dispatch; obsolete proposal was not executed.',data:{status:'not_started'}};}
+        if(frame.pending?.stage==='prepared' && frame.pending.action.name!=='recommend_packages') {
+          const pending=frame.pending;
+          const result={ok:false,output:'Backend restarted before dispatch; obsolete proposal was not executed.',data:{status:'not_started'}};
+          const call=frame.queuedCalls?.find(item=>item.id===pending.callId);
+          const key=`native:result:${chat.id}:${frame.id}:${call?.id}`;
+          if(frame.delegationEventId && call && !this.db.prepare('SELECT 1 FROM state WHERE key=?').get(key)) {
+            this.setState(key,result);
+            frame.messages.push({role:'tool',tool_call_id:call.id,content:JSON.stringify(result)});
+            frame.queuedCalls=frame.queuedCalls!.filter(item=>item.id!==call.id);
+            frame.pending=undefined;
+          } else {
+            pending.stage='done';
+            pending.result=result;
+          }
+        }
         for(const call of [...(frame.queuedCalls ?? [])]) if(call.id!==frame.pending?.callId) {
           frame.messages.push({role:'tool',tool_call_id:call.id,content:JSON.stringify({ok:false,output:'Backend restarted before dispatch; not executed.',data:{status:'not_started'}})});
           frame.queuedCalls=frame.queuedCalls!.filter(item=>item.id!==call.id);
@@ -365,7 +381,12 @@ export class Store {
     }
     for (const chat of this.chats()) if (chat.status === 'running' || chat.status === 'awaiting_approval') {
       this.updateChat(chat.id, { status: 'interrupted' });
-      this.message(chat.id,'system','The backend restarted during this task. Resume will reconcile recorded actions; uncertain commands will not be rerun automatically.');
+      this.message(chat.id,'system','The backend restarted during this task. Inspect recorded actions before resuming; uncertain commands will not be rerun automatically.');
+      const run=this.getState<RunState|null>(`run:${chat.id}`,null);
+      if(run) {
+        recordContinuationControl(this,chat.id,run,'restart');
+        if(run.continuationControl)this.setState(`run:${chat.id}`,run);
+      }
     }
   }
   close() { this.changes.removeAllListeners(); this.db.close(); }

@@ -134,7 +134,7 @@ Types in shared/types.ts are the integration boundary. All JSON API failures ret
 - GET /api/chats/:id -> ChatDetail
 - PATCH /api/chats/:id { title?, approvalMode? } -> Chat; a different approvalMode returns 409 while running, awaiting approval, or holding any pending proposal. Pause/resolve work first. A policy change never starts/resumes a run, decides a proposal, changes another chat, or changes the future-chat default.
 - POST /api/chats/:id/messages { content } -> { accepted: true }; running chat messages are steering. /plan plans without tool mutations; /btw steers.
-- POST /api/chats/:id/control { action: 'pause' | 'resume' | 'interrupt' } -> { ok: true }
+- POST /api/chats/:id/control with `{action:'pause'}`, `{action:'interrupt'}`, or `{action:'resume', precondition?:string}` returns `{ok:true}`. Exact scoped Coder continuation requires the current Recovery precondition.
 - POST /api/approvals/:id { decision: 'approve' | 'deny' } -> { ok: true }
 - GET /api/chats/:id/events?after=0 -> SSE with id, event=type, data=JSON. Events include message, status, delta, plan, approval, tool, tool_output, tests, file_changed, steering, error. Reconnect by Last-Event-ID. UI may refetch chat detail on durable events.
 - GET /api/projects/:id/files?path= -> FileEntry[] (one directory)
@@ -466,6 +466,14 @@ An install state cannot replace earlier uncertainty with success/non-dispatch me
 
 `destination` values (`controls`, `approvals`, `terminal`, `installs`, `plan`) are navigation hints, never URLs/capabilities/approvals. Recovery open/refresh only reads this GET; navigation focuses existing controls/panels without clicking Resume/pause/process cancellation/install status/reconciliation. Exact selected process/install IDs are retained; a record omitted by the existing terminal/profile install-history windows is labelled unavailable rather than substituted with another record. Existing effect routes retain all current Runtime/mode/planStep/approval/revision/target/expiry checks. The projection revision covers every returned state/version/coverage field except observation time; it is not an effect token. UI marks changed chat/event/mode/plan/goal/disconnection/aged observations stale and ignores obsolete chat/request responses. Opening the app/dashboard never launches a goal or command.
 
+
+## Durable task continuation
+
+Recovery can return one optional `continuation` for a retained scoped Coder assignment. It identifies the current original frame and Plan step, the held or interrupted status, and bounded historical native evidence references. A correlated result reports what the controller recorded at the time. Current workspace reads and verification remain authoritative. The read runs in the existing no-store SQLite observation snapshot. It cannot launch a provider, worker, approval, checkpoint or queue.
+
+The checked Resume request carries the available projection's 64-character lowercase hexadecimal precondition. The precondition identifies a current interruption, assignment, scoped generation, Plan and chat/model binding. It expires with plan, runtime, settings or observation changes, and the committed Resume consumes it before launch. A missing or stale precondition, incomplete original effect evidence, an unsettled action or lease, or changed guidance keeps the scoped frame paused. A request body outside the strict control schema returns 400. A changed, unavailable or held continuation returns 409 without a queue intervention, goal renewal or accepted control. Current goal and queue claims remain with their existing controls.
+
+On acceptance, the Runtime records the new generation and its exact interruption reference in the native run transaction. Only the committed state can admit a provider request. The controller rechecks current authority, existing workspace guards and applicable guidance at dispatch. The first Coder request can carry a short transient targeted read of original Plan paths with matching current source. Old test evidence remains historical until reverified. Opening Recovery and restarting the backend leave retained work paused for human inspection.
 
 ## M34 bounded task file checkpoints
 

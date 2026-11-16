@@ -5,6 +5,7 @@ import {toolRegistry,parseToolArguments} from './tool-registry.js';
 import {helperCanonical} from './package-helper.js';
 import {parseNativeJSON} from './native-json.js';
 import {readPlanEvidence} from './plan-evidence.js';
+import {observeContinuation} from './task-continuation.js';
 
 export const RECOVERY_LIMITS={events:500,installs:100,processes:64,calls:100,steps:100,entries:200,evidence:8,
   eventBytes:131072,recordBytes:131072,runBytes:2097152,sourceBytes:4194304} as const;
@@ -37,11 +38,11 @@ const missing=()=>Object.assign(new Error('Recovery evidence is unavailable for 
 
 /** A deferred, read-only SQLite snapshot. Never calls Store recovery/transaction,
  * Runtime, install history (which expires decisions), or a host/worker/helper. */
-export function recoveryView(store:Store,chatId:string):RecoveryView {
+export function recoveryView(store:Store,chatId:string,settingsBinding=''):RecoveryView {
   if(!identity(chatId))throw missing();
   store.db.exec('SAVEPOINT recovery_observation');
   try {
-    const result=observe(store,chatId);
+    const result=observe(store,chatId,settingsBinding);
     store.db.exec('RELEASE recovery_observation');
     return result;
   }catch(error){store.db.exec('ROLLBACK TO recovery_observation');store.db.exec('RELEASE recovery_observation');
@@ -50,7 +51,7 @@ export function recoveryView(store:Store,chatId:string):RecoveryView {
   }
 }
 
-function observe(store:Store,chatId:string):RecoveryView {
+function observe(store:Store,chatId:string,settingsBinding:string):RecoveryView {
   const coverage:RecoveryView['coverage']=[];
   const cover=(source:string,limit:number,truncated=false)=>{const item={source,limit,truncated,unavailable:0};coverage.push(item);return item;};
   // Both SQL-returned bytes and JSON parsing are bounded. Never return an
@@ -290,6 +291,8 @@ function observe(store:Store,chatId:string):RecoveryView {
   const priority=(s:RecoveryStatus)=>['uncertain','interrupted','running','unknown','not_started','failed','completed'].indexOf(s);
   all.sort((a,b)=>priority(a.status)-priority(b.status)||(b.updatedAt??'').localeCompare(a.updatedAt??'')||a.id.localeCompare(b.id));
   const projected=all.slice(0,entryCoverage.limit);
-  const body={schema:'recovery-v1' as const,chatId,projectId,chat:chatState,latestEventId:integer(latest?.id)??0,...(goal?{goal}:{}),...(plan?{plan}:{}),humanMessageIds,entries:projected,coverage};
+  const continuation=observeContinuation(store,chatId,true,settingsBinding).view;
+  if(continuation)cover('continuation',24,continuation.partial).unavailable=continuation.status==='unavailable'?1:0;
+  const body={schema:'recovery-v1' as const,chatId,projectId,chat:chatState,latestEventId:integer(latest?.id)??0,...(goal?{goal}:{}),...(plan?{plan}:{}),humanMessageIds,entries:projected,...(continuation?{continuation}:{}),coverage};
   return {...body,revision:createHash('sha256').update(JSON.stringify(body)).digest('hex'),observedAt:new Date().toISOString()};
 }

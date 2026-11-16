@@ -5,6 +5,7 @@ import {TransferDialog} from './TransferDialog';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallHistory } from './InstallControls';
 import {RecoveryPanel} from './RecoveryPanel';
+import type {RecoveryView} from '../shared/types';
 import {CheckpointsPanel} from './CheckpointsPanel';
 import {
   ArrowDown,
@@ -255,7 +256,7 @@ export function Conversation({
       {previewOpen&&<PreviewPanel key={project.id+chatId} projectId={project.id} revision={detail.events.filter(event=>event.type==='command').at(-1)?.id??0} connected={connection==='connected'} onClose={()=>setPreviewOpen(false)}/>}
       {checkpointsOpen&&<CheckpointsPanel key={chatId} projectId={project.id} chatId={chatId} revision={fileRevision} onClose={()=>setCheckpointsOpen(false)}/>}
       {inspectorOpen&&<InspectorPanel detail={detail} connected={connection==='connected'} onClose={()=>{setInspectorOpen(false);inspectorControl.current?.focus();}} onNavigate={link=>{if(link.kind==='files'&&link.path)onInspectFile(link.path);else if(link.kind==='plan')navigateRecovery('plan');else if(link.kind==='tests'&&detail.tests.some(report=>report.id===link.id)){setInspectorReport({id:link.id,nonce:Date.now()});setInspectorOpen(false);}}}/>}
-      {recoveryOpen&&<RecoveryPanel detail={detail} connected={connection==='connected'} onClose={()=>{setRecoveryOpen(false);recoveryControl.current?.focus();}} onNavigate={navigateRecovery}/>}
+      {recoveryOpen&&<RecoveryPanel detail={detail} connected={connection==='connected'} onClose={()=>{setRecoveryOpen(false);recoveryControl.current?.focus();}} onNavigate={navigateRecovery} onResume={precondition=>void act('resume',()=>post(`/chats/${id(chatId)}/control`,{action:'resume',precondition}))} resumePending={!!busy || !configured}/>}
       {planOpen && <section id="chat-plan" className="chat-plan" aria-label="Current plan" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){setPlanOpen(false);planControl.current?.focus();}}}>
         <div className="plan-toolbar">
           <span>{chat.mode === 'plan' ? 'Planning only' : 'Execution enabled'}</span>
@@ -570,9 +571,14 @@ export function Conversation({
                 className="text-button"
                 disabled={!!busy || !configured}
                 onClick={() =>
-                  void act("resume", () =>
-                    post(`/chats/${id(chatId)}/control`, { action: "resume" }),
-                  )
+                  void act("resume", async () => {
+                    const recovery=await request<RecoveryView>(`/chats/${id(chatId)}/recovery`);
+                    if(recovery.continuation) {
+                      setRecoveryOpen(true);
+                      return;
+                    }
+                    await post(`/chats/${id(chatId)}/control`, {action:"resume"});
+                  })
                 }
               >
                 <Play size={13} />

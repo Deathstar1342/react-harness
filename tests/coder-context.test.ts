@@ -1,7 +1,9 @@
 import {link,mkdtemp,mkdir,readFile,realpath,rm,unlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {afterEach,expect,it} from 'vitest';
+import {afterEach,expect,it,vi} from 'vitest';
+import {recoveryView} from '../server/recovery.js';
+import type {RunState} from '../server/runtime.js';
 import {createManagedHooks} from '../server/context.js';
 import {readConfig} from '../server/config.js';
 import {createGoal,goalOf} from '../server/goals.js';
@@ -15,6 +17,10 @@ import {WorkspaceTools} from '../server/tools/index.js';
 import {hash} from '../server/tools/paths.js';
 import type {CompletionResult,ModelProvider,ToolResult} from '../shared/types.js';
 import {nativeReply} from './native-fixture.js';
+import {testResult} from './orchestration-fixture.js';
+import {randomUUID} from 'node:crypto';
+import {queueText,readQueue,writeQueue} from '../server/queue-state.js';
+import {reserveMutation} from '../server/tools/mutations.js';
 
 type Request = Parameters<ModelProvider['complete']>[0];
 type Reply = CompletionResult | ((request: Request) => CompletionResult | Promise<CompletionResult>);
@@ -331,7 +337,7 @@ it('keeps critical metadata outside compaction and leaves packet source out of t
   expect(summaries.flatMap(request=>request.messages).map(message=>message.content).join('\n')).not.toMatch(/INITIAL_BODY_ONLY|Advisory Coder context/);
 });
 
-it('retains explicit restart behavior without adopting the prior packet or replaying an approval',async()=>{
+it('reloads scoped context after explicit restart Resume without replaying an approval',async()=>{
   const t = await fixture(true);
   const body = 'export function ready() { return "BEFORE_RESTART"; }\n';
   await t.put('entry.ts',body);
@@ -346,7 +352,7 @@ it('retains explicit restart behavior without adopting the prior packet or repla
   const store = new Store(t.db), tools = new WorkspaceTools();
   store.recover();
   const requests:Request[] = [];
-  const replies = [coderDone,verdict,done];
+  const replies = [fullRead('entry.ts'),coderDone,verdict,done];
   const provider:ModelProvider = {models:async()=>[],complete:async input=>{
     requests.push(input);
     const reply = replies.shift();
@@ -357,12 +363,241 @@ it('retains explicit restart behavior without adopting the prior packet or repla
   try {
     expect(store.chat(t.chat.id).status).toBe('interrupted');
     expect(requests).toHaveLength(0);
-    await recovered.control(t.chat.id,'resume');
+    const view=recoveryView(store,t.chat.id,recovered.continuationSettingsBinding()).continuation;
+    expect(view).toMatchObject({status:'available',precondition:expect.stringMatching(/^[a-f0-9]{64}$/)});
+    await expect(recovered.control(t.chat.id,'resume')).rejects.toMatchObject({statusCode:409});
+    await recovered.control(t.chat.id,'resume',view!.precondition);
     await recovered.wait(t.chat.id);
-    expect(coderRequests(requests)).toHaveLength(1);
-    expect(requests.some(request=>packet(request))).toBe(false);
+    expect(coderRequests(requests)).toHaveLength(2);
+    expect(packet(coderRequests(requests)[0])?.content).toContain('BEFORE_RESTART');
+    expect(requests.some(request=>request.messages[0].content.startsWith('Write a factual continuation'))).toBe(false);
+    expect(store.events(t.chat.id).filter(event=>event.type==='task_continuation_control').map(event=>event.data)).toEqual([
+      expect.objectContaining({kind:'restart'}),
+      expect.objectContaining({kind:'resume',interruptionEventId:view!.interruptionEventId}),
+    ]);
     expect(await readFile(path.join(t.root,'entry.ts'),'utf8')).toBe(body);
   } finally {await recovered.close(); await tools.dispose(); store.close();}
+});
+
+function durableRows(store:Store) {
+  const tables=['state','chats','events','approvals','messages','task_queues','queue_links','inspector_requests','inspector_clock','file_changes'];
+  return tables.map(table=>store.db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all());
+}
+
+const continuationOf=(t:Awaited<ReturnType<typeof fixture>>)=>recoveryView(t.store,t.chat.id,t.runtime.continuationSettingsBinding()).continuation;
+
+async function pausedContinuation(t:Awaited<ReturnType<typeof fixture>>) {
+  await t.put('entry.ts','export function ready() { return "CURRENT_AFTER_PAUSE"; }\n');
+  const read=fullRead('entry.ts');
+  t.replies.push(read,setPlan([ground([cite('entry.ts',read,'ready')])]),()=>t.delegate(['entry.ts']),fullRead('entry.ts'),done,done,done);
+  await t.run();
+  expect(t.store.chat(t.chat.id).status).toBe('paused');
+  return continuationOf(t)!;
+}
+
+it('preserves all rows on Recovery, stale, omitted and COMMIT-vetoed continuation',async()=>{
+  const t=await fixture(true);
+  const first=await pausedContinuation(t);
+  expect(first.status).toBe('available');
+  expect(first.evidence).toEqual([expect.objectContaining({path:'entry.ts',status:'succeeded'})]);
+  await t.runtime.control(t.chat.id,'pause');
+  const before=durableRows(t.store), second=continuationOf(t)!;
+  expect(second.interruptionEventId).not.toBe(first.interruptionEventId);
+  expect(second.precondition).not.toBe(first.precondition);
+  expect(JSON.stringify(second)).not.toContain('CURRENT_AFTER_PAUSE');
+  await expect(t.runtime.control(t.chat.id,'resume',first.precondition)).rejects.toMatchObject({statusCode:409});
+  await expect(t.runtime.control(t.chat.id,'resume')).rejects.toMatchObject({statusCode:409});
+  expect(durableRows(t.store)).toEqual(before);
+  const requests=t.requests.length;
+  const original=t.store.db.exec.bind(t.store.db);
+  const commit=vi.spyOn(t.store.db,'exec').mockImplementation(sql=>{
+    if(sql==='COMMIT')throw Error('Controlled COMMIT veto');
+    return original(sql);
+  });
+  try {await expect(t.runtime.control(t.chat.id,'resume',second.precondition)).rejects.toThrow('Controlled COMMIT veto');}
+  finally {commit.mockRestore();}
+  expect(durableRows(t.store)).toEqual(before);
+  expect(t.requests).toHaveLength(requests);
+  expect(continuationOf(t)?.precondition).toBe(second.precondition);
+});
+
+it('consumes the committed interruption once when Resume requests race and at the next pause',async()=>{
+  const t=await fixture(true);
+  const initial=await pausedContinuation(t);
+  await t.put('entry.ts','export function ready() { return "EXTERNAL_CHANGED_SOURCE"; }\n');
+  const read=fullRead('entry.ts');
+  t.replies.push(read,done,done,done);
+  const [first,duplicate]=await Promise.allSettled([
+    t.runtime.control(t.chat.id,'resume',initial.precondition),
+    t.runtime.control(t.chat.id,'resume',initial.precondition),
+  ]);
+  expect(first.status).toBe('fulfilled');
+  expect(duplicate).toMatchObject({status:'rejected',reason:{statusCode:409}});
+  await t.runtime.wait(t.chat.id);
+  const later=continuationOf(t)!;
+  expect(later.status).toBe('available');
+  expect(later.precondition).not.toBe(initial.precondition);
+  expect(later.evidence).toHaveLength(2);
+  const resumed=coderRequests(t.requests).findLast(request=>packet(request)?.content.includes('"state":"stale"'));
+  expect(resumed).toBeDefined();
+  expect(packet(resumed!)?.content).not.toContain('EXTERNAL_CHANGED_SOURCE');
+  await expect(t.runtime.control(t.chat.id,'resume',initial.precondition)).rejects.toMatchObject({statusCode:409});
+  expect(t.store.events(t.chat.id).filter(event=>(event.data as {kind?:string}).kind==='resume')).toHaveLength(1);
+});
+
+it('retains real file-change evidence and treats original test verification as historical',async()=>{
+  const t=await fixture(true);
+  const original='export function ready() { return "ORIGINAL"; }\n';
+  const current='export function ready() { return "UPDATED"; }\n';
+  await t.put('entry.ts',original);
+  t.store.updateChat(t.chat.id,{approvalMode:'autonomous'});
+  const execute=t.tools.execute.bind(t.tools);
+  let tests=0;
+  vi.spyOn(t.tools,'execute').mockImplementation((context,action)=>{
+    if(action.name==='run_tests') {
+      tests++;
+      return Promise.resolve(testResult('passed'));
+    }
+    return execute(context,action);
+  });
+  const read=fullRead('entry.ts'), write=nativeReply('write_file',{path:'entry.ts',baseHash:hash(original),content:current});
+  t.replies.push(read,setPlan([ground([cite('entry.ts',read,'ready')])]),()=>t.delegate(['entry.ts']),
+    write,nativeReply('run_tests',{command:'synthetic fixture verification'}),done,done,done);
+  await t.run();
+  expect(await readFile(path.join(t.root,'entry.ts'),'utf8')).toBe(current);
+  const paused=continuationOf(t)!;
+  expect(paused.evidence).toEqual([
+    expect.objectContaining({tool:'write_file',path:'entry.ts',changeId:expect.any(String),status:'succeeded'}),
+    expect.objectContaining({tool:'run_tests',report:'passed',status:'succeeded'}),
+  ]);
+  const count=t.requests.length;
+  t.replies.push(fullRead('entry.ts'),done,done,done);
+  await t.runtime.control(t.chat.id,'resume',paused.precondition);
+  await t.runtime.wait(t.chat.id);
+  expect(tests).toBe(1);
+  const first=t.requests[count];
+  expect(first.messages.find(message=>message.content.startsWith('Explicit human Resume'))?.content)
+    .toMatch(/historical.*"tool":"run_tests".*"report":"passed"/s);
+  expect(packet(first)?.content).not.toContain('UPDATED');
+  const saved=t.store.getState<RunState>(`run:${t.chat.id}`,null!);
+  expect(saved.frames.at(-1)?.acceptanceEvidence?.checks[0].status).toBe('stale');
+  expect(JSON.stringify(saved)).not.toContain('Explicit human Resume');
+});
+
+it('rejects changed guidance, provider settings and held goals without durable changes',async()=>{
+  const t=await fixture(true);
+  const paused=await pausedContinuation(t);
+  t.config.contextLimits.coder-=100;
+  const before=durableRows(t.store);
+  await expect(t.runtime.control(t.chat.id,'resume',paused.precondition)).rejects.toMatchObject({statusCode:409});
+  expect(durableRows(t.store)).toEqual(before);
+  const view=continuationOf(t)!;
+  await t.put('AGENTS.md','Changed scoped guidance.\n');
+  await expect(t.runtime.control(t.chat.id,'resume',view.precondition)).rejects.toThrow('Project guidance changed');
+  expect(durableRows(t.store)).toEqual(before);
+  const human=t.store.messages(t.chat.id).find(message=>message.role==='user')!;
+  createGoal(t.store,t.chat.id,{objective:'Held original work',acceptanceCriteria:['Review before starting']},human.id);
+  const held=durableRows(t.store);
+  await expect(t.runtime.control(t.chat.id,'resume',continuationOf(t)?.precondition)).rejects.toMatchObject({statusCode:409});
+  expect(durableRows(t.store)).toEqual(held);
+});
+
+it('leaves a running project queue and a workspace reservation untouched on refusal',async()=>{
+  const t=await fixture(true);
+  const paused=await pausedContinuation(t);
+  const held=reserveMutation(t.root);
+  try {
+    const before=durableRows(t.store);
+    await expect(t.runtime.control(t.chat.id,'resume',paused.precondition)).rejects.toMatchObject({statusCode:409});
+    expect(durableRows(t.store)).toEqual(before);
+  } finally {held.release();}
+  const version=queueText('Original next queued test fixture'), id=randomUUID();
+  const queue=readQueue(t.store,t.project.id);
+  writeQueue(t.store,{...queue,revision:1,session:randomUUID(),policyDigest:hash('fixture'),status:'running',
+    tasks:[{id,versions:[version],status:'pending',reason:'Not admitted'}],scope:[{id,revision:version.revision,digest:version.digest}]});
+  const before=durableRows(t.store);
+  await expect(t.runtime.control(t.chat.id,'resume',paused.precondition)).rejects.toThrow('Pause the project queue');
+  expect(durableRows(t.store)).toEqual(before);
+  expect(t.store.chats(t.project.id)).toHaveLength(1);
+});
+
+it('keeps an assignment paused when authoritative receipts or stored identity are damaged',async()=>{
+  const t=await fixture(true);
+  const first=await pausedContinuation(t);
+  const e=first.evidence[0];
+  t.store.db.prepare('DELETE FROM events WHERE id=? AND chat_id=?').run(e.eventId,t.chat.id);
+  const next=continuationOf(t)!;
+  expect(next.evidence).toEqual([expect.objectContaining({eventId:e.eventId,status:'unavailable'})]);
+  const before=durableRows(t.store);
+  await expect(t.runtime.control(t.chat.id,'resume',next.precondition)).rejects.toMatchObject({statusCode:409});
+  expect(durableRows(t.store)).toEqual(before);
+  const key=`run:${t.chat.id}`,run=t.store.getState<RunState>(key,null!);
+  delete run.continuationControl;
+  delete run.frames.at(-1)!.delegationEventId;
+  t.store.setState(key,run);
+  const damaged=continuationOf(t)!;
+  expect(damaged.status).toBe('unavailable');
+  const blocked=durableRows(t.store);
+  await expect(t.runtime.control(t.chat.id,'resume')).rejects.toMatchObject({statusCode:409});
+  expect(durableRows(t.store)).toEqual(blocked);
+});
+
+it('refuses a scheduled Resume invalidated by a simultaneous human pause',async()=>{
+  const t=await fixture(true);
+  const view=await pausedContinuation(t), requests=t.requests.length;
+  let enter!:()=>void, release!:()=>void;
+  const entered=new Promise<void>(resolve=>{enter=resolve;});
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  t.boundaries.push(async()=>{enter();await held;});
+  await t.runtime.control(t.chat.id,'resume',view.precondition);
+  await entered;
+  const stopping=t.runtime.control(t.chat.id,'interrupt');
+  release();
+  await stopping;
+  expect(t.requests).toHaveLength(requests);
+  expect(t.store.chat(t.chat.id).status).toBe('interrupted');
+  expect(continuationOf(t)?.interruptionEventId).not.toBe(view.interruptionEventId);
+});
+
+it('reopens an interrupted completion Critic using its existing protected Resume',async()=>{
+  const t=await fixture(true);
+  await t.put('entry.ts','export function ready() { return "REVIEW_SOURCE"; }\n');
+  const read=fullRead('entry.ts');
+  let enter!:()=>void, release!:(result:CompletionResult)=>void;
+  const reviewing=new Promise<void>(resolve=>{enter=resolve;});
+  const held=new Promise<CompletionResult>(resolve=>{release=resolve;});
+  t.replies.push(read,setPlan([ground([cite('entry.ts',read,'ready')])]),()=>t.delegate(['entry.ts']),
+    fullRead('entry.ts'),coderDone,()=>{enter();return held;});
+  await t.runtime.submit(t.chat.id,'Review the exact assigned source.');
+  await reviewing;
+  const stopping=t.runtime.control(t.chat.id,'interrupt');
+  release(verdict);
+  await stopping;
+  await t.runtime.close();
+  const saved=t.store.getState<RunState>(`run:${t.chat.id}`,null!);
+  expect(saved.frames.map(frame=>frame.role)).toEqual(['architect','coder','critic']);
+  expect(saved.continuationControl).toBeUndefined();
+  const store=new Store(t.db), tools=new WorkspaceTools();
+  store.recover();
+  const requests:Request[]=[];
+  const answers=[verdict,done];
+  const provider:ModelProvider={models:async()=>[],complete:async input=>{
+    requests.push(input);
+    const response=answers.shift();
+    if(!response)throw Error('Unexpected review request');
+    return response;
+  }};
+  const runtime=new Runtime(store,provider,tools,t.config,createManagedHooks(provider,store,t.config));
+  try {
+    expect(recoveryView(store,t.chat.id,runtime.continuationSettingsBinding()).continuation).toBeUndefined();
+    expect(requests).toHaveLength(0);
+    await runtime.control(t.chat.id,'resume');
+    await runtime.wait(t.chat.id);
+    expect(requests[0].tools?.some(tool=>tool.function.name==='review_result')).toBe(true);
+    expect(coderRequests(requests)).toHaveLength(0);
+    expect(store.events(t.chat.id).some(event=>event.type==='task_continuation_control')).toBe(false);
+    expect(store.plan(t.chat.id).phases[0].steps[0].status).toBe('done');
+  } finally {await runtime.close();await tools.dispose();store.close();}
 });
 
 it('suppresses a linked source introduced before provider dispatch',async()=>{
