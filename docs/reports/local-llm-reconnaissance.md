@@ -23,3 +23,52 @@ Baseline `9c6f66f86e956db370fa12c275f064d6eb71564f`, tree `619aa1fe65cb5d0f28353
 ## Validation plan
 
 Use deterministic temp-project fixtures for scope, secret exclusions, bounds, observation provenance, stale/deleted/changed paths and incomplete reads. Exercise the real Runtime and disk Store for accepted revisions, no-op preservation and refused edits with zero plan or goal changes. Run Node 24 typecheck, focused and full tests, build and applicable existing exact-source CI. Fixture evaluation does not establish local-model or GPU behavior.
+
+## Implementation handoff
+
+Tested source [`e1409ee`](https://github.com/Deathstar1342/react-harness/commit/e1409eee7aad9fe8db923d41b7ed92d85e503bdf) has tree `8648a262f1610584f85ae3f58287921aaf3eecec`. The branch is `codex/local-llm-reconnaissance`. The early contract was published as [`6be00ec`](https://github.com/Deathstar1342/react-harness/commit/6be00ecd5c5570fe40f42ba40e662ed9133c6f8c). Integration and exact-main validation belong to the coordinator.
+
+- The overview and planning checks use the authoritative Plan and existing native result history. Added or materially changed steps require fresh observations. Maintaining a large plan is possible through bounded revisions. Ordinary replies and no-op plan saves retain their existing behavior. A clear advances the revision through Store, retains protected goal obligations and historical progress, and blocks both routes to Start building.
+- Native controller work takes fresh storage attestations immediately around the bounded scan, before and after eligible tool results, during evidence revalidation, and at the synchronous plan transition. Provider waits and the surrounding general tool dispatch run outside those new scopes. The original worker claim and final SQLite observer remain authoritative. Regression tests exercise an actual HTTP scope hook and disk Store with an authenticated observer fixture. Expiring the inherited scope permits ordinary chat and a valid plan, replacing the workspace identity poisons the shared gate, and a final COMMIT veto rolls back the plan and its correlated result.
+- The compact native schema removed repeated dialect headers and generic string descriptions. Runtime validation still checks UTF-8 bytes and the full strict arguments. The Architect's execute-mode tool JSON plus fixed role prompt totals 22,711 UTF-8 bytes versus 23,478 on the assigned baseline, before adding the optional overview. Existing configured context limits and compaction fixtures are preserved.
+
+### Local validation
+
+- Verified the physical D: ancestor chain, common Git directory, clean source, Node v24.19.0 and the copied dependency closure with matching lock SHA-256 `e1ac0045745744da454459ee36c3df98b149a4c6802ac17bd9bf7fb733ff9b25`. Source mirrors, dependency copy, caches, fixture temp and build output stayed inside the assigned worktree.
+- Exact candidate `npm run typecheck` and `npm run build` passed on Windows. The full local suite had 1,228 passed, 47 skipped and one checkpoint failure. On the same short physical D: `t` path the unchanged baseline read 4,197,247 SQLite bytes and the candidate read 4,197,997 against the existing 4,194,304-byte checkpoint assertion. The checkpoint code and threshold were untouched. Linux Validate passed this assertion.
+- The four review cases passed on the correction. Replaying their tests against `6180ea2` in a separate source mirror reproduced three native-scope failures and the plan-clear refusal. The independent shape, provenance, stale and commit-race fixtures use controlled provider replies with the real Runtime and SQLite.
+
+### Exact-source CI
+
+All six required workflows and all 10 jobs passed on attempt 1 for the tested SHA. The 158 reported setup, job and post step records contain 137 successes and 21 expected platform or conditional skips. Linux Validate reported **1,269 passed and 7 skipped**. Container includes the connected production controller, owned worker and browser checks. Source Desktop includes both exported Linux GUIs and the relocated Windows payload check.
+
+| Workflow | Jobs | Step results |
+| --- | --- | --- |
+| [Validate 43915995799](https://github.com/Deathstar1342/react-harness/actions/runs/43915995799) | [verify 133470160880](https://github.com/Deathstar1342/react-harness/actions/runs/43915995799/job/133470160880) | 14 passed, 0 skipped |
+| [Desktop validation 43915995862](https://github.com/Deathstar1342/react-harness/actions/runs/43915995862) | [electron (windows-latest) 133470161713](https://github.com/Deathstar1342/react-harness/actions/runs/43915995862/job/133470161713), [electron (ubuntu-24.04) 133470162337](https://github.com/Deathstar1342/react-harness/actions/runs/43915995862/job/133470162337) | 29 passed, 11 skipped |
+| [Private desktop support runtime 43915995611](https://github.com/Deathstar1342/react-harness/actions/runs/43915995611) | [runtime (ubuntu-24.04) 133470161083](https://github.com/Deathstar1342/react-harness/actions/runs/43915995611/job/133470161083), [runtime (windows-latest) 133470161744](https://github.com/Deathstar1342/react-harness/actions/runs/43915995611/job/133470161744) | 30 passed, 6 skipped |
+| [Privileged helper validation 43915995920](https://github.com/Deathstar1342/react-harness/actions/runs/43915995920) | [helper 133470160934](https://github.com/Deathstar1342/react-harness/actions/runs/43915995920/job/133470160934) | 12 passed, 2 skipped |
+| [Container foundation 43915995586](https://github.com/Deathstar1342/react-harness/actions/runs/43915995586) | [linux-container 133470160932](https://github.com/Deathstar1342/react-harness/actions/runs/43915995586/job/133470160932) | 15 passed, 0 skipped |
+| [Guided container source desktop 43915995837](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837) | [linux-source (ubuntu-24.04) 133470160719](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837/job/133470160719), [linux-source (ubuntu-22.04) 133470161465](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837/job/133470161465), [windows-payload 133474686557](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837/job/133474686557) | 37 passed, 2 skipped |
+
+The nine fresh artifacts below were checked against their published workflow, source SHA, availability, size and SHA-256 metadata. Archive bytes and internal manifests are available for independent coordinator review.
+
+| Artifact | Name | Bytes | Published SHA-256 |
+| --- | --- | ---: | --- |
+| [14251310717](https://github.com/Deathstar1342/react-harness/actions/runs/43915995586/artifacts/14251310717) | container-foundation | 159644 | `009bad3288daa995d80c3733419eb761e3062fa02e7cbe192241899ab78ee0b6` |
+| [14249627869](https://github.com/Deathstar1342/react-harness/actions/runs/43915995862/artifacts/14249627869) | desktop-evidence-windows-latest | 953650 | `b1d16b16a0a0b37c393c5cc8866d9e2b9dd692020925762bd27746db07f390d0` |
+| [14248919821](https://github.com/Deathstar1342/react-harness/actions/runs/43915995862/artifacts/14248919821) | desktop-evidence-ubuntu-24.04 | 1864511 | `08523828569393b754f4977cd7cebbdb86158d0cb9c39d524b1c5a6a35b01d1c` |
+| [14250125996](https://github.com/Deathstar1342/react-harness/actions/runs/43915995611/artifacts/14250125996) | private-runtime-windows-latest | 37844 | `e9a882a8d6ee3a7b9c6911719e879da7718dc8414b1d817c4f9409b05b2d8e7e` |
+| [14249842565](https://github.com/Deathstar1342/react-harness/actions/runs/43915995611/artifacts/14249842565) | private-runtime-ubuntu-24.04 | 186177 | `40879d9c3c5c3a314ff85dcfa5868df1ac9a4aee6b0d4dad271d82959c853389` |
+| [14251330767](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837/artifacts/14251330767) | source-evidence-ubuntu-24.04 | 115837 | `39ba07e2b8fde5d8773752097cbb43fcb0c7a92f1b59c54107da4bd7893804f1` |
+| [14250831397](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837/artifacts/14250831397) | source-evidence-ubuntu-22.04 | 105663 | `2a4d01ebeed171b47a6b637f3dec198f941ecdf2bd440ee80c9a8cd35dabaaf1` |
+| [14250546565](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837/artifacts/14250546565) | source-windows | 205373429 | `16936dbb1dc20579f3f9035c97bd2a7cf27c50f81477b5a07c34a499cadb0c3d` |
+| [14250186967](https://github.com/Deathstar1342/react-harness/actions/runs/43915995837/artifacts/14250186967) | source-evidence-windows | 35705 | `22c82245b5388802227ed2b40a2a17121abba83b28fca07e0b5ef824134fdf1f` |
+
+### Retained failures and limits
+
+- [`7988a48` Validate](https://github.com/Deathstar1342/react-harness/actions/runs/43912476867) failed three existing context checks. The initial Windows run reproduced the same three failures plus the baseline checkpoint failure. Schema and prompt compaction fixed the context failures without raising limits.
+- [`6180ea2`](https://github.com/Deathstar1342/react-harness/commit/6180ea26d2ed90cbd2074b7d64bec5b030b60188) passed the six applicable workflows and published nine artifacts. It was superseded after the coordinator found the two defects reproduced by the new tests. Its exact-source status, jobs, artifact metadata and local results are retained.
+- The automatically triggered [held Installer candidates run](https://github.com/Deathstar1342/react-harness/actions/runs/43915995618) failed its existing packaged smoke at the `Persistent profile home (Linux path)` selector. M21 packaging remains paused.
+- The worktree's ignored `logs/reconnaissance` contains the source and dependency provenance, mirrored test/build logs, baseline checkpoint replay, `replay-6180ea2-native-clear.log`, GitHub job and artifact JSON, and the failed/successful CI excerpts. The report-only handoff commit changes only this report in the tested tree.
+- The overview is sampled and links are checked within project scope. Declaration-like text is a bounded lexical observation. The gate can check the exact declared sources and file identities at admission, but undisclosed dependencies and subsequent external edits are outside that observation. Implementation approvals, leases and base hashes govern later edits. Local inference quality, model compatibility and GPU behavior remain unverified.
