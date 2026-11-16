@@ -78,6 +78,8 @@ export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }
 export interface TestReport { id: string; runner: string; command: string; createdAt: string; status: 'passed' | 'failed' | 'error' | 'cancelled'; tests: TestCase[]; output: string; exitCode?: number }
 export interface ToolService {
+  /** Validate the canonical registered project root for bounded, read-only planning observations. */
+  planningRoot?(root: string): string;
   /** Trusted synchronous queue admission observation; no cleanup or dispatch. */
   assertQueueIdle?(root:string):void;
   readonly processLifecycle?: 'sandbox-dispatch-v1';

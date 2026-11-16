@@ -35,6 +35,7 @@ export async function orchestrationFixture(phases = 1, persistent = false) {
   const replies: Reply[] = [], requests: Input[] = [], executed: Action[] = [], commandResults: ToolResult[] = [];
   const tools: ToolService = {
     processLifecycle:workspace.processLifecycle,
+    planningRoot:workspace.planningRoot.bind(workspace),
     configureMutationGuard:workspace.configureMutationGuard.bind(workspace),
     closeCommandContext:workspace.closeCommandContext.bind(workspace),
     restore:workspace.restore.bind(workspace), restoreMove:workspace.restoreMove.bind(workspace),

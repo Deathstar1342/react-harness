@@ -7,7 +7,10 @@ import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
 import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef } from '../shared/types.js';
 import type { Config } from './config.js';
-import { Store } from './store.js';
+import { Store, unchangedPlanStructure } from './store.js';
+import { nativeResultFits, planningRead, planObservation, prepareAdmission, type PlanObservation, type PlanStepAdmission } from './plan-admission.js';
+import { observePlanningPath, reconnaissanceRoot, reconnaissancePath, repositoryOverview, reconnaissanceLimits } from './repository-reconnaissance.js';
+import { estimateTokens } from './scheduler.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
 import { hash, safeRelative } from './tools/paths.js';
 import { definitionFor, parseToolArguments, publishedTools, toolRegistry, validateAction, validateToolResult, skillControls } from './tool-registry.js';
@@ -51,6 +54,11 @@ const safeResult = (error: unknown): ToolResult => ({
   output: error instanceof Error ? error.message : 'Action failed',
 });
 
+function planningRefusal(error: unknown): string {
+  if (!(error instanceof Error) || 'code' in error) return 'Cannot verify the current planning path. Inspect it again in the registered project.';
+  return error.message;
+}
+
 export class Runtime {
   queue?:TaskQueue;
   queueActive(chatId:string){return this.active.has(chatId);}
@@ -88,6 +96,8 @@ export class Runtime {
   private projectEdits = new Map<string,'undo'|'removal'>();
   private decisions = new Map<string, number>();
   private closePromise?: Promise<void>;
+  private readonly planningEpoch = randomUUID();
+  private readonly repositoryOverviews = new WeakMap<RunState, {identity: string; message: ModelMessage}>();
 
   private assertAvailable(chatId: string) {
     const projectId = this.store.chat(chatId).projectId;
@@ -626,6 +636,89 @@ export class Runtime {
     this.launch(approval.chatId);
   }
 
+  private planningWorkspace(chatId: string) {
+    const project = this.store.project(this.store.chat(chatId).projectId);
+    this.store.assertCheckpointSafe(project.id);
+    if (project.removalError || this.projectEdits.has(project.id) || !this.tools.planningRoot ||
+        this.tools.planningRoot(project.path) !== project.path) {
+      throw new Error('The registered project is unavailable for planning. Restore access and inspect it again.');
+    }
+    return reconnaissanceRoot(project.path);
+  }
+
+  private planningBinding(chatId: string, state: RunState, frame: Frame) {
+    const chat = this.store.chat(chatId);
+    const project = this.store.project(chat.projectId);
+    return hash(JSON.stringify([this.planningEpoch, project.id, project.path, project.createdAt, chatId,
+      state.frames[0]?.id, frame.id, state.generation, state.planOnly, chat.mode, chat.modeVersion]));
+  }
+
+  private async initialRepositoryOverview(chatId: string, state: RunState, signal: AbortSignal): Promise<ModelMessage> {
+    try {
+      const root = this.planningWorkspace(chatId);
+      const identity = JSON.stringify([root.path, root.identity, state.frames[0]?.id]);
+      const cached = this.repositoryOverviews.get(state);
+      if (cached?.identity === identity) return cached.message;
+      const message = await repositoryOverview(root, signal);
+      this.repositoryOverviews.set(state, {identity, message});
+      return message;
+    } catch {
+      signal.throwIfAborted();
+      return {role:'user', content:'Repository overview unavailable. Use confined native reads before saving a changed plan.'};
+    }
+  }
+
+  private async preparePlanControl(chatId: string, state: RunState, frame: Frame, call: NativeToolCall, action: Action, signal: AbortSignal) {
+    const proposed = {phases: action.args.phases as import('../shared/types.js').PlanPhase[]};
+    const previous = this.store.plan(chatId);
+    const goalVersion = () => {
+      const goal = goalOf(this.store, chatId);
+      return JSON.stringify(goal && [goal.id, goal.revision, goal.generation, goal.status]);
+    };
+    const binding = this.planningBinding(chatId, state, frame);
+    const plan = JSON.stringify(previous), goal = goalVersion();
+    const current = () => {
+      signal.throwIfAborted();
+      return state.frames.at(-1) === frame && frame.role === 'architect' && frame.queuedCalls?.[0]?.id === call.id &&
+        !state.steering.length && this.planningBinding(chatId, state, frame) === binding;
+    };
+    const noChange = unchangedPlanStructure(previous, proposed);
+    let checkFiles: (() => void) | undefined;
+    let refusal: string | undefined;
+    if (!noChange) {
+      try {
+        const root = this.planningWorkspace(chatId);
+        const recorded = this.store.getState<PlanObservation[]>('plan:observations:' + chatId, []);
+        checkFiles = await prepareAdmission(root, proposed.phases, action.args.admission as PlanStepAdmission[] | undefined, callId => {
+          const observation = recorded.find(item => item.callId === callId && item.binding === binding &&
+            item.rootIdentity === root.identity);
+          if (!observation) return;
+          const result = this.store.getState<ToolResult | null>('native:result:' + chatId + ':' + frame.id + ':' + callId, null);
+          return result?.ok && nativeResultFits(result) ? {observation, result} : undefined;
+        }, signal);
+      } catch (error) {
+        signal.throwIfAborted();
+        refusal = planningRefusal(error);
+      }
+    }
+    return {
+      current,
+      rejection: () => {
+        if (!current() || plan !== JSON.stringify(this.store.plan(chatId)) || goal !== goalVersion()) {
+          return 'The active plan, goal, or run changed. Use the current task and inspect its source again.';
+        }
+        if (refusal) return refusal;
+        try {
+          if (checkFiles) {
+            this.planningWorkspace(chatId);
+            checkFiles();
+          }
+        }
+        catch (error) { return planningRefusal(error); }
+      },
+    };
+  }
+
   private toolContext(
     chatId: string,
     frame: Frame,
@@ -669,7 +762,7 @@ export class Runtime {
     if(!result.ok||result.data&&typeof result.data==='object'&&((result.data as Record<string,unknown>).uncertain===true||(result.data as Record<string,unknown>).recoveryRequired===true||(result.data as Record<string,unknown>).state==='uncertain'))this.queue?.failed(chatId,'A native action failed or was refused. Inspect the original task.');
     const full = JSON.stringify(result);
     this.store.setState(`native:result:${chatId}:${frame.id}:${callId}`,result);
-    const content = Buffer.byteLength(full) <= 120000 ? full : JSON.stringify({ok:result.ok,output:result.output.slice(0,16000),truncated:true,evidence:`native:result:${chatId}:${frame.id}:${callId}`});
+    const content = nativeResultFits(result, full) ? full : JSON.stringify({ok:result.ok,output:result.output.slice(0,16000),truncated:true,evidence:`native:result:${chatId}:${frame.id}:${callId}`});
     frame.messages.push({role:'tool',tool_call_id:callId,content});
     frame.queuedCalls = frame.queuedCalls.filter(call=>call.id!==callId);
     this.store.setState(`native:frame:${chatId}:${frame.id}`,frame.messages);
@@ -862,6 +955,14 @@ export class Runtime {
         ...frame.messages,
       ];
 
+      if (frame.role === 'architect') {
+        const overview = await this.initialRepositoryOverview(chatId, state, signal);
+        const tools = publishedTools(frame.role, state.planOnly ? 'plan' : 'execute');
+        if (estimateTokens([...messages, overview], tools) + this.config.maxOutputTokens < this.config.contextLimits.architect * 0.8) {
+          messages.splice(messages.length - frame.messages.length, 0, overview);
+        }
+      }
+
       let preparedFrame:Frame|undefined;
       if (this.hooks.prepareMessages) {
         preparedFrame=structuredClone(frame);
@@ -957,7 +1058,12 @@ export class Runtime {
             await this.completeGoal(chatId,state,frame,call,action,signal);
             continue;
           }
-          const outcome=await definition.handler({workspace:this.tools,context:this.toolContext(chatId,frame,signal),control:async request=>this.controlAction(chatId,state,frame,call,request,reviewedScope)},action);
+          const admission = action.name === 'set_plan' ? await this.preparePlanControl(chatId, state, frame, call, action, signal) : undefined;
+          if (admission) {
+            await this.refreshInstructions(chatId, state, signal);
+            if (!admission.current()) continue;
+          }
+          const outcome=await definition.handler({workspace:this.tools,context:this.toolContext(chatId,frame,signal),control:async request=>this.controlAction(chatId,state,frame,call,request,reviewedScope,admission)},action);
           if(outcome.data==='pause')return;
           continue;
         }
@@ -1099,6 +1205,7 @@ export class Runtime {
     signal: AbortSignal,
   ): Promise<boolean> {
     const pending = frame.pending!;
+    let observedForPlan: PlanObservation | undefined;
     const transition=(change:(next:Frame,draft:RunState)=>void)=>this.commitRunTransition(chatId,state,draft=>{
       const next=draft.frames.find(item=>item.id===frame.id);
       if(!next || next.pending?.id!==pending.id)throw new Error('Pending native transition lost its identity');
@@ -1351,7 +1458,25 @@ export class Runtime {
         let executionResult:ToolResult;
         try {
           validateAction(pending.action,frame.role,state.planOnly?'plan':'execute');
+          const capture = frame.role === 'architect' && pending.callId && planningRead(pending.action.name) ? (() => {
+            try {
+              const root = this.planningWorkspace(chatId);
+              if (root.path !== context.projectRoot) return;
+              const filename = reconnaissancePath(String(pending.action.args.path));
+              return {root, before: observePlanningPath(root, filename), binding: this.planningBinding(chatId, state, frame)};
+            } catch { return; }
+          })() : undefined;
           executionResult = await definitionFor(pending.action.name).handler({workspace:this.tools,context,process:action=>this.processAction(chatId,state,frame,pending,action),control:async()=>{throw new Error('Not a workspace call');}},pending.action);
+          if (capture && !signal.aborted && capture.binding === this.planningBinding(chatId, state, frame)) {
+            try {
+              observedForPlan = planObservation(pending.action, executionResult, pending.callId!, capture.binding, capture.root, capture.before);
+              if (observedForPlan) {
+                const annotated = {...executionResult, data: {...executionResult.data as object, planEvidenceCallId: pending.callId}};
+                if (nativeResultFits(annotated)) executionResult = annotated;
+                else observedForPlan = undefined;
+              }
+            } catch { /* Ordinary reads retain their existing behavior. Unsafe or changed paths produce no planning receipt. */ }
+          }
           if(verification) {
             verification.after=await snapshotScope(this.tools,context.projectRoot,frame.assignment?.paths);
             verification.bindingValid=frame.pending===pending && state.generation===verificationBinding.generation && !state.steering.length && !state.planOnly && this.store.chat(chatId).modeVersion===verificationBinding.modeVersion && JSON.stringify(frame.assignment)===verificationBinding.assignment;
@@ -1432,6 +1557,11 @@ export class Runtime {
 
         if (!pending.callId) throw new Error('Missing native call identity');
         this.resolveCall(chatId,frame,pending.callId,result);
+        if (observedForPlan && !signal.aborted && observedForPlan.binding === this.planningBinding(chatId, draft, frame)) {
+          const key = 'plan:observations:' + chatId;
+          const original = this.store.getState<PlanObservation[]>(key, []).filter(item => item.binding === observedForPlan!.binding);
+          this.store.setState(key, [...original, observedForPlan].slice(-reconnaissanceLimits.evidenceWindow));
+        }
 
         const message = this.store.message(
           chatId,
@@ -1581,7 +1711,7 @@ export class Runtime {
     });
   }
 
-  private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot):ToolResult {
+  private controlAction(chatId:string,state:RunState,original:Frame,call:NativeToolCall,action:Action,reviewedScope?:ScopeSnapshot, admission?: {rejection: () => string | undefined}):ToolResult {
     if(['submit_completion','review_result'].includes(action.name))this.skills.assertCertain(chatId);
     if(['submit_completion','review_result','delegate'].includes(action.name)) {
       const projectId=this.store.chat(chatId).projectId;
@@ -1603,7 +1733,14 @@ export class Runtime {
           this.store.progress(chatId,frame.planStep,frame.id,'blocked','awaiting_user',String(action.args.question).slice(0,2000));
           this.store.updateChat(chatId,{status:'paused'});goalStatus(this.store,chatId,'waiting_for_user',String(action.args.question));paused=true;break;
         case 'set_plan': {
-          const plan=this.store.revisePlan(chatId,{phases:action.args.phases as import('../shared/types.js').PlanPhase[]});
+          const proposed = {phases: action.args.phases as import('../shared/types.js').PlanPhase[]};
+          const refusal = admission ? admission.rejection() : unchangedPlanStructure(this.store.plan(chatId), proposed)
+            ? undefined : 'A changed plan requires current repository evidence.';
+          if (refusal) {
+            this.resolveCall(chatId, frame, call.id, {ok:false, output:refusal});
+            break;
+          }
+          const plan=this.store.revisePlan(chatId,proposed);
           resolve(`Plan saved at revision ${plan.version}. Runtime evidence controls completion.`,plan);break;
         }
         case 'delegate': {

@@ -16,6 +16,13 @@ import type { RunState } from './runtime.js';
 import type { Approval, ApprovalMode, Chat, ChatDetail, Message, Plan, Project, RunEvent, TestReport, FileChange, FileChangeStatus, FileChangeSummary, RoleModels, PlanStepRef, PlanEvidence, PlanStep } from '../shared/types.js';
 
 const now = () => new Date().toISOString();
+export function unchangedPlanStructure(previous: Plan, proposed: Plan): boolean {
+  const structure = (plan: Plan) => JSON.stringify(plan.phases.map(phase => ({
+    id: phase.id, title: phase.title, steps: phase.steps.map(step => ({id: step.id, title: step.title})),
+  })));
+  return !!previous.id && structure(previous) === structure(proposed);
+}
+
 export class Store {
   readonly db: DatabaseSync;
   readonly changes = new EventEmitter();
@@ -269,8 +276,7 @@ export class Store {
   revisePlan(chatId: string, proposed: Plan): Plan {
     if (!this.transactionEvents) return this.transaction(() => this.revisePlan(chatId, proposed));
     const previous = this.plan(chatId);
-    const structure = (plan: Plan) => JSON.stringify(plan.phases.map(p => ({id:p.id,title:p.title,steps:p.steps.map(s=>({id:s.id,title:s.title}))})));
-    if (previous.id && structure(previous) === structure(proposed)) return previous;
+    if (unchangedPlanStructure(previous, proposed)) return previous;
     const plan: Plan = {id: previous.id ?? randomUUID(), version: (previous.version ?? 0) + 1,
       phases: proposed.phases.map(phase => ({id: phase.id, title: phase.title,
         steps: phase.steps.map(step => ({id: step.id, title: step.title, status: step.status === 'blocked' ? 'blocked' : 'pending'}))}))};

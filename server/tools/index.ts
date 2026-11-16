@@ -1,4 +1,5 @@
 import {runNativeOperation,assertNativePath} from '../native-storage.js';
+import { observePlanningPath, reconnaissancePath, reconnaissanceRoot } from '../repository-reconnaissance.js';
 import {ContainerShellPool} from '../container-shell.js';
 import { lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -41,6 +42,14 @@ export class WorkspaceTools implements ToolService {
     try {return await runNativeOperation(()=>{assertNativePath(root,false);return operation();});} finally {reservation.release();}
   }
   assertQueueIdle(root:string) {this.check();assertNativePath(root,false);assertMutationIdle(root);this.mutationGuard(root);const id=key(path.resolve(root));if(this.operations.has(id)||this.removing.has(id)||this.quarantined.has(id))throw new ToolError('Workspace operation or cleanup remains active.','CONFLICT');this.files.assertRemovable(root);}
+  planningRoot(root: string) {
+    this.check();
+    const canonical = this.sandbox.validateRoot(root);
+    if (canonical !== root || this.removing.has(key(root)) || this.quarantined.has(key(root))) {
+      throw new ToolError('The registered workspace is unavailable for planning inspection.');
+    }
+    return canonical;
+  }
   closeCommandContext(context:ToolContext) {return this.shells.closeContext(context);}
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
     this.sandbox.validateRoot(root);
@@ -125,6 +134,7 @@ export class WorkspaceTools implements ToolService {
   }
   private async inspectInternal(context: ToolContext, action: Action): Promise<ToolInspection> {
     this.check(); const args = validate(action);
+    if (action.name === 'inspect_new_plan_path') reconnaissancePath(args.path);
     await rootPath(context.projectRoot);
     if (args.path !== undefined) await scoped(context.projectRoot, args.path, ['list_files', 'search', 'search_page', 'git_diff'].includes(action.name));
     if (definitionFor(action.name).fileMutation) {
@@ -169,6 +179,17 @@ export class WorkspaceTools implements ToolService {
       }
       if(!this.container&&['run_shell','execute_python','run_tests','git_status','git_diff'].includes(action.name))this.sandbox.assertExecutionAvailable();
       switch (action.name) {
+        case 'inspect_new_plan_path': {
+          try {
+            const relative = reconnaissancePath(args.path);
+            const observation = observePlanningPath(reconnaissanceRoot(this.planningRoot(context.projectRoot)), relative);
+            return observation.state === 'absent'
+              ? {ok: true, output: 'Proposed file is currently absent.', data: {path: relative, state: 'absent'}}
+              : {ok: false, output: 'This file already exists. Read it and cite it as existing source.'};
+          } catch {
+            return {ok: false, output: 'Cannot establish absence for this confined path. Check its spelling, parent directory, and whether it is excluded.'};
+          }
+        }
         case 'read_file_range': { const data = await this.files.range(root,args.path,args.startLine,args.count); return {ok: data.hash !== null, output: data.content, data}; }
         case 'search_page': { const data = await this.files.searchPage(root,args.query,args.path,args.offset,args.limit,args.revision); return {ok: true, output: JSON.stringify(data), data}; }
         case 'read_file': { const file = await this.read(root, args.path); return { ok: file.hash !== null, output: file.hash === null ? `File not found: ${file.path}` : file.content, data: file }; }

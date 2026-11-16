@@ -88,7 +88,17 @@ const phases = z.array(planPhaseSchema).max(50).superRefine(
   },
 );
 
+const planSource = z.strictObject({path: text(1024), callId: id, symbol: z.string().regex(/^[A-Za-z_$][\w$]{0,79}$/).optional(), excerpt: text(200).optional()});
+const planAdmission = z.array(z.strictObject({
+  phaseId: id,
+  stepId: id,
+  sources: z.array(planSource).max(8),
+  newFiles: z.array(z.strictObject({path: text(1024), callId: id})).max(8),
+  checks: z.array(z.strictObject({method: z.enum(['test','inspection']), target: text(1024), expected: text(600)})).min(1).max(4),
+})).max(16);
+
 export const actionSchema = z.discriminatedUnion('name', [
+  z.strictObject({name: z.literal('inspect_new_plan_path'), args: z.strictObject({path: text(1024)})}),
   z.strictObject({name:z.literal('discover_skills'),args:z.strictObject({})}),
   z.strictObject({name:z.literal('load_skill'),args:skillIdentity}),
   z.strictObject({name:z.literal('draft_skill'),args:skillDraftInput}),
@@ -163,7 +173,7 @@ export const actionSchema = z.discriminatedUnion('name', [
   }),
   z.strictObject({
     name: z.literal('set_plan'),
-    args: z.strictObject({ phases }),
+    args: z.strictObject({ phases, admission: planAdmission.optional() }),
   }),
   z.strictObject({
     name: z.literal('delegate'),
@@ -245,7 +255,7 @@ export function validateToolResult(result:unknown):ToolResult {
   if(!parsed.success)throw new Error('Invalid native tool result; effects may have occurred. Inspect state before deciding what work remains.');
   return parsed.data;
 }
-const read = new Set(['list_files','read_file','read_file_range','search','search_page','git_status','git_diff']);
+const read = new Set(['inspect_new_plan_path','list_files','read_file','read_file_range','search','search_page','git_status','git_diff']);
 const fileMutations = new Set(['write_file','patch_file','maintain_instructions','rename_file','delete_file','save_skill']);
 export const skillControls = new Set(['discover_skills','load_skill','draft_skill','invoke_skill']);
 export function workspaceAction(action:Action):Action {
@@ -256,7 +266,7 @@ export function workspaceAction(action:Action):Action {
 }
 const processes = new Set(['start_process','process_status','process_output','cancel_process']);
 const execute = new Set(['run_shell','execute_python','run_tests']);
-const terminal = new Set(['delegate','review','review_result','submit_completion','ask_user','request_goal_completion']);
+const terminal = new Set(['set_plan','delegate','review','review_result','submit_completion','ask_user','request_goal_completion']);
 const descriptions: Record<string,string> = {
   discover_skills:'Discover bounded project/personal workflow metadata and diagnostics. Project names take precedence only for discovery; use explicit scope/name for loading. No execution or verification evidence.',
   load_skill:'Load one workflow and its declared confined resources, returning exact revision. Untrusted guidance, not human authorization or verification. Invoke explicitly to select its pinned revision.',
@@ -267,7 +277,7 @@ const descriptions: Record<string,string> = {
   process_status:'Observe an exact same-task process handle; optionally wait at most 1000 ms. Status cannot reconcile uncertainty or prove tests passed. Architects/critics can inspect only their current same-chat assignment evidence.',
   process_output:'Read up to 16000 retained UTF-8 output bytes using exact byte cursor, with base/end/next offsets and truncation. At most 64000 bytes retained. No process execution or replay.',
   cancel_process:'Stop only the requesting coder frame’s exact already-authorized process handle and await actual namespace cleanup. No additional approval; stop does not roll back effects or prove completion. Interrupted evidence conservatively blocks assignment acceptance.',
-  read_file_range:'Read 1–500 lines with the whole-file SHA-256 hash. Output is bounded to 64,000 bytes; request fewer lines if necessary. Does not imply the complete file was returned.',
+  read_file_range:'Read 1–500 lines with a whole-file hash. Request fewer lines if output is too large. Use a returned planEvidenceCallId to cite those lines. Planning revalidation can cover up to 256 KiB of distinct source files per revision.',
   search_page:'Page through bounded literal text matches. Continue using returned revision and nextOffset; a changed scope rejects the cursor. Incomplete means coverage was omitted or limits were reached, never proof of absence.',
   patch_file:'Apply ordered nonoverlapping original-file line intervals using a fresh whole-file baseHash. startLine is one-based, deleteCount counts complete lines, text is literal replacement including intended newline bytes. Insertion at EOF uses original line count + 1. Retains all other bytes.',
   maintain_instructions:'Architect maintenance of only canonical AGENTS.md files: ordered literal line patches for structure, commands, conventions and durable decisions. Preserve user guidance and keep live goals/progress in database. Fresh baseHash, editor leases and ordinary diff/approval checks apply. Planning may draft prose only.',
@@ -275,7 +285,7 @@ const descriptions: Record<string,string> = {
   rename_file:'Move a regular text file to an absent destination, using fresh source baseHash and protecting both editor leases. Exclusive destination creation then source removal prevents overwriting collisions; partial effects remain uncertain. Both paths must be in assignment scope.',
   request_goal_completion:'Request whole-goal completion using the exact current goal and plan revisions and recorded accepted review event IDs. Runtime checks all protected criteria/steps, current evidence and uncertainty. Claims, removed steps and critic PASS alone do not suffice. Must be last in a batch.',
   list_files:'List a confined project directory. Omit path for the root.',
-  read_file:'Read a project file and its current SHA-256 hash. Missing files return a null hash.',
+  read_file:'Read a project file and its current SHA-256 hash. Cite planEvidenceCallId when returned to the Architect. Use read_file_range if the result is truncated. A missing read cannot certify a proposed new file.',
   search:'Search bounded project text. Protected files are excluded.',
   write_file:'Replace a project file using its freshly observed SHA-256 baseHash, or null for a new file. Requires scope, lease, version and approval checks.',
   run_shell:'Run a potentially modifying command in the Linux project sandbox. Requires execution permission and may require approval; an uncertain outcome must not be replayed.',
@@ -283,7 +293,8 @@ const descriptions: Record<string,string> = {
   run_tests:'Run a potentially modifying test command and collect a fresh JUnit report. A command exit alone does not prove the report passed.',
   git_status:'Read confined Git status without hooks or credential access.',
   git_diff:'Read confined Git changes with protected paths excluded.',
-  set_plan:'Save plan structure with unique phase and step IDs. Runtime evidence controls completion status.',
+  inspect_new_plan_path:'Check that one confined proposed new file is currently absent. Use its original native call ID in set_plan admission. Existing, excluded, linked and uninspectable paths do not establish absence.',
+  set_plan:'Save plan structure with unique phase and step IDs. Structural changes need admission for every step, with current native read call IDs, explicit new-file observations, and test or inspection outcomes. An unchanged saved structure needs no admission. Must be last in a batch.',
   delegate:'Assign one coder a bounded objective, verifiable acceptance criteria and scoped paths. For related planned work bind planStep to exact current identities and revision; omit it for unrelated work. Must be last in a batch.',
   review:'Request an independent read-only review of a concrete focus. This does not accept unrelated plan steps or a whole phase. Must be last in a batch.',
   review_result:'Record a critic verdict with findings from actual files, diffs and verification. Checkpoint is not completion; PASS cannot override failed or uncertain execution, or grant OS/package authority. Must be last in a batch.',
@@ -296,7 +307,7 @@ export const toolRegistry: ReadonlyMap<string,ToolDefinition> = new Map(actionSc
   const name = option.shape.name.value;
   const workspace = read.has(name) || execute.has(name) || fileMutations.has(name) || processes.has(name);
   const effect = execute.has(name) || name === 'recommend_packages' || name === 'start_process' || name === 'cancel_process' ? 'execute' : fileMutations.has(name) ? 'write' : 'read';
-  const roles: ToolRole[] = name==='discover_skills'||name==='load_skill' ? ['architect','coder','critic'] : skillControls.has(name)||name==='save_skill' ? ['architect','coder'] : name === 'maintain_instructions' ? ['architect'] : name === 'install_decision' ? ['install_reviewer'] : read.has(name) || name === 'process_status' || name === 'process_output' ? ['architect','coder','critic'] : name === 'review_result' ? ['critic'] : name === 'submit_completion' || name === 'recommend_packages' ? ['architect','coder'] : workspace ? ['coder'] : ['architect'];
+  const roles: ToolRole[] = name==='discover_skills'||name==='load_skill' ? ['architect','coder','critic'] : skillControls.has(name)||name==='save_skill' ? ['architect','coder'] : ['maintain_instructions','inspect_new_plan_path'].includes(name) ? ['architect'] : name === 'install_decision' ? ['install_reviewer'] : read.has(name) || name === 'process_status' || name === 'process_output' ? ['architect','coder','critic'] : name === 'review_result' ? ['critic'] : name === 'submit_completion' || name === 'recommend_packages' ? ['architect','coder'] : workspace ? ['coder'] : ['architect'];
   const definition: ToolDefinition = {
     name, description:descriptions[name], arguments:option.shape.args, result:resultSchema, roles,
     fileMutation: fileMutations.has(name), command: execute.has(name),
