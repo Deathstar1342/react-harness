@@ -2,6 +2,8 @@ import { parseToolArguments } from '../server/tool-registry.js';
 import { nativeReply, actionOf, nativeState } from './native-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtempSync,realpathSync,writeFileSync } from 'node:fs';
+import { WorkspaceTools } from '../server/tools/index.js';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Store } from '../server/store.js';
@@ -20,17 +22,34 @@ const shape = ():StoredPlan=>({phases:[{id:'phase',title:'Build',steps:[{id:'ste
 const cleanups:(()=>Promise<void>)[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const fn of cleanups.splice(0).reverse())await fn();});
 function fixture(filename=':memory:') {
+  const temp=realpathSync(tmpdir());
+  const root=mkdtempSync(path.join(temp,'planning-native-'));
+  writeFileSync(path.join(root,'x'),'Observed planning fixture result');
+  const workspace=new WorkspaceTools();
   const store=new Store(filename);
-  const project=store.createProject('Fixture','/fixture');
+  const project=store.createProject('Fixture',root);
   const chat=store.createChat(project.id,'Fixture chat','autonomous');
   const queue:(CompletionResult|(()=>Promise<CompletionResult>))[]=[];
   const executed:string[]=[];
-  const tools:ToolService={inspect:async(_ctx,a)=>({effect:a.name==='read_file'?'read':'write',risk:'routine',description:a.name}),execute:async(_ctx,a)=>{executed.push(a.name);return {ok:true,output:'Observed fixture result'};},read:async(_root,p)=>({path:p,content:'',hash:null}),list:async()=>[],save:async()=>{throw new Error('unused');},setDirty:()=>{},dispose:async()=>{}};
+  const tools:ToolService={
+    planningRoot:workspace.planningRoot.bind(workspace),assertCoderContextPath:workspace.assertCoderContextPath.bind(workspace),
+    inspect:async(_ctx,a)=>({effect:a.name==='read_file'?'read':'write',risk:'routine',description:a.name}),
+    execute:async(context,a)=>{
+      executed.push(a.name);
+      return a.name==='read_file' ? workspace.execute(context,a) : {ok:true,output:'Observed fixture result'};
+    },
+    read:workspace.read.bind(workspace),list:workspace.list.bind(workspace),save:async()=>{throw new Error('unused');},setDirty:()=>{},dispose:workspace.dispose.bind(workspace),
+  };
   const provider={models:async()=>['fixture'],complete:async()=>{const value=queue.shift();if(!value)throw new Error('Unexpected fixture request');return (typeof value==='function'?await value():value);}};
   const config=readConfig({STARK_BASE_URL:'http://127.0.0.1/v1',STARK_API_KEY:'synthetic-test-only'});
   const hooks={instructions:roleInstructions};
   let runtime=new Runtime(store,provider,tools,config,hooks);
-  cleanups.push(async()=>{await runtime.close();store.close();});
+  cleanups.push(async()=>{
+    await runtime.close();await workspace.dispose();store.close();
+    const target=realpathSync(root);
+    if (path.dirname(target)!==temp || !path.basename(target).startsWith('planning-native-')) throw new Error('Unexpected planning fixture cleanup target');
+    await rm(target,{recursive:true,force:true});
+  });
   const plan=store.revisePlan(chat.id,shape());
   const ref:PlanStepRef={planId:plan.id!,planVersion:plan.version!,phaseId:'phase',stepId:'step'};
   const delegate=(reference:PlanStepRef|undefined=ref)=>action('delegate',{objective:'Implement fixture',acceptanceCriteria:['Observed result and review'],...(reference?{planStep:reference}:{})});

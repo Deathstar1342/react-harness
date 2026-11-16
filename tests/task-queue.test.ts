@@ -69,6 +69,31 @@ it('bounded original history and strict raw duplicate/reference/storage corrupti
 it('approval wait stops progression even after a later human approval permits that exact task',async()=>{
  const t=await fixture([nativeReply('delegate',{objective:'Create source',acceptanceCriteria:['Create source'],paths:['a.ts']}),nativeReply('write_file',{path:'a.ts',content:'new',baseHash:null}),complete(),nativeReply('review_result',{verdict:'pass',findings:[]}),complete()]);t.add('Create source');t.add('Never auto start');await t.start();await t.settle();expect(t.calls).toBe(2);expect(t.view().status).toBe('paused');const chat=t.view().entries[0].chatId!;expect(t.store.chat(chat).status).toBe('awaiting_approval');const approval=t.store.approvals(chat)[0];await t.runtime.decide(approval.id,'approve');await t.runtime.wait(chat);expect(t.view().entries[1].status).toBe('pending');expect(t.view().status).toBe('paused');expect(t.calls).toBe(5);expect(t.view().entries[0].status).toBe('accepted');t.responses.push(complete());await t.start();await t.settle();expect(t.calls).toBe(6);
 });
+it('a genuine Critic replan retains the original queue claim and never admits the next task',async()=>{
+  const t=await fixture();
+  await writeFile(path.join(t.root,'a.ts'),'export const missingIntegration = true;\n');
+  t.add('Inspect a required integration');t.add('Never admit this task automatically');
+  t.responses.push(nativeReply('delegate',{objective:'Inspect the original integration',acceptanceCriteria:['Review the integration scope'],paths:['a.ts']}),
+    nativeReply('read_file',{path:'a.ts'}),complete(),async()=>{
+      const chat=t.view().entries[0].chatId!;
+      const event=t.store.events(chat).findLast(row=>row.type==='tool'&&
+        (row.data as {action?:{name:string};result?:{ok:boolean}}).action?.name==='read_file' &&
+        (row.data as {result?:{ok:boolean}}).result?.ok===true)!;
+      return nativeReply('review_result',{verdict:'changes_requested',findings:[],replan:{
+        reason:'scope_change',explanation:'The integration requires a human decision about expanding scope.',evidenceEventIds:[event.id],
+      }});
+    },complete());
+  await t.start();await t.settle();
+  const entry=t.view().entries[0],claim=readQueue(t.store,t.project.id).tasks[0].claim!;
+  const events=t.store.events(entry.chatId!);
+  expect(events.find(row=>row.type==='review')?.data).toMatchObject({passed:false,disposition:'replan'});
+  expect(events.some(row=>row.type==='queue_native_acceptance')).toBe(false);
+  expect(claim.receipt).toBeUndefined();
+  expect(t.view().status).toBe('paused');
+  expect(t.view().entries.map(row=>row.status)).toEqual(['stopped','pending']);
+  expect(t.calls).toBe(5);
+  await expect(t.start()).rejects.toThrow(/unresolved/);
+});
 it('accepted root cannot progress until the actual independent mutation reservation releases',async()=>{
  const t=await fixture([complete(),complete()]);t.add('First');t.add('Second');let held:ReturnType<typeof reserveMutation>|undefined;const accepted=t.queue.accepted.bind(t.queue);vi.spyOn(t.queue,'accepted').mockImplementation((...args)=>{accepted(...args);held=reserveMutation(t.root);});await t.start();await t.settle();expect(t.calls).toBe(1);expect(t.view().entries[0].status).toBe('accepted');expect(t.view().status).toBe('paused');held!.release();expect(t.calls).toBe(1);vi.restoreAllMocks();await t.start();await t.settle();expect(t.calls).toBe(2);
 });

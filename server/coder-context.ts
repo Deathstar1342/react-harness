@@ -38,7 +38,7 @@ export function coderScopes(paths: string[] | undefined) {
   return paths?.length && paths.every(filename=>safeRelative(filename,true)) ? [...new Set(paths)] : [];
 }
 
-function mountPaths() {
+export function mountPaths() {
   if (process.platform !== 'linux') return [];
   // The kernel's mount inventory detects same-device binds which stat.dev misses.
   const fd = openSync('/proc/self/mountinfo','r');
@@ -70,7 +70,7 @@ function blockedRead(error: unknown): boolean {
   return code === 'CONFLICT' || code === 'PROCESS_BUSY';
 }
 
-function fileStatus(root: ReconnaissanceRoot, filename: string, mounts: string[], guard: (filename: string) => void) {
+export function observeAdvisoryFile(root: ReconnaissanceRoot, filename: string, mounts: string[], guard: (filename: string) => void) {
   if (reconnaissancePath(filename) !== filename) throw new Error('Invalid source path.');
   assertNotMounted(root.path,filename,mounts);
   guard(filename);
@@ -132,7 +132,7 @@ export async function loadCoderSources(
           if (source.symbol) card.symbol = source.symbol;
         }
         try {
-          const observation = fileStatus(root,filename,mounts,guard);
+          const observation = observeAdvisoryFile(root,filename,mounts,guard);
           card.observation = observation;
           if (observation.state === 'absent') card.state = source ? 'missing' : 'planned-new';
           else if (!source) card.state = 'stale';
@@ -147,7 +147,7 @@ export async function loadCoderSources(
             if (!file) card.state = 'omitted';
             else if (file.hash !== source.hash) card.state = 'stale';
             else {
-              const current = fileStatus(root,filename,mountPaths(),guard);
+              const current = observeAdvisoryFile(root,filename,mountPaths(),guard);
               if (current.stamp !== observation.stamp) card.state = 'stale';
               else {
                 card.excerpt = excerpt(file.content,source);
@@ -181,7 +181,7 @@ export function recheckCoderSources(
     if (!card.observation) return card;
     const {excerpt:_excerpt,commands:_commands,observation:_observation,...bare} = card;
     try {
-      const current = fileStatus(root,card.path,mounts,guard);
+      const current = observeAdvisoryFile(root,card.path,mounts,guard);
       if (current.state === card.observation.state && current.stamp === card.observation.stamp) return card;
       return {...bare,state:current.state === 'absent' ? 'missing' : 'stale'};
     } catch (error) {

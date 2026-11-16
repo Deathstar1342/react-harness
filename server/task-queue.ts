@@ -33,7 +33,6 @@ export class TaskQueue {
   const projectId=String(row.project_id),q=readQueue(this.store,projectId),task=q.tasks.find(t=>t.id===row.task_id);
   if(!task?.claim||task.claim.id!==row.claim_id||task.claim.rootId!==row.root_id||task.claim.chatId!==chatId)throw queueError('Queue claim reference unavailable.',503);queueChat(this.store,chatId,projectId);return {q,task,projectId};
  }
- owns(chatId:string,state?:RunState){const found=this.locate(chatId);return !!found?.task&&(!state||state.queueClaim?.id===found.task.claim?.id&&state.frames[0]?.id===found.task.claim?.rootId);}
  view(projectId:string,cursor?:string):QueueView{return nativePrivateUnit(()=>{
   const q=readQueue(this.store,projectId);let offset=0;
   if(cursor){try{const c=z.strictObject({projectId:uuid,revision,offset:revision.max(32)}).parse(parseNativeJSON(Buffer.from(cursor,'base64url').toString('utf8'),1024));if(c.projectId!==projectId||c.revision!==q.revision||c.offset%16||c.offset>=q.tasks.length)throw Error();offset=c.offset;}catch{throw queueError();}}
@@ -85,8 +84,17 @@ export class TaskQueue {
   if(initial&&(q.status!=='running'||q.session!==this.session||chat.mode!=='execute'||state.planOnly||chat.modeVersion!==c.modeVersion||chat.approvalMode!==c.approvalMode||state.instructionsHash!==c.instructionsHash||this.runtime.skills.binding(chatId)!==c.skillsHash||!equal(chat.models,this.runtime.config.models)))throw queueError('Queue dispatch authorization changed.');return found;
  }
  beforeProvider(chatId:string,state:RunState){const found=this.locate(chatId);if(found?.task?.status==='accepted'&&!state.queueClaim&&state.frames[0]?.id!==found.task.claim?.rootId)return;if(!found?.task){if(state.queueClaim)throw queueError('Queue link unavailable.',503);return;}this.verify(chatId,state);if(found.task.claim?.stage!=='dispatched')throw queueError('Queue dispatch claim is unavailable.');const c=found.task.claim;if(state.instructionsHash!==c.instructionsHash||state.skillsHash!==this.runtime.skills.binding(chatId)||this.store.chat(chatId).mode!=='execute'||state.planOnly)throw queueError('Queue guidance, skills or execution mode changed before dispatch.');}
- accepted(chatId:string,state:RunState,rootId:string,callId:string,receipt:NonNullable<QueueClaim['receipt']>){const found=this.locate(chatId);if(!found?.task)return;const {q,task}=found,c=task.claim!;
-  if(!['running','stopped'].includes(task.status)||c.stopKind==='failure'||c.stopKind==='cancel'||c.session!==this.session||state.frames[0]?.id!==rootId||c.rootId!==rootId||state.frames.length!==1||c.receipt)return;
+ private acceptanceTask(chatId:string,state:RunState,rootId:string) {
+  const found=this.locate(chatId);
+  const task=found?.task,c=task?.claim;
+  if (!c || state.queueClaim?.id!==c.id || state.frames.length!==1 || state.frames[0]?.id!==rootId || c.rootId!==rootId ||
+      !['running','stopped'].includes(task.status) || c.stopKind==='failure' || c.stopKind==='cancel' ||
+      c.session!==this.session || c.receipt) return;
+  return found;
+ }
+ canAccept(chatId:string,state:RunState,rootId:string) {return !!this.acceptanceTask(chatId,state,rootId);}
+ accepted(chatId:string,state:RunState,rootId:string,callId:string,receipt:NonNullable<QueueClaim['receipt']>){
+  const found=this.acceptanceTask(chatId,state,rootId);if(!found?.task)return;const {q,task}=found,c=task.claim!;
   const result=queueEvidence(this.store,'state',`native:result:${chatId}:${rootId}:${callId}`);if(result.ok!==true)throw queueError('Original native acceptance unavailable.',503);
   if(receipt.kind==='goal'&&(receipt.goalId!==c.goalId||receipt.goalRevision!==c.goalRevision||receipt.goalGeneration===undefined))throw queueError('Original goal acceptance changed.');
   c.receipt=receipt;task.status='accepted';task.reason='Native acceptance recorded; reservation release is still required.';writeQueue(this.store,q);
