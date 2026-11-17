@@ -163,7 +163,7 @@ export async function createApp(options: AppOptions) {
   app.get('/api/chats/:id/inspector',async(request,reply)=>{const query=z.object({cursor:z.string().max(1024).optional()}).strict().parse(request.query);reply.header('Cache-Control','no-store');return inspectorView(store,paramId(request.params),query.cursor);});
   app.get('/api/chats/:id/recovery',async(request,reply)=>{
     z.object({}).strict().parse(request.query);
-    reply.header('Cache-Control','no-store');return recoveryView(store,paramId(request.params));
+    reply.header('Cache-Control','no-store');return recoveryView(store,paramId(request.params),runtime.continuationSettingsBinding());
   });
   app.get('/api/chats/:id/skills',async request=>{await runtime.checkSkills(paramId(request.params));return {catalog:await runtime.skills.files(paramId(request.params)).catalog(),selection:runtime.skills.view(paramId(request.params)),drafts:runtime.skills.drafts(paramId(request.params))};});
   app.get('/api/chats/:id/skills/document',async request=>{const input=skillIdentity.parse(request.query);return runtime.skills.files(paramId(request.params)).load(input.scope,input.name);});
@@ -209,7 +209,7 @@ export async function createApp(options: AppOptions) {
       if(['POST','PUT','PATCH'].includes(request.method)&&!route.endsWith('/editor')&&!route.endsWith('/control'))store.assertCheckpointSafe(projectId);
       if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
-      if(['POST','PUT','PATCH','DELETE'].includes(request.method))queues.intervention(projectId);
+      if(!route.endsWith('/control') && ['POST','PUT','PATCH','DELETE'].includes(request.method))queues.intervention(projectId);
       requests.set(request.id,projectId);
     }
   });
@@ -362,7 +362,17 @@ export async function createApp(options: AppOptions) {
     if(!config.baseUrl || !config.apiKey)return reply.code(503).send({error:'Configure the provider before revising a goal.'});
     return reply.code(202).send(await runtime.setGoal(paramId(request.params),body,{expectedRevision,reason}));
   });
-  app.post('/api/chats/:id/control',async request=> {const {action} = z.object({action:z.enum(['pause','resume','interrupt'])}).strict().parse(request.body);await runtime.control(paramId(request.params),action);return {ok:true};});
+  app.post('/api/chats/:id/control',async request=>{
+    const input=z.discriminatedUnion('action',[
+      z.strictObject({action:z.literal('resume'),precondition:z.string().regex(/^[a-f0-9]{64}$/).optional()}),
+      z.strictObject({action:z.literal('pause')}),
+      z.strictObject({action:z.literal('interrupt')}),
+    ]).parse(request.body);
+    const chatId=paramId(request.params);
+    await runtime.control(chatId,input.action,input.action==='resume'?input.precondition:undefined,
+      ()=>queues.intervention(store.chat(chatId).projectId));
+    return {ok:true};
+  });
   app.post('/api/chats/:id/processes/:processId/cancel',async request=>{
     const {id,processId}=z.object({id:z.string().uuid(),processId:z.string().uuid()}).strict().parse(request.params);
     z.object({}).strict().parse(request.body);

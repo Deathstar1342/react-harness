@@ -1,6 +1,7 @@
 import {assertQueueConversationIdle} from './queue-admission.js';
 import type {TaskQueue} from './task-queue.js';
-import {queueError} from './queue-state.js';
+import {queueError, readQueue} from './queue-state.js';
+import {assertContinuationEvidence, continuationConflict, continuationDispatchCurrent, observeContinuation, recordContinuationControl, type ContinuationControl} from './task-continuation.js';
 import {observeRequest} from './inspector-records.js';
 import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
@@ -31,8 +32,9 @@ import {isReplanReceipt, reviewEvidence, reviewLimits, reviewReplan, samePlanSte
 import {captureReviewContext, currentReceiptFiles, observeReviewFiles, recheckReviewContext, recheckReviewFiles, renderReviewEvidence, reviewFileCandidates, unavailableReview, type ReviewFileObservation} from './review-context.js';
 
 interface PendingAction { reviewOrigin?:string; verification?: VerificationSnapshot; callId?: string; id: string; action: Action; approvalId?: string; stage: 'prepared' | 'executing' | 'done'; result?: ToolResult; instructionsHash?: string | null; commandOutcomeRecorded?: boolean }
-export interface Frame { acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; reviewOrigin?:string; evidenceWindowTruncated?:boolean; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
+export interface Frame { delegationEventId?:number; continuationWorkspace?:string; acceptanceEvidence?: AssignmentEvidence; assignment?: Assignment; proseTurns?:number; queuedCalls?: NativeToolCall[]; evidenceEventIds?: number[]; planStep?: PlanStepRef; reviewDelegationId?: string; reviewOrigin?:string; evidenceWindowTruncated?:boolean; id: string; role: AgentRole; messages: ModelMessage[]; objective?: string; pending?: PendingAction; final?: string; repairs: number; failures?: number; scope?: string[]; shellId?: string; reviewKind?: 'completion'|'checkpoint'|'independent' }
 export interface RunState {
+  continuationControl?:ContinuationControl;
   queueClaim?:{projectId:string;taskId:string;id:string};
   skillsHash?:string;
   humanMessageIds?: string[];
@@ -44,6 +46,12 @@ export interface RunState {
   objective?: string;
   instructionsHash?: string | null;
   instructionTargets?: string[];
+}
+interface ContinuationDispatch {
+  control:ContinuationControl;
+  workspace:string;
+  providerConfig:string;
+  historical:ModelMessage;
 }
 type BeforeProvider = (signal: AbortSignal) => Promise<ModelMessage[]>;
 interface CoderContextBinding { key: string; previous?: CoderSourceContext }
@@ -405,6 +413,8 @@ export class Runtime {
     try {
     this.store.transaction(() => {
       change(draft);
+      if(draft.continuationControl && draft.frames.at(-1)?.id!==draft.continuationControl.frameId)
+        delete draft.continuationControl;
       this.queue?.transition(chatId,draft);
       this.store.setState(`run:${chatId}`, draft);
       for(const frame of draft.frames)this.store.setState(`native:frame:${chatId}:${frame.id}`,frame.messages);
@@ -423,7 +433,7 @@ export class Runtime {
     this.runs.set(chatId, state);
   }
 
-  private launch(chatId: string) {
+  private launch(chatId: string, continuation?:ContinuationDispatch) {
     this.assertAvailable(chatId);
 
     if (this.active.has(chatId)) return;
@@ -431,8 +441,14 @@ export class Runtime {
     const controller = new AbortController();
 
     const promise = Promise.resolve()
-      .then(() => this.loop(chatId, controller.signal))
+      .then(() => this.loop(chatId, controller.signal,continuation))
       .catch(async error => {
+        if (continuation && (error as {code?:string})?.code==='CONTINUATION_STALE') {
+          const state=this.load(chatId);
+          if (!controller.signal.aborted && state?.generation===continuation.control.generation && this.store.chat(chatId).status==='running')
+            this.store.updateChat(chatId,{status:'paused'});
+          return;
+        }
         // A claimed process can outlive the native-result COMMIT that started it.
         // Stop and drain that ownership before declaring the runtime failure done.
         let cleanupFailure = '';
@@ -515,12 +531,132 @@ export class Runtime {
     }
   }
 
-  async control(chatId: string, action: 'pause' | 'resume' | 'interrupt') {
-    this.queue?.human(chatId);
+  async control(chatId: string, action: 'pause' | 'resume' | 'interrupt', precondition?:string, beforeLegacy?:()=>void) {
     this.store.chat(chatId);
+    const scoped = action==='resume' && observeContinuation(this.store,chatId,false,this.continuationSettingsBinding()).view;
+    if (scoped && (!precondition || scoped.precondition!==precondition))
+      throw continuationConflict(scoped.status==='available' ? 'Refresh Recovery and use the exact Resume control.' : scoped.reason);
+    if (!scoped && precondition) throw continuationConflict('The original continuation is no longer current.');
+    if (scoped && this.decisions.has(chatId)) throw continuationConflict('Another human control is in progress.');
+    if (!scoped) {
+      beforeLegacy?.();
+      this.queue?.human(chatId);
+    }
     this.decisions.set(chatId,(this.decisions.get(chatId) ?? 0)+1);
-    try { return await this.controlInternal(chatId,action); }
-    finally { const remaining=this.decisions.get(chatId)!-1;if(remaining)this.decisions.set(chatId,remaining);else this.decisions.delete(chatId); }
+    try {
+      if (scoped) return await this.resumeContinuation(chatId,precondition!);
+      return await this.controlInternal(chatId,action);
+    } finally {
+      const remaining=this.decisions.get(chatId)!-1;
+      if(remaining)this.decisions.set(chatId,remaining);else this.decisions.delete(chatId);
+    }
+  }
+
+  private continuationWorkspace(chatId:string) {
+    this.assertAvailable(chatId);
+    const project=this.store.project(this.store.chat(chatId).projectId);
+    if(this.store.getState(`transfer:reservation:${project.id}`,null)) throw continuationConflict('A transfer is pending or uncertain.');
+    this.store.assertSkillRemovalSafe(project.id);
+    this.store.assertInstallRemovalSafe(project.id);
+    this.processes.assertIdle(project.id);
+    if (readQueue(this.store,project.id).status==='running') throw continuationConflict('Pause the project queue through its existing control.');
+    if(!this.tools.assertQueueIdle) throw continuationConflict('Workspace operation and editor lease checks are unavailable.');
+    this.tools.assertQueueIdle(project.path);
+    return this.planningWorkspace(chatId);
+  }
+
+  continuationSettingsBinding() {
+    return hash(JSON.stringify([this.planningEpoch,this.config.baseUrl,this.config.apiKey,this.config.contextLimits,this.config.maxOutputTokens]));
+  }
+
+  private async continuationGuidance(chatId:string,state:RunState,root:string) {
+    await this.skills.fresh(chatId);
+    if(state.skillsHash!==this.skills.binding(chatId)) throw continuationConflict('The selected skill guidance changed.');
+    const targets=[...new Set([...(state.instructionTargets??[]),...(state.frames.at(-1)?.scope??[])])].sort();
+    const current=await readProjectInstructions(this.tools,root,targets);
+    if (current.hash!==state.instructionsHash) throw continuationConflict('Project guidance changed. Review it and give current scoped guidance.');
+  }
+
+  private async resumeContinuation(chatId:string,precondition:string) {
+    await runNativeOperation(async ()=>{
+      const current=()=>{
+        const observation=observeContinuation(this.store,chatId,false,this.continuationSettingsBinding());
+        if(this.active.has(chatId) || this.decisions.get(chatId)!==1 ||
+           observation.view?.status!=='available' || observation.view.precondition!==precondition || !observation.state)
+          throw continuationConflict('The original continuation changed. Refresh Recovery.');
+        return observation.state;
+      };
+      const state=current();
+      const providerConfig=this.continuationSettingsBinding();
+      let workspace:string;
+      try {
+        const root=this.continuationWorkspace(chatId);
+        workspace=root.identity;
+        if(workspace!==state.frames.at(-1)?.continuationWorkspace) throw continuationConflict('The original registered workspace changed.');
+        await this.continuationGuidance(chatId,state,root.path);
+      } catch(error) {
+        nativeStorageActive();
+        throw continuationConflict(error instanceof Error ? error.message : 'Current workspace evidence is unavailable.');
+      }
+      let history:ReturnType<typeof assertContinuationEvidence>=[];
+      const interrupted=current();
+      try {
+        this.commitRunTransition(chatId,interrupted,draft=>{
+          current();
+          if(this.continuationWorkspace(chatId).identity!==workspace || this.continuationSettingsBinding()!==providerConfig)
+            throw continuationConflict('Workspace identity or provider settings changed.');
+          history=assertContinuationEvidence(this.store,chatId,draft);
+          const interruption=draft.continuationControl!.eventId;
+          draft.generation++;
+          draft.steps=0;
+          const coder=draft.frames.at(-1)!;
+          coder.proseTurns=0;
+          for(const check of coder.acceptanceEvidence?.checks??[])if(check.status==='passed')check.status='stale';
+          this.store.updateChat(chatId,{status:'running'});
+          recordContinuationControl(this.store,chatId,draft,'resume',interruption);
+          if(draft.continuationControl?.kind!=='resume')
+            throw continuationConflict('Exact resumed assignment could not be recorded.');
+        });
+      } catch(error) {
+        // SQLite may have committed before the acknowledgement failed. The next
+        // human control must read the durable run even if this one cannot launch.
+        const cached=this.runs.get(chatId);
+        if(cached) {
+          for(const frame of cached.frames)this.coderContexts.delete(frame);
+          this.repositoryOverviews.delete(cached);
+          this.runs.delete(chatId);
+        }
+        throw error;
+      }
+      const live=this.load(chatId)!;
+      const coder=live.frames.at(-1)!;
+      this.coderContexts.set(coder,{key:this.coderContextKey(chatId,live,coder)});
+      this.launch(chatId,{control:live.continuationControl!,workspace,providerConfig,historical:{role:'user',content:
+        'Explicit human Resume of the original assignment. Recorded tool outcomes are historical. Inspect current scoped source and reverify any relied-on checks before reporting completion.\n'+JSON.stringify(history)} });
+    });
+  }
+
+  private async assertContinuationDispatch(chatId:string,state:RunState,admission:ContinuationDispatch,signal:AbortSignal) {
+    const stale=()=>Object.assign(new Error('Checked continuation changed before provider dispatch.'),{code:'CONTINUATION_STALE'});
+    const current=()=>{
+      signal.throwIfAborted();
+      if (!continuationDispatchCurrent(this.store,chatId,state,admission.control) ||
+          this.continuationSettingsBinding()!==admission.providerConfig) throw stale();
+      const root=this.continuationWorkspace(chatId);
+      if(root.identity!==admission.workspace)throw stale();
+      return root;
+    };
+    await runNativeOperation(async ()=>{
+      try {
+        const root=current();
+        await this.continuationGuidance(chatId,state,root.path);
+        current();
+      } catch {
+        signal.throwIfAborted();
+        nativeStorageActive();
+        throw stale();
+      }
+    });
   }
 
   private async controlInternal(chatId: string, action: 'pause' | 'resume' | 'interrupt') {
@@ -560,15 +696,16 @@ export class Runtime {
     const running = this.active.get(chatId);
     this.installs?.invalidate(chatId,'USER_CANCELLED');
 
-    this.store.transaction(()=>{
-    this.store.updateChat(chatId, {
-      status: action === 'pause' ? 'paused' : 'interrupted',
-    });
-    goalStatus(this.store,chatId,'paused',action==='pause'?'Paused by the user. Explicit resume is required.':'Interrupted by the user. Inspect recorded effects before explicit resume.');
-
-    for (const frame of this.load(chatId)?.frames ?? []) this.store.progress(chatId, frame.planStep, frame.id, 'blocked', action, 'Work stopped; completion has not been accepted.');
-    this.store.invalidateApprovals(chatId);
-    });
+    const stop=(draft?:RunState)=>{
+      this.store.updateChat(chatId, {status:action==='pause'?'paused':'interrupted'});
+      goalStatus(this.store,chatId,'paused',action==='pause'?'Paused by the user. Explicit resume is required.':'Interrupted by the user. Inspect recorded effects before explicit resume.');
+      for(const frame of draft?.frames??[]) this.store.progress(chatId,frame.planStep,frame.id,'blocked',action,'Work stopped; completion has not been accepted.');
+      this.store.invalidateApprovals(chatId);
+      if(draft)recordContinuationControl(this.store,chatId,draft,action);
+    };
+    const original=this.load(chatId);
+    if(original)this.commitRunTransition(chatId,original,stop);
+    else this.store.transaction(()=>stop());
     for (const frame of this.load(chatId)?.frames ?? []) this.coderContexts.delete(frame);
     running?.controller.abort(new Error(`Task ${action} requested`));
     this.processes.stopChat(chatId);
@@ -760,6 +897,7 @@ export class Runtime {
 
   private async prepareCoderRequest(
     chatId: string, state: RunState, frame: Frame, messages: ModelMessage[], tools: NativeToolDefinition[], signal: AbortSignal,
+    historyEstimate=0,
   ): Promise<{messages:ModelMessage[]; beforeProvider:BeforeProvider} | undefined> {
     const binding = this.coderContexts.get(frame), ref = frame.planStep;
     if (!binding || !ref || frame.role !== 'coder') return;
@@ -769,7 +907,7 @@ export class Runtime {
     if (!task) return;
     const base = estimateTokens(messages,tools);
     const limit = this.config.contextLimits.coder;
-    const room = advisoryEstimate(limit-this.config.maxOutputTokens-Math.min(8192,Math.floor(limit*0.1))-base);
+    const room = Math.min(2048-historyEstimate,advisoryEstimate(limit-this.config.maxOutputTokens-Math.min(8192,Math.floor(limit*0.1))-base));
     const plan = this.store.plan(chatId);
     const prefix = messages.length-frame.messages.length;
     const absent: CoderSourceContext = {cards:[],outsideScope:task.sources.length+task.newFiles.length,observation:'unavailable'};
@@ -1137,9 +1275,10 @@ export class Runtime {
     return instructions;
   }
 
-  private async loop(chatId: string, signal: AbortSignal) {
+  private async loop(chatId: string, signal: AbortSignal, continuation?:ContinuationDispatch) {
     const state = this.load(chatId);
     if (!state?.frames.length) return;
+    if(continuation)await this.assertContinuationDispatch(chatId,state,continuation,signal);
 
     const initialGoal=goalOf(this.store,chatId);
     if(initialGoal && initialGoal.status!=='completed' && !state.planOnly && ['paused','blocked','waiting_for_user'].includes(initialGoal.status))return;
@@ -1190,6 +1329,7 @@ export class Runtime {
         draft.steps++;
         for (const unfinished of state.frames) this.store.progress(chatId, unfinished.planStep, unfinished.id, 'blocked', 'budget', 'Task reached its safety budget; resume is required.');
         this.store.updateChat(chatId, { status: 'paused' });
+        recordContinuationControl(this.store,chatId,draft,'budget');
         this.store.message(
           chatId,
           'system',
@@ -1226,7 +1366,7 @@ export class Runtime {
         : frame.messages;
       if (reviewScaffold) messages = [...messages.slice(0,-frame.messages.length),...initialMessages];
       let preparedFrame:Frame|undefined;
-      if (this.hooks.prepareMessages) {
+      if (this.hooks.prepareMessages && !continuation) {
         const preparation = structuredClone(frame);
         preparedFrame = preparation;
         if (reviewScaffold) preparation.messages=structuredClone(initialMessages);
@@ -1242,11 +1382,36 @@ export class Runtime {
       if(state.generation!==generation)continue;
       if(preparedFrame && JSON.stringify(preparedFrame.messages)!==JSON.stringify(initialMessages))this.commitRunTransition(chatId,state,draft=>{draft.frames.find(item=>item.id===frame.id)!.messages=preparedFrame!.messages;});
       const tools = publishedTools(frame.role,state.planOnly?'plan':'execute');
-      const advisoryRequest = frame.role === 'critic'
+      let historyEstimate=0;
+      if(continuation) {
+        const offset=messages.length-frame.messages.length;
+        const scoped=[...messages.slice(0,offset),continuation.historical,...messages.slice(offset)];
+        if(estimateTokens(scoped,tools)+this.config.maxOutputTokens<=this.config.contextLimits.coder) {
+          historyEstimate=estimateTokens(scoped,tools)-estimateTokens(messages,tools);
+          messages=scoped;
+        }
+      }
+      let advisoryRequest = frame.role === 'critic'
         ? await this.prepareCriticRequest(chatId,state,frame,messages,tools,signal)
-        : await this.prepareCoderRequest(chatId,state,frame,messages,tools,signal);
+        : await this.prepareCoderRequest(chatId,state,frame,messages,tools,signal,historyEstimate);
       signal.throwIfAborted();
       if (state.generation!==generation || state.frames.at(-1)!==frame) continue;
+      if (continuation) {
+        const admission=continuation, prepared=advisoryRequest;
+        await this.assertContinuationDispatch(chatId,state,admission,signal);
+        const initial=prepared?.messages??messages;
+        if(estimateTokens(initial,tools)+this.config.maxOutputTokens>this.config.contextLimits.coder)
+          throw Object.assign(new Error('Checked continuation does not fit the configured context.'),{code:'CONTINUATION_STALE'});
+        advisoryRequest={messages:initial,beforeProvider:async dispatchSignal=>{
+          await this.assertContinuationDispatch(chatId,state,admission,dispatchSignal);
+          const checked=prepared ? await prepared.beforeProvider(dispatchSignal) : messages;
+          if(!continuationDispatchCurrent(this.store,chatId,state,admission.control))
+            throw Object.assign(new Error('Checked continuation changed before provider dispatch.'),{code:'CONTINUATION_STALE'});
+          if(estimateTokens(checked,tools)+this.config.maxOutputTokens>this.config.contextLimits.coder)
+            throw Object.assign(new Error('Checked continuation does not fit the configured context.'),{code:'CONTINUATION_STALE'});
+          return checked;
+        }};
+      }
       this.save(chatId,state);
       const deltas=nativeOutputBuffer(text=>this.store.event(chatId,'delta',{role:frame.role,text}));
       const input = {model:this.store.chatModels(chatId)[frame.role],messages:advisoryRequest?.messages ?? messages,tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
@@ -1260,8 +1425,14 @@ export class Runtime {
           observed.onObservation?.({type:'invoked'});
         }
         return this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed);
-      },this.hooks.scheduled || !!advisoryRequest).finally(()=>deltas.flush());
+      },this.hooks.scheduled || !!advisoryRequest).finally(()=>deltas.flush()).catch(error=>{
+        if (continuation && (error as {code?:string})?.code==='CONTINUATION_STALE' &&
+            state.generation!==continuation.control.generation && state.steering.length && !signal.aborted) return undefined;
+        throw error;
+      });
+      continuation=undefined;
       signal.throwIfAborted();
+      if(!completion)continue;
       this.store.event(chatId,'provider_request',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,model:input.model,finishReason:completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
       if (completion.usage) this.store.event(chatId,'usage',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,...completion.usage});
       await this.refreshInstructions(chatId,state,signal);
@@ -1299,6 +1470,7 @@ export class Runtime {
             goalStatus(this.store,chatId,'paused',`${next.role} stopped after three text-only turns without the required native completion or verdict. Explicit continuation is required.`);
             this.store.message(chatId,'system',`${next.role} stopped after three text-only turns without a required native completion or verdict. Work remains unaccepted; review the task and resume or steer it.`);
             this.store.progress(chatId,next.planStep,next.id,'blocked','no_progress','Internal agent did not provide a native completion or verdict.');
+            recordContinuationControl(this.store,chatId,draft,'budget');
           } else next.messages.push({role:'user',content:next.role==='critic'?'Continue the review using observed evidence; submit review_result when ready. Text is not a recorded verdict.':'Continue the assigned work using native tools, or submit_completion with observed evidence and limitations when ready. A status update does not complete the assignment.'});
         } else {
           next.proseTurns=0;
@@ -1341,6 +1513,14 @@ export class Runtime {
           const outcome = await definition.handler({workspace:this.tools, context:this.toolContext(chatId,frame,signal), control:async request => {
             const commit = () => this.controlAction(chatId,state,frame,call,request,review,admission);
             if (review) return runNativeOperation(() => commit());
+            if (request.name==='delegate' && request.args.planStep && (request.args.paths as string[]|undefined)?.length) {
+              return runNativeOperation(()=>{
+                signal.throwIfAborted();
+                if(state.generation!==generation || state.frames.at(-1)!==frame || frame.queuedCalls?.[0]?.id!==call.id)
+                  throw new Error('The Coder delegation changed before commit.');
+                return commit();
+              });
+            }
             if (!admission?.checkWorkspaceAtCommit) return commit();
             // Refresh only the synchronous plan/file check and SQLite transition.
             // The surrounding tool handler and all provider work stay outside.
@@ -2061,6 +2241,11 @@ export class Runtime {
           resolve('Coder delegated; result will follow independent review.',{delegationId:coder.id});
           draft.frames.push(coder);
           const event=this.store.event(chatId,'delegation',{objective,delegationId:coder.id,planStep:reference});
+          if(reference && coder.scope?.length) {
+            coder.delegationEventId=event.id;
+            try { coder.continuationWorkspace=this.planningWorkspace(chatId).identity; }
+            catch { nativeStorageActive(); }
+          }
           this.store.progress(chatId,reference,coder.id,'in_progress','started',objective,event.id);
           if (reference && this.store.planStep(chatId,reference)?.task) preparedCoder = coder;
           break;

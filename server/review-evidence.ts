@@ -13,7 +13,7 @@ export const reviewLimits = {
 interface ReviewSource {
   id: string;
   role: 'coder'|'critic';
-  origin: string;
+  origin: string|null;
   ids?: number[];
 }
 
@@ -34,6 +34,7 @@ export interface ReviewReceipt {
   exit?: number;
   digest?: string|null;
   changeId?: string;
+  commandId?: string;
   destinationDigest?: string;
   legacy?: boolean;
   outside?: boolean;
@@ -63,7 +64,8 @@ function receiptQuery(store: Store) {
     " AND length(CAST(n.data AS BLOB))<=? AND json_extract(e.data,'$.result')=n.data" +
     " AND NOT EXISTS (SELECT 1 FROM json_tree(e.data) WHERE typeof(key)='text' GROUP BY parent,key HAVING count(*)>1)" +
     " AND ((json_type(e.data,'$.reviewReceipt') IS NULL) OR" +
-    " (json_extract(e.data,'$.reviewReceipt.version')=1 AND json_extract(e.data,'$.reviewReceipt.origin')=?" +
+    " (json_extract(e.data,'$.reviewReceipt.version')=1 AND length(json_extract(e.data,'$.reviewReceipt.origin'))=64" +
+    " AND (? IS NULL OR json_extract(e.data,'$.reviewReceipt.origin')=?)" +
     " AND json_extract(e.data,'$.reviewReceipt.callId')=json_extract(m.data,'$.metadata.toolCallId'))))" +
     " SELECT CASE WHEN length(json_extract(data,'$.action.name'))<=64 THEN json_extract(data,'$.action.name') END AS tool," +
     " CASE WHEN length(CAST(json_extract(data,'$.action.args.path') AS BLOB))<=1024 THEN json_extract(data,'$.action.args.path') END AS path," +
@@ -125,7 +127,7 @@ export function reviewEvidence(
       }
       seen.add(id);
       const missing: ReviewReceipt = {id,role,status:'unavailable',check:checks.get(id)};
-      const row = read.get(id,chatId,reviewLimits.event,chatId,frameId,128*1024,frameId,frameId,reviewLimits.event,origin);
+      const row = read.get(id,chatId,reviewLimits.event,chatId,frameId,128*1024,frameId,frameId,reviewLimits.event,origin,origin);
       const tool = typeof row?.tool === 'string' ? toolRegistry.get(row.tool) : undefined;
       if (!tool || !tool.roles.includes(role) || tool.kind !== 'workspace' || !row) {
         receipts.push(missing);
@@ -152,7 +154,7 @@ export function reviewEvidence(
       const changeId = !legacy && tool.fileMutation && typeof row.changeId === 'string' ? row.changeId : undefined;
       const destinationDigest = typeof row.destinationDigest === 'string' && digestPattern.test(row.destinationDigest) ? row.destinationDigest : undefined;
       const baseDigest = typeof row.baseHash === 'string' && digestPattern.test(row.baseHash) ? row.baseHash : row.baseHashType==='null' ? null : undefined;
-      receipts.push({...missing,tool:tool.name,path,destination,digest,baseDigest,changeId,destinationDigest,status,legacy,report,exit,directory,
+      receipts.push({...missing,tool:tool.name,path,destination,digest,baseDigest,changeId,commandId:typeof row.changeId==='string'?row.changeId:undefined,destinationDigest,status,legacy,report,exit,directory,
         skipped:typeof row.skipped === 'number' && row.skipped > 0 ? row.skipped : undefined});
     }
   }

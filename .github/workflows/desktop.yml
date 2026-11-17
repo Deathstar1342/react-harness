@@ -137,6 +137,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:M37_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/queue/native'
           node --import tsx tests/milestone-37-native.ts native
+      - name: Checked task continuation in Chrome and sandboxed Electron (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 4
+        run: |
+          export CONTINUATION_RECEIPTS="$GITHUB_WORKSPACE/test-results/continuation"
+          export CONTINUATION_SOURCE="$GITHUB_SHA"
+          node --import tsx tests/continuation-browser.ts
+          M33_ELECTRON=1 xvfb-run -a node --import tsx tests/continuation-browser.ts
+      - name: Checked task continuation in Chrome and sandboxed Electron (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 4
+        run: |
+          $env:CONTINUATION_RECEIPTS=Join-Path $env:GITHUB_WORKSPACE 'test-results/continuation'
+          $env:CONTINUATION_SOURCE=$env:GITHUB_SHA
+          node --import tsx tests/continuation-browser.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:M33_ELECTRON='1'
+          node --import tsx tests/continuation-browser.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -147,3 +165,4 @@ jobs:
             test-results/preview/
             test-results/inspector/
             test-results/queue/
+            test-results/continuation/

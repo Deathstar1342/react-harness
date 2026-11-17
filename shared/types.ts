@@ -143,12 +143,26 @@ export interface RecoveryEntry {
   evidence:{eventId:number;at:string|null}[]; evidenceTruncated:boolean;
   outputTruncated?:boolean;
 }
+export interface TaskContinuation {
+  status:'available'|'blocked'|'stale'|'unavailable';
+  reason:string;
+  precondition?:string;
+  interruptionEventId?:number;
+  frameId?:string;
+  planStep?:PlanStepRef;
+  objective?:string;
+  requirements?:string[];
+  evidence:{eventId:number;tool?:string;path?:string;destination?:string;changeId?:string;
+    report?:'passed'|'failed'|'error'|'unavailable';status:'succeeded'|'failed'|'uncertain'|'unavailable'}[];
+  partial:boolean;
+}
 export interface RecoveryView {
   schema:'recovery-v1'; chatId:string; projectId:string; observedAt:string; revision:string; latestEventId:number;
   chat:{status:ChatStatus|'unknown';mode:ChatMode|'unknown';modeVersion:number|null;updatedAt:string|null};
   goal?:{id:string;revision:number;status:GoalStatus;humanMessageId:string|null;updatedAt:string|null;uncertainEventIds:number[];truncated:boolean;eventId:number|null};
   plan?:{id:string;version:number}; humanMessageIds:string[];
   entries:RecoveryEntry[];
+  continuation?:TaskContinuation;
   coverage:{source:string;limit:number;truncated:boolean;unavailable:number}[];
 }
 export interface PublicSettings { executionMode?:'direct'|'container'; executionAvailable?:boolean; limitSource?:'application-budget'; providerLimits?:'unknown'; configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
