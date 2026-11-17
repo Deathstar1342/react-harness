@@ -60,3 +60,68 @@ Path inventory relative to the milestone review directory on D:
 - Assigned source is `local-llm-evaluation/`. Common Git metadata is `repo-remote/.git/` and the assigned entry is `repo-remote/.git/worktrees/local-llm-evaluation/`.
 - Existing closure candidate is `local-llm-continuation-corrected/node_modules/`, with an ordinary directory and matching tracked root lock. Existing cache candidate is `npm-cache/`. Before using either, verify the dependency/platform closure and use isolated trial copies without modifying the previous worktree or its receipts.
 - Proposed baseline checkout is `local-llm-evaluation-baseline/`. Each ref will use its own `node_modules/`, `dist/` and `build/`. Reserve `temp/le/` for short per-trial fixture and temp paths and `local-llm-evaluation-receipts/` for the private path manifest and receipts. These proposed output paths are absent at contract time. Do not use the shell's default C: Node or temp directory. The verified D: Node binary is under the existing Codex runtime's `dependencies/node/bin/` directory.
+
+## Controlled benchmark results
+
+The evaluation source `eb7ce8a98f219210ba20e08588eca63414cc08af` (tree `fdf4de94cf99f51f3af42555aeeac1b60b02cf1a`) adds the two evaluation test files. The Windows comparison overlaid those byte-identical files in fresh detached checkouts of the two pinned source trees. Their tracked files stayed clean. Both used Node 24.19.0 and isolated copies of the matching lockfile closure, with a new temporary Git index, synthetic project, disk SQLite profile, chat and loopback HTTP server per trial. The server received one synthetic model ID for all roles. Each role had a 64,000-unit input limit and a 256-token output allowance, with shared 60 RPM, 1.5M TPM and 10M TPD budgets. These are harness limits. Actual tokenizer capacity, template overhead, quantization and generation defaults require a real server and model.
+
+### Version-specific scripts
+
+- The baseline receives an ordinary Plan definition and the delivered Runtime receives admission references tied to the same native reads. For playbook creation, delivered additionally checks destination absence before Plan admission.
+- Both scripts insert an incorrect identifier in one consumer, receive a failed Critic verdict and repair it within the original delegated scope. Baseline evidence identifies the next Coder turn. Delivered also stores `local_repair`.
+- The replan starts with `feature.cjs` in scope. Its observed shared-rendering constraint supports widening the scope to include `shared.cjs`. Delivered accepts the Critic's explicit `scope_change` and exact original read receipt. Baseline uses its existing changes-requested route, which returns two repair turns before the Architect sees the unresolved assignment. Both require a second Plan revision and no write before the new scope. The baseline structured replan disposition is unavailable.
+- Both portable runs verify exact current bytes, confirmed native file changes, original correlated tool results, exact accepted Plan progress and the review event it references, plus the scenario oracle. Ansible rows here pass the structural oracle only. Syntax-check, Bash execution, playbook execution, output modes and idempotence remain unmeasured. The test code also runs the fixed oracle through real `run_tests` with fresh JUnit on the configured disposable Linux sandbox, where available. That oracle performs the same JS behavior or text structure checks.
+
+### Paired Windows trials
+
+Each row includes one pair. The matrix retained all six trials per revision. Both revisions recorded six accepted Plan steps and all six bounded oracles passed. The two playbooks are included at their defined structural coverage. Each reported path count is the exact final diff outside Git metadata, with no deviation from the authorized allowlist. Calls include all attempted provider requests in the trial.
+
+| Fixture | Changed files each | Calls baseline → delivered | Explicit reads baseline → delivered | Run wall ms baseline / delivered |
+| --- | ---: | ---: | ---: | ---: |
+| Single-file | 1 | 8 → 8 | 3 → 3 | 673 / 732 |
+| Multi-file refactor | 3 | 11 → 11 | 10 → 10 | 1,561 / 1,869 |
+| Bash-to-Ansible | 1 | 7 → 7 | 3 → 3 | 658 / 879 |
+| Ansible from requirements | 1 | 7 → 7 | 3 → 3 | 651 / 813 |
+| Dependency-aware | 2 | 8 → 8 | 12 → 12 | 1,663 / 1,879 |
+| Replan | 2 | 18 → 14 | 10 → 8 | 1,584 / 1,444 |
+
+Explicit reads returned 4,183 versus 3,843 UTF-8 bytes across the matrix. Dedicated destination-absence checks are separate from content reads. Automatic context preparation time and its isolated read bytes are unavailable in these receipts. Windows recorded no native command or test execution or native validation failures in the six positives. The baseline recorded four changes-requested verdicts and delivered recorded two, all from the deliberately scripted defect and conflict.
+
+| Role | Calls baseline / delivered | Dispatched input estimate baseline / delivered | Reserved estimate including output baseline / delivered | Inspector populated usage rows baseline / delivered | Inspector request elapsed ms baseline / delivered |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Architect | 27 / 27 | 842,591 / 791,594 | 849,503 / 798,506 | 17 / 16 | 598 / 582 |
+| Coder | 22 / 20 | 666,702 / 550,937 | 672,334 / 556,057 | 14 / 12 | 463 / 478 |
+| Critic | 10 / 8 | 227,527 / 133,178 | 230,087 / 135,226 | 8 / 8 | 222 / 242 |
+
+Input estimates use the harness byte-based estimator over the exact dispatched messages and schemas. The reservations include the 256-token output allowance per request. All calls were conversation calls, the HTTP active-request high-water mark was one per trial, and no compaction call occurred. Synthetic reported input/output totals from known rows were 187/34 and 165/30. Usage was unknown on the other 20 and 19 requests respectively. These synthetic values prove usage accounting, including reported zero, and provide no actual model token counts. Queue and provider service times are unavailable as separate measures. The wall times include the real Runtime and fixture server. The scripted sequences and fixture latencies provide no model quality or speed estimate.
+
+### Supplementary qualification
+
+Each exact checkout passed all 15 checks, including the six paired JSON runs and nine supplemental trials. Fragmented SSE preserved raw native arguments and original IDs through matching result messages. The managed production-style transport sent one HTTP request on refusal, transient HTTP failure, truncated SSE and timeout, with no tool effects. The duplicate-key batch rejected both calls and preserved their result correlations. A Coder receiving text only paused after three turns without native completion. Impossible context stopped during preparation before any Inspector request. Impossible account reservation preserved a queued Inspector failure with zero attempts and no reservation. The first development run used the wrong Plan receipt field and expected a request record before context preparation. Those failed receipts were retained. The corrected suite passed with `sourceEventId` and distinct preparation/admission assertions.
+
+For reproduction, create fresh detached checkouts at the two pinned commits and verify the lock identity. Overlay `tests/local-llm-evaluation-fixtures.ts` and `tests/local-llm-evaluation.test.ts` from the evaluation source. Verify the two overlay files match the evaluation source and `git diff HEAD` is empty in each checkout. Run `node node_modules/vitest/vitest.mjs run tests/local-llm-evaluation.test.ts` from each, with `ABYSSUS_EVALUATION_REF=baseline` for the pre-optimization ref only. Use the matching Node/dependency closure and a fresh temporary root for each run. For raw receipt retention, set `ABYSSUS_EVALUATION_RECEIPTS` to an existing private directory outside the checkout. Leaving it unset runs the same assertions and cleans temporary trial storage. The test binds only a controlled loopback server and needs no live provider configuration.
+
+The fixture overlay Git blobs were `019d72482a8f51ed2729d89abd3b8f056abacabe` and `8bbce550f03255193700320557ccc87618fc1f4a` in the same order as the filenames above. Both match the exact tested commit.
+
+## Live qualification prerequisite
+
+No explicitly trusted existing local route and configured native-tool model were furnished to this milestone. Live calls, host-only probes and actual controller reachability measurements therefore total zero. The required operator input is the designation of an already running local OpenAI-compatible endpoint and its configured model ID, with a supported approved path from the isolated controller and any needed credential already supplied through the controller's private configuration. The offline benchmark is reproducible independently of that input. Model/GPU fit, live serial inference, real tokens and live performance remain unknown.
+
+## Exact-source validation
+
+Both Windows typechecks, fresh web and Electron builds, 230 focused Vitest checks, the 37 native diagnostic probe checks, and the full suite of 1,298 passing tests with 47 platform skips succeeded using the D: closure. Linux Validate passed 1,338 tests with seven skips. Its log shows all 15 evaluation checks passed with the disposable Linux prerequisites and unprivileged sandbox enabled. That supplies actual native JUnit execution for the fixture oracle, with no Ansible runtime or live inference measurements. The focused provider tests also cover bounded adapter-only retries and redirect refusal.
+
+| Required exact-source workflow | Run | Verified fresh artifacts |
+| --- | --- | --- |
+| Validate | [43994377593](https://github.com/Deathstar1342/react-harness/actions/runs/43994377593) | Linux suite and diagnostic log |
+| Desktop validation | [43994377776](https://github.com/Deathstar1342/react-harness/actions/runs/43994377776) | `14290175901`, `14289861145` |
+| Support runtime | [43994377678](https://github.com/Deathstar1342/react-harness/actions/runs/43994377678) | `14289066847`, `14288359621` |
+| Privileged helper | [43994377709](https://github.com/Deathstar1342/react-harness/actions/runs/43994377709) | Job and step results |
+| Container foundation | [43994377547](https://github.com/Deathstar1342/react-harness/actions/runs/43994377547) | `14289056886` |
+| Guided source | [43994377599](https://github.com/Deathstar1342/react-harness/actions/runs/43994377599) | `14290055574`, `14290010699`, `14289876562`, `14288449771` |
+
+All six workflows passed on attempt one. The audit compared all ten jobs and 162 ordered GitHub-reported steps against the identical workflow definitions and the delivered revision's step inventory. There were 139 successes and 23 expected skips, including GitHub-managed steps in the total. All nine authenticated archives matched published sizes and SHA-256 digests, exact source, safe unique paths, regular file types and full ZIP CRC. The audit checked 27 semantic receipts, including connected Linux worker and queue/recovery/preview evidence, Chrome and sandboxed Electron lanes, both exported Linux lifecycles and the relocated Windows payload.
+
+Complete Windows archive `14289876562` has SHA-256 `ad7c2cd48213b20e553e5f42fb3756137d195e6bab56276ba4ab7843fab33e3f`. All 10,410 manifest hashes and the complete 10,411-member set matched. The audit checked 42 copied Git files, lock and image provenance, and matched nine packaged server modules against the local exact-source build after line-ending normalization. The payload excludes the evaluation fixtures. Physical Windows Docker and live model acceptance remain separate.
+
+The separate [Installer candidates run](https://github.com/Deathstar1342/react-harness/actions/runs/43994377770) failed and remains under the M21 hold. Local draft failures, raw trials, CI snapshots and authenticated evidence are retained privately on D:. This report is the report-only handoff for coordinator review, independent validation and eventual exact-main checks.
