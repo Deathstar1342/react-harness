@@ -74,7 +74,7 @@ async function startBackendScoped(options:ProfileOptions & {transportToken?:stri
     store=new Store(database);
     durableWrite(dataMarker,JSON.stringify({version:1}));
     ({app}=await createApp({config,provider,store,providerSettingsFile:file,tools,
-      hooks:createManagedHooks(provider,store,config,{promptExtensions}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close},transportAuth:auth,browserPreview:options.desktop?undefined:options.browserPreview}));
+      hooks:createManagedHooks(provider,store,config,{promptExtensions,textJSON:true}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close},transportAuth:auth,browserPreview:options.desktop?undefined:options.browserPreview}));
     const address=await app.listen({host:config.host,port:config.port});
     config.port=Number(new URL(address).port);
     lifecycle.ready();

@@ -2,7 +2,7 @@
 
 The approved [container backend plan](CONTAINERIZATION.md) uses a native Electron GUI, containerized controller/project workers, persistent selected storage and one-time copy-on-import. See [current status](docs/STATUS.md) and [M32 evidence gates](docs/m32-acceptance.md); customer packaging remains paused.
 
-A local chat workspace for models served through STARK's native OpenAI-compatible Chat Completions API. The architect delegates implementation to a coder and brings in a critic to review scope, changes and verification evidence. React/TypeScript, Node24 inside the controller, node:sqlite and a local Monaco editor preserve conversations and editing state.
+A local chat workspace for models served through an OpenAI-compatible Chat Completions API. The architect delegates implementation to a coder and brings in a critic to review scope, changes and verification evidence. React/TypeScript, Node24 inside the controller, node:sqlite and a local Monaco editor preserve conversations and editing state.
 
 ## Guided source launch
 
@@ -10,7 +10,11 @@ With an approved preexisting local Linux Docker engine, run `bash setup.sh` on a
 
 Source setup builds pinned runtime/image payloads; it is not a customer installer. Windows entrypoints and payload validation remain distinct from the open actual Docker Desktop/D-drive/SQLite/dependency-link device gate. Docker's own backing/cache drive is separate from the selected runtime and app folders. See the **[Setup guide](docs/setup.md)** for exact prerequisites, read-only checks, reruns, retained failed builds and storage behavior.
 
-Enter provider address/key and exact role models through private Settings. Existing settings are preserved. The provider receives native `tools`, assistant `tool_calls` and matching tool results; prose never executes. No work credentials are needed to validate independent source/runtime behavior. Work-only STARK acceptance remains deferred.
+## Text-only model branch
+
+On `non-tools`, choose the exact free text-model ID for **each** role in private Settings or set `ARCHITECT_MODEL`, `CODER_MODEL`, and `CRITIC_MODEL` in the private profile configuration. Check the model selections in existing chats as well. The branch preserves prior model IDs; it cannot classify accounts, prices, or free-tier limits.
+
+The architect, coder, and critic request one complete JSON object with `message`, `action`, and `parameters`. Ordinary conversation uses a null action and empty parameters. The provider receives ordinary text messages and the allowed action schemas. It receives no native tool definitions or tool-role messages. The runtime parses the entire JSON response and rejects extra text, duplicate keys, and unauthorized or malformed actions. A format failure gets up to two repair requests under the existing budget. Provider errors and interrupted actions follow the ordinary recovery rules. Work-only live provider testing remains deferred.
 
 ## Work with projects and chats
 
@@ -56,13 +60,13 @@ Default roles are configurable in `.env`:
 | Coder | `gemini-3.5-flash-withtools` |
 | Critic | `gemini-3.5-pro` |
 
-These are provisional model candidates, not live-verified IDs. Provider capabilities and limits remain unknown until checked. Connection tests independently probe ordinary replies, native round trips and streaming. Application token/rate budgets are conservative local settings, not claims about provider limits.
+These are provisional model candidates, not live-verified IDs. Provider capabilities and limits remain unknown until checked. Connection tests independently probe ordinary replies, exact JSON and streaming JSON. Application token/rate budgets are conservative local settings, not claims about provider limits.
 
 To customize role guidance without editing code, create local UTF-8 text files and set `ARCHITECT_PROMPT_FILE`, `CODER_PROMPT_FILE`, or `CRITIC_PROMPT_FILE` in the profile `.env`. Relative file values resolve from `profile/config`; explicit process environment paths retain launch-directory semantics. Each file must be nonempty and at most 32,000 bytes. Restart after edits. Guidance is appended to the native role instructions; schema validation, approvals and file checks still apply. Prompt contents and filenames are excluded from frontend settings.
 
 The current implementation delegates to one coder at a time. Parallel coders/worktree integration remain a later extension.
 
-Native Chat Completions carries typed tool calls. Only complete validated calls can execute; ordinary prose never executes. Model-written continuation summaries preserve original transcripts and reattach authoritative state separately. Conservative token estimates and a persistent account ledger coordinate requests across roles and chats; the scheduler reserves headroom for architect/critic work and counts compaction calls. Configure context, output, minute, and daily limits in `.env`. These budgets cover this backend database, not other clients using the same API account.
+The text transport adapts validated JSON into the same internally correlated action and result records used for approvals and recovery. Ordinary prose and rejected responses cannot request execution. Model-written continuation summaries preserve original transcripts and reattach authoritative state separately. Conservative token estimates and a persistent account ledger coordinate requests across roles and chats; the scheduler reserves headroom for architect/critic work and counts compaction calls. Configure context, output, minute, and daily limits in `.env`. These budgets cover this backend database, not other clients using the same API account.
 
 Structured tests use fresh JUnit XML. For example, ask the coder to run:
 

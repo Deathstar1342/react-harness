@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { _electron as electron, expect } from '@playwright/test';
 import { mkdtempSync, mkdirSync, rmSync,writeFileSync,readFileSync,existsSync,unlinkSync } from 'node:fs';
 import path from 'node:path';
@@ -7,12 +6,6 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-// This entrypoint runs with Node's native TypeScript loader, without tsx resolution.
-function diagnosticReply(input:{tools?:unknown[]}) {
-  return {text:input.tools?.length?'':'Connection OK',finishReason:input.tools?.length?'tool_calls':'stop',
-    toolCalls:input.tools?.length?[{id:`call_${randomUUID()}`,type:'function' as const,function:{name:'connection_echo',arguments:JSON.stringify({value:'Connection OK'})}}]:[],
-    usage:{inputTokens:15,outputTokens:10}};
-}
 const root=path.resolve(import.meta.dirname,'..'),home=mkdtempSync(path.join(tmpdir(),'abyssus-electron-'));
 mkdirSync(path.join(root,'test-results'),{recursive:true});
 const launch=()=>electron.launch({args:[path.join(root,'tests/desktop-electron-entry.cjs')],chromiumSandbox:true,cwd:tmpdir(),env:{...process.env,ABYSSUS_SMOKE_HOME:home,MODEL_STREAMING:'false'},timeout:30000});
@@ -125,10 +118,13 @@ try {
       console.log('PASS real Electron independent skill/file dirty aggregation, unsaved draft close guard and retained editor state');
       const provider=createServer(async(req,res)=>{
         if(req.url==='/v1/models'){res.setHeader('content-type','application/json');res.end(JSON.stringify({data:['gemini-3.5-pro','gemini-3.5-flash-withtools'].map(id=>({id}))}));return;}
-        let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw),result=diagnosticReply(body);
-        const message={role:'assistant',content:result.text,...(result.toolCalls.length?{tool_calls:result.toolCalls}:{})};
-        if(body.stream){res.setHeader('content-type','text/event-stream');res.end(`data: ${JSON.stringify({choices:[{index:0,delta:{...message,...(result.toolCalls.length?{tool_calls:result.toolCalls.map((call,index)=>({...call,index}))}:{})},finish_reason:result.finishReason}],usage:{prompt_tokens:10,completion_tokens:10}})}\n\ndata: [DONE]\n\n`);}
-        else{res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message,finish_reason:result.finishReason}],usage:{prompt_tokens:10,completion_tokens:10}}));}
+        let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);
+        if ('tools' in body || 'tool_choice' in body || body.messages.some((message:{role:string;tool_calls?:unknown})=>message.role==='tool'||'tool_calls' in message)) {
+          res.statusCode=400;res.end();return;
+        }
+        const message={role:'assistant',content:body.messages.at(-1).content.includes('bare JSON')?'{"value":"Connection OK"}':'Connection OK'};
+        if(body.stream){res.setHeader('content-type','text/event-stream');res.end(`data: ${JSON.stringify({choices:[{index:0,delta:message,finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:10}})}\n\ndata: [DONE]\n\n`);}
+        else{res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message,finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:10}}));}
       });provider.listen(0,'127.0.0.1');await once(provider,'listening');
       try {
         await page.getByRole('button',{name:'Settings',exact:true}).click();
@@ -138,7 +134,7 @@ try {
         await expect(page.getByText('Provider settings saved. Model defaults apply to new chats only.')).toBeVisible();
         await page.getByRole('button',{name:'Test connection',exact:true}).click();
         await expect(page.getByText('Connection checks passed',{exact:true})).toBeVisible({timeout:30000});
-        for(const role of ['architect','coder','critic'])for(const evidence of ['ordinary','native','streaming']) {
+        for(const role of ['architect','coder','critic'])for(const evidence of ['ordinary','json','streaming']) {
           await expect(page.getByText(`${role} · ${evidence} · passed`,{exact:true})).toBeVisible();
         }
         await page.getByRole('button',{name:'Close',exact:true}).click();

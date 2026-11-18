@@ -6,7 +6,7 @@ export interface DeletionPreview { canonicalPath: string; confirmationToken: str
 export type ProjectRemoval = { mode: 'app-only' } | { mode: 'disk'; canonicalPath: string; confirmationToken: string };
 export interface WorkspaceSettings { transferMode?:'source-code'; workspaceRoot: string; defaultWorkspaceRoot: string }
 export interface Preferences { debugMode: boolean; defaultApprovalMode: ApprovalMode }
-export interface ConnectionCheck { evidence?: 'ordinary'|'native'|'streaming'; model?:string; requestId?:string; target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
+export interface ConnectionCheck { evidence?: 'ordinary'|'native'|'json'|'streaming'; model?:string; requestId?:string; target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
 export interface ConnectionReport { catalog?:ModelCatalogEntry[]; ok: boolean; checks: ConnectionCheck[]; completedAt: string }
 export interface DirectoryListing { path: string; parentPath: string | null; entries: {name:string;path:string}[]; roots: {name:string;path:string}[]; truncated: boolean }
 export type RoleModels = Record<AgentRole, string>;

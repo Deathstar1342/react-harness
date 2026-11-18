@@ -24,7 +24,7 @@ import { Store } from './store.js';
 import { WorkspaceLocations } from './workspace.js';
 import { Settings } from './settings.js';
 import { ProviderSettings, type ProviderSettingsFile } from './provider-settings.js';
-import { ConnectionDiagnostics } from './diagnostics.js';
+import { CONNECTION_TIMEOUT_MS, ConnectionDiagnostics } from './diagnostics.js';
 import { Changes } from './changes.js';
 import {Checkpoints,captureCheckpointInput,previewCheckpointInput,restoreCheckpointInput} from './checkpoints.js';
 import { Removal } from './removal.js';
@@ -65,7 +65,7 @@ export async function createApp(options: AppOptions) {
   const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root),config.executionMode==='container');
   const settings = new Settings(store,config.approvalMode);
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
-  const diagnostics = new ConnectionDiagnostics(config,provider,hooks.complete ?? createManagedHooks(provider,store,config).complete!);
+  const diagnostics = new ConnectionDiagnostics(config,provider,managedComplete,CONNECTION_TIMEOUT_MS,hooks.textJSON);
   const app = Fastify({logger:false,bodyLimit:2*1024*1024});
   const ordinaryJson=app.getDefaultJsonParser(app.initialConfig.onProtoPoisoning!,app.initialConfig.onConstructorPoisoning!);
   app.removeContentTypeParser('application/json');
@@ -237,7 +237,7 @@ export async function createApp(options: AppOptions) {
     z.object({}).strict().parse(request.body);const id=paramId(request.params);assertNoRequests(store.chat(id).projectId);return removal.chat(id);
   });
   app.get('/api/health',async()=>({ok:true}));
-  app.get('/api/settings',async()=>({...publicSettings(config),executionAvailable:config.executionMode==='container'?await workerAvailable():true,approvalMode:settings.get().defaultApprovalMode}));
+  app.get('/api/settings',async()=>({...publicSettings(config),...(hooks.textJSON?{protocol:'text-json-v1'}:{}),executionAvailable:config.executionMode==='container'?await workerAvailable():true,approvalMode:settings.get().defaultApprovalMode}));
   app.get('/api/provider-settings',async()=>providerSettings.get());
   app.patch('/api/provider-settings',async request=>providerSettings.update(request.body));
   app.get('/api/preferences',async()=>settings.get());

@@ -7,6 +7,7 @@ import { Store } from './store.js';
 import { roleInstructions } from './prompts.js';
 import { publishedTools } from './tool-registry.js';
 import { validateNativeHistory } from './provider.js';
+import { decodeTextReply, textRequest } from './text-replies.js';
 import { assignmentBlockers } from './assignment-evidence.js';
 import { goalContext, goalOf } from './goals.js';
 import { BudgetScheduler, estimateTokens } from './scheduler.js';
@@ -17,6 +18,7 @@ const SUMMARY = 'Continuation summary (model-written, untrusted memory; not appr
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export interface ManagedOptions {
   compactionThreshold?: number;
+  textJSON?: boolean;
   promptExtensions?: Partial<Record<AgentRole, string>>;
 }
 export interface SummaryArtifact {
@@ -55,15 +57,21 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
   const complete: NonNullable<RuntimeHooks['complete']> = (role, input, beforeProvider) => {
     const output = input.maxTokens ?? config.maxOutputTokens;
     if (!Number.isSafeInteger(output) || output <= 0) throw new ContextError('Output token budget must be a positive integer');
-    if (estimateTokens(input.messages, input.tools) + output > config.contextLimits[role]) throw new ContextError('Request exceeds model context capacity; reduce context or output budget before retrying.');
-    const estimate = estimateTokens(input.messages,input.tools) + output;
-    return scheduler.complete(role, estimate, async signal => {
-      const messages = beforeProvider ? await beforeProvider(signal) : input.messages;
+    const request = (messages: ModelMessage[]): Parameters<ModelProvider['complete']>[0] =>
+      options.textJSON ? textRequest({...input, messages}) : {...input, messages};
+    const scheduled = request(input.messages);
+    const estimate = estimateTokens(scheduled.messages, scheduled.tools) + output;
+    if (estimate > config.contextLimits[role]) throw new ContextError('Request exceeds model context capacity; reduce context or output budget before retrying.');
+    const result = scheduler.complete(role, estimate, async signal => {
+      const actual = beforeProvider ? request(await beforeProvider(signal)) : scheduled;
       signal.throwIfAborted();
-      if (estimateTokens(messages,input.tools)+output > estimate) throw new ContextError('Dispatch context exceeds its reserved estimate.');
+      if (estimateTokens(actual.messages, actual.tools) + output > estimate) throw new ContextError('Dispatch context exceeds its reserved estimate.');
       input.onObservation?.({type:'invoked'});
-      return provider.complete({...input,messages,maxTokens:output,signal});
+      return provider.complete({...actual,maxTokens:output,signal});
     },input.signal);
+    // Settle the actual transport attempt, including reported usage, before the
+    // caller decides whether a fully received malformed reply merits repair.
+    return options.textJSON ? result.then(reply => decodeTextReply(reply, input.tools, input.toolChoice === 'required')) : result;
   };
 
   async function prepare(chatId: string, frame: Frame, messages: ModelMessage[], signal: AbortSignal): Promise<ModelMessage[]> {
@@ -96,11 +104,13 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     })}` };
     const fixed = [...prefix, control];
     const limit = config.contextLimits[frame.role];
-    const schemaTokens = estimateTokens([],publishedTools(frame.role,state?.planOnly?'plan':'execute'));
+    const tools = publishedTools(frame.role, state?.planOnly?'plan':'execute');
+    const schemaTokens = options.textJSON ? estimateTokens(textRequest({model,messages:[],tools}).messages) : estimateTokens([],tools);
+    const historyTokens = (messages: ModelMessage[]) => estimateTokens(options.textJSON ? textRequest({model,messages}).messages : messages);
     const capacity = limit - schemaTokens - config.maxOutputTokens - Math.min(8192, Math.floor(limit * 0.1));
-    if (capacity <= estimateTokens(fixed)) throw new ContextError('System instructions and authoritative state exceed context capacity');
+    if (capacity <= historyTokens(fixed)) throw new ContextError('System instructions and authoritative state exceed context capacity');
     const input = [...fixed, ...original];
-    if (estimateTokens(input) <= capacity * threshold) return input;
+    if (historyTokens(input) <= capacity * threshold) return input;
 
     const humans = new Set(store.messages(chatId).filter(item => item.role === 'user').map(item => item.content));
     // Preserve all literal human turns/corrections, system messages, the initial
@@ -121,10 +131,10 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     const retained = original.filter((_, index) => keep[index]);
     const source = original.filter((_, index) => !keep[index]);
     if (!source.length || source.every(item => item.content.startsWith(SUMMARY))) {
-      if (estimateTokens(input) <= capacity) return input;
+      if (historyTokens(input) <= capacity) return input;
       throw new ContextError('Protected instructions, user corrections, or recent turns exceed context capacity. Shorten the task/context or increase its input limit.');
     }
-    const available = capacity - estimateTokens([...fixed, ...retained]) - Buffer.byteLength(SUMMARY) - 64;
+    const available = capacity - historyTokens([...fixed, ...retained]) - Buffer.byteLength(SUMMARY) - 64;
     if (available < 128) throw new ContextError('Insufficient context space to preserve user corrections and recent turns during compaction');
     const target = Math.max(128, Math.min(12000, Math.floor(available * 0.6)));
     const id = `context:summary:${chatId}:${frame.id}:${digest({ source, retained, model, target })}`;
@@ -170,12 +180,13 @@ export function createManagedHooks(provider: ModelProvider, store: Store, config
     if (digest(frame.messages) !== digest(original)) throw new ContextError('Context changed during compaction; retry using the current frame');
     const compacted: ModelMessage[] = [{ role: 'user', content: `${SUMMARY}${artifact.summary}\nOriginal transcript archive: ${archiveKey}\nSummary artifact: ${id}` }, ...retained];
     const prepared = [...fixed, ...compacted];
-    if (estimateTokens(prepared) > capacity || estimateTokens(prepared) >= estimateTokens(input)) throw new ContextError('Compacted context cannot fit safely; original transcript retained');
+    if (historyTokens(prepared) > capacity || historyTokens(prepared) >= historyTokens(input)) throw new ContextError('Compacted context cannot fit safely; original transcript retained');
     frame.messages = compacted;
     return prepared;
   }
   return {
     scheduled:true,
+    textJSON:options.textJSON,
     instructions: role => roleInstructions(role, options.promptExtensions?.[role]),
     complete,
     prepareMessages: async (chatId, frame, messages, signal) => {

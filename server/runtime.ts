@@ -3,6 +3,7 @@ import type {TaskQueue} from './task-queue.js';
 import {queueError, readQueue} from './queue-state.js';
 import {assertContinuationEvidence, continuationConflict, continuationDispatchCurrent, observeContinuation, recordContinuationControl, type ContinuationControl} from './task-continuation.js';
 import {observeRequest} from './inspector-records.js';
+import {maxTextReplyAttempts, TextReplyFormatError, textReplyCorrection, textReplyTransport, textRequest} from './text-replies.js';
 import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
@@ -65,6 +66,7 @@ const boundedReviewText = (text: string) => Buffer.from(text).subarray(0,reviewL
 
 export interface RuntimeHooks {
   scheduled?:boolean;
+  textJSON?:boolean;
   instructions(role: AgentRole): string;
   prepareMessages?: (chatId: string, frame: Frame, messages: ModelMessage[], signal: AbortSignal) => Promise<ModelMessage[]>;
   complete?: (role: AgentRole, input: Parameters<ModelProvider['complete']>[0], beforeProvider?: BeforeProvider) => Promise<CompletionResult>;
@@ -1287,6 +1289,7 @@ export class Runtime {
       if(!state.planOnly)goalStatus(this.store,chatId,'running','Continuing authorized goal work.');
     });
 
+    let formatRetry: {frameId:string;generation:number;failures:number} | undefined;
     while (state.frames.length && !signal.aborted) {
       const unsettled = state.frames.at(-1)!;
       if (unsettled.pending && unsettled.pending.stage !== 'prepared') {
@@ -1414,26 +1417,41 @@ export class Runtime {
       }
       this.save(chatId,state);
       const deltas=nativeOutputBuffer(text=>this.store.event(chatId,'delta',{role:frame.role,text}));
-      const input = {model:this.store.chatModels(chatId)[frame.role],messages:advisoryRequest?.messages ?? messages,tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
+      const failures = formatRetry?.frameId === frame.id && formatRetry.generation === generation ? formatRetry.failures : 0;
+      const withCorrection = (history: ModelMessage[]) => failures ? [...history,textReplyCorrection] : history;
+      const input = {model:this.store.chatModels(chatId)[frame.role],messages:withCorrection(advisoryRequest?.messages ?? messages),tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
+      const pendingAdvisory = advisoryRequest;
+      const beforeProvider = pendingAdvisory ? async (dispatchSignal: AbortSignal) => withCorrection(await pendingAdvisory.beforeProvider(dispatchSignal)) : undefined;
       this.commitRunTransition(chatId,state,()=>{this.queue?.beforeProvider(chatId,state);const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
-      this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...promptIdentity(messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
+      this.store.setState(`context:prompt:${chatId}:${frame.id}:${state.steps}`, { role: frame.role, model: input.model, generation, instructionsHash: state.instructionsHash, ...(this.hooks.textJSON ? {transport:textReplyTransport} : {}), ...promptIdentity((this.hooks.textJSON ? textRequest(input).messages : messages).filter(message=>message.role==='system').map(message=>message.content).join('\n\n')) });
       const completion = await observeRequest(this.store,{chatId,projectId:this.store.chat(chatId).projectId,runId:state.frames[0].id,taskId:frame.id,generation,ordinal:state.steps,role:frame.role,humanMessageIds:state.humanMessageIds??[],...(frame.planStep?{planStep:frame.planStep}:{})},input,async observed => {
-        if (this.hooks.scheduled && this.hooks.complete) return this.hooks.complete(frame.role,observed,advisoryRequest?.beforeProvider);
-        if (advisoryRequest) {
-          const checked = await advisoryRequest.beforeProvider(signal);
+        if (this.hooks.scheduled && this.hooks.complete) return this.hooks.complete(frame.role,observed,beforeProvider);
+        if (beforeProvider) {
+          const checked = await beforeProvider(signal);
           observed = {...observed,messages:checked};
           observed.onObservation?.({type:'invoked'});
         }
         return this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed);
       },this.hooks.scheduled || !!advisoryRequest).finally(()=>deltas.flush()).catch(error=>{
         if (continuation && (error as {code?:string})?.code==='CONTINUATION_STALE' &&
-            state.generation!==continuation.control.generation && state.steering.length && !signal.aborted) return undefined;
-        throw error;
+            state.generation!==continuation.control.generation && state.steering.length && !signal.aborted) {
+          continuation = undefined;
+          return undefined;
+        }
+        if (!(error instanceof TextReplyFormatError) || signal.aborted) throw error;
+        if (state.generation !== generation) {
+          continuation = undefined;
+          return undefined;
+        }
+        if (failures + 1 >= maxTextReplyAttempts) throw new Error(`Model did not return valid text JSON in ${maxTextReplyAttempts} attempts. No action from those replies was started.`);
+        formatRetry = {frameId:frame.id,generation,failures:failures+1};
+        return undefined;
       });
-      continuation=undefined;
       signal.throwIfAborted();
       if(!completion)continue;
-      this.store.event(chatId,'provider_request',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,model:input.model,finishReason:completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
+      continuation=undefined;
+      formatRetry=undefined;
+      this.store.event(chatId,'provider_request',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,model:input.model,finishReason:this.hooks.textJSON?'stop':completion.finishReason,...(completion.requestId?{requestId:completion.requestId}:{})});
       if (completion.usage) this.store.event(chatId,'usage',{inspectorRequestId:completion.inspectorRequestId,role:frame.role,...completion.usage});
       await this.refreshInstructions(chatId,state,signal);
       if (state.generation !== generation) { this.deliverSteering(chatId,state); continue; }

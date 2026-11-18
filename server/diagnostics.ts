@@ -99,6 +99,7 @@ export class ConnectionDiagnostics {
     private provider: ModelProvider,
     private complete: NonNullable<RuntimeHooks['complete']>,
     private timeoutMs = CONNECTION_TIMEOUT_MS,
+    private textJSON = false,
   ) {}
 
   run(signal?: AbortSignal): Promise<ConnectionReport> {
@@ -191,26 +192,35 @@ export class ConnectionDiagnostics {
       }
     }
 
+    const probes = this.textJSON ? ['ordinary','json','streaming'] as const : ['ordinary','native','streaming'] as const;
     for (const role of roles) {
-      for (const evidence of ['ordinary','native','streaming'] as const) {
+      for (const evidence of probes) {
         if (signal.aborted || !this.config.baseUrl || !this.config.apiKey) {
           checks.push({target:role,evidence,model:modelsByRole[role],status:'skipped',message:'Probe not sent because configuration is missing or the check stopped.'});
           continue;
         }
         try {
           const streaming = evidence === 'streaming';
-          const messages:ModelMessage[]=[{role:'system',content:'Harmless connection diagnostic. No workspace, files, shell or packages are available.'},{role:'user',content:evidence==='ordinary'?'Reply exactly Connection OK.':'Call connection_echo exactly once with value Connection OK. After receiving its result, reply exactly Connection OK.'}];
-          const tools = evidence==='ordinary'?undefined:[{type:'function' as const,function:{name:'connection_echo',description:'Echo a harmless in-memory diagnostic value. No external effects.',parameters:{type:'object',properties:{value:{type:'string',const:'Connection OK'}},required:['value'],additionalProperties:false}}}];
+          const json = this.textJSON && evidence !== 'ordinary';
+          const prompt = evidence === 'ordinary' ? 'Reply exactly Connection OK.'
+            : json ? 'Return exactly one bare JSON object: {"value":"Connection OK"}.'
+              : 'Call connection_echo exactly once with value Connection OK. After receiving its result, reply exactly Connection OK.';
+          const messages:ModelMessage[]=[{role:'system',content:'Harmless connection diagnostic. No workspace, files, shell or packages are available.'},{role:'user',content:prompt}];
+          const tools = evidence==='ordinary'||json?undefined:[{type:'function' as const,function:{name:'connection_echo',description:'Echo a harmless in-memory diagnostic value. No external effects.',parameters:{type:'object',properties:{value:{type:'string',const:'Connection OK'}},required:['value'],additionalProperties:false}}}];
           const request=(history:ModelMessage[],useTools=true)=>bounded(signal,()=>this.complete(role,{model:modelsByRole[role],messages:history,tools:useTools?tools:undefined,toolChoice:tools&&useTools?'required':undefined,streaming,signal,maxTokens:Math.min(1024,this.config.maxOutputTokens),noRetry:true}));
           let result=await request(messages);
-          if(evidence!=='ordinary') {
+          if(tools) {
             const calls=validateNativeCalls(result.toolCalls);
             if(result.finishReason!=='tool_calls'||result.text.length>2048||calls.length!==1||calls[0].function.name!=='connection_echo')throw new Error();
             const args=parseNativeJSON(calls[0].function.arguments,2048) as Record<string,unknown>;
             if(!args||Object.keys(args).length!==1||args.value!=='Connection OK')throw new Error();
             result=await request([...messages,{role:'assistant',content:result.text,tool_calls:calls},{role:'tool',tool_call_id:calls[0].id,content:JSON.stringify({value:args.value})}],false);
           }
-          if(result.finishReason!=='stop'||result.toolCalls?.length||result.text.length>2048||result.text.trim()!=='Connection OK')throw new Error();
+          if(result.finishReason!=='stop'||result.toolCalls?.length||result.text.length>2048)throw new Error();
+          if (json) {
+            const value = parseNativeJSON(result.text,2048);
+            if (JSON.stringify(value) !== '{"value":"Connection OK"}') throw new Error();
+          } else if (result.text.trim()!=='Connection OK') throw new Error();
           checks.push({target:role,evidence,model:modelsByRole[role],status:'passed',message:`${evidence} probe passed${models?.includes(modelsByRole[role])?'':'; configured ID was not confirmed in the catalog'}.`,...(result.requestId?{requestId:result.requestId}:{})});
         } catch(error) {
           failed(role,error);

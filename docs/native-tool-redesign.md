@@ -1,5 +1,7 @@
 # abysSUS native-tool redesign
 
+The `non-tools` branch uses [text JSON model transport](../README.md#text-only-model-branch) while retaining the internal action, approval, and persistence rules below. This report records the original native transport milestone.
+
 Approved for implementation on 2026-10-14. This supersedes the custom JSON recommendation architecture and compatibility requirements in historical records. Implementation sequence and ownership are in [milestones](milestones.md); dispatch and verified progress are in [STATUS](STATUS.md). M22–M27 is delivered on independently reviewed GitHub main `4a0036cd734f46e78aca879ea5436b10fe516294`, with every applicable exact-main CI step verified; [coordinator closeout](reports/milestone-27-coordinator.md) records evidence and limits. Live work-provider acceptance and M21 packaging/release remain separate holds, including the failed clean-portability and incomplete inner-manifest archive findings. The redesign heartbeat is paused; no automatic packaging resumption or release is implied.
 
 ## Product and model decisions
