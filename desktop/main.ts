@@ -1,27 +1,28 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, realpathSync, lstatSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import {NativePreview,previewScheme} from './preview.js';
 import { DocumentGuard } from './document-guard.js';
-import { ContainerDesktopController } from './container-controller.js';
-import { hostStoragePath } from '../server/container-contract.js';
-import { desktopOrigin, isDesktopURL, validateSender } from './policy.js';
+import { DesktopController } from './controller.js';
+import { desktopOrigin, environmentSchema, isDesktopURL, linuxPath, pickerPath, validateSender } from './policy.js';
 import { desktopResponse } from './proxy.js';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 app.setName('abysSUS');
 nativeTheme.themeSource='dark';
 app.enableSandbox();
-protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}},previewScheme]);
+protocol.registerSchemesAsPrivileged([{scheme:'abyssus',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,allowServiceWorkers:false}}]);
+if(app.isPackaged&&process.platform==='linux') {
+  const desktopRelease=JSON.parse(readFileSync(path.join(appRoot,'release.json'),'utf8'));
+  const backendRelease=JSON.parse(readFileSync('/opt/abyssus/app/release.json','utf8'));
+  if(desktopRelease.source!==backendRelease.source)throw new Error('Desktop/backend package versions differ. Install the matching reviewed package set.');
+}
 let window:BrowserWindow|undefined,quitting=false,closing=false;
 const documents=new DocumentGuard();
-const controller=new ContainerDesktopController(appRoot);
-const previews=new NativePreview(()=>window,()=>controller.target(),()=>documents.sessionId);
-let picked:{id:string;path:string;storageId:string;mode:'existing'|'initialize'}|undefined;
-const selectionSchema=z.object({path:z.string().max(4096),storageId:z.uuid()}).strict();
-if(!app.requestSingleInstanceLock())app.quit();
+const controller=new DesktopController(app.isPackaged&&process.platform==='linux'?'/opt/abyssus/app':appRoot);
+const selectionSchema=z.object({environment:environmentSchema,home:linuxPath}).strict();
+if(!app.isPackaged&&!app.requestSingleInstanceLock())app.quit();
 else {
   app.on('second-instance',()=>{window?.show();window?.focus();});
   await app.whenReady();
@@ -41,11 +42,11 @@ else {
     try{return await desktopResponse(request,path.join(appRoot,'dist/client'),target?.sessionId===documents.sessionId?target:undefined);}
     catch{return Response.json({error:'Desktop connection failed. Reopen setup to inspect recovery.'},{status:503});}
   });
-  const selectionFile=path.join(app.getPath('userData'),'desktop-container-selection.json');
-  if(existsSync(selectionFile))try{controller.selection=selectionSchema.parse(JSON.parse(readFileSync(selectionFile,'utf8')));controller.state.container={available:false,storage:{displayPath:controller.selection.path,id:controller.selection.storageId}};}
+  const selectionFile=path.join(app.getPath('userData'),'desktop-selection.json');
+  if(existsSync(selectionFile))try{controller.state.selection=selectionSchema.parse(JSON.parse(readFileSync(selectionFile,'utf8')));}
   catch{controller.state.message='Saved desktop selection needs recovery. Choose the existing profile explicitly; do not initialize a replacement.';}
   await controller.inventory();
-
+  documents.selection=controller.state.selection;
   const freezeWindow=async(ticket:ReturnType<DocumentGuard['begin']>)=>{
     const owner=window!.webContents,nonce=randomUUID();
     const thaw=()=>{if(!owner.isDestroyed())owner.send('desktop:thaw',nonce);};
@@ -70,9 +71,9 @@ else {
     window.webContents.on('will-redirect',event=>event.preventDefault());
     window.webContents.on('will-attach-webview',event=>event.preventDefault());
     window.webContents.on('will-prevent-unload',()=>{}); // dirty editor veto remains effective
-    window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame){documents.documentChanged();void previews.drain().catch(()=>{});}});
+    window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame)documents.documentChanged();});
     window.webContents.on('render-process-gone',()=>{
-      void previews.drain().catch(()=>{});documents.documentChanged();documents.edited(true); // Unsaved text may have been lost.
+      documents.documentChanged();documents.edited(true); // Unsaved text may have been lost.
       const crashedWindow=window!;
       void dialog.showMessageBox(crashedWindow,{type:'warning',title:'Window stopped',message:'The window stopped. Backend work remains tracked.',detail:'Unsaved editor text may have been lost. Reopen the window to inspect recorded state; actions are not replayed.',buttons:['Keep open','Reopen window'],defaultId:0,cancelId:0}).then(result=>{if(result.response===1&&window===crashedWindow&&!quitting){documents.edited(false);crashedWindow.destroy();createWindow();}});
     });
@@ -86,86 +87,53 @@ else {
     try {
       const result=await dialog.showMessageBox(window,{type:'question',title:'Close abysSUS?',message:documents.dirty?'Unsaved editor changes will be lost.':'Close abysSUS and stop its backend?',detail:'Active tools and system-install calls must finish local cleanup. System changes are not rolled back. Recorded uncertain outcomes remain for review.',buttons:['Keep open','Close and wait'],defaultId:0,cancelId:0});
       if(result.response!==1)return;
-      documents.check(ticket);thaw=await freezeWindow(ticket);await previews.drain();
+      documents.check(ticket);thaw=await freezeWindow(ticket);
       await controller.stop();documents.check(ticket);quitting=true;window.destroy();app.quit();
     }catch{await dialog.showMessageBox(window,{type:'error',message:'Close was not completed. The window is preserved.',detail:'Editor changes or failed/unverified backend cleanup require review. Ownership remains while the backend is alive. Inspect recovery, then deliberately retry the close check; nothing was killed or replayed.'});}
     finally{thaw?.();documents.end(ticket);closing=false;}
   }
   const handler=(channel:string,fn:(input:unknown)=>unknown)=>ipcMain.handle(channel,(event,input)=>{validateSender(event,window?.webContents);return fn(input);});
-  handler('desktop:preview-open',input=>{if(documents.busy)throw new Error('Wait for the current transition');return previews.open(input);});
-  handler('desktop:preview-bounds',input=>previews.move(input));
-  handler('desktop:preview-reload',input=>{if(documents.busy)throw new Error('Wait for the current transition');return previews.reload(input);});
-  handler('desktop:preview-close',input=>previews.close(input));
   handler('desktop:status',()=>documents.status(controller.state));
   handler('desktop:dirty',input=>{documents.edited(z.boolean().parse(input));});
-  handler('desktop:container-check',async()=>{if(documents.busy)throw new Error('Wait for the current transition.');return controller.inventory();});
-  handler('desktop:storage-pick',async()=>{
-    const ticket=documents.begin();
-    try {
-      if(controller.state.phase==='ready')throw new Error('Stop the current workspace before selecting other storage.');
-      const result=await dialog.showOpenDialog(window!,{title:'Choose persistent abysSUS storage',properties:['openDirectory','createDirectory']});
-      documents.check(ticket);if(result.canceled||result.filePaths.length!==1)return null;
-      if(process.platform!=='linux'&&process.platform!=='win32')throw new Error('Unsupported desktop platform.');
-      const selected=hostStoragePath(result.filePaths[0],process.platform);
-      if(lstatSync(selected).isSymbolicLink()||realpathSync(selected)!==selected)throw new Error('Choose a canonical local folder without links.');
-      const marker=path.join(selected,'.storage-id');
-      const mode=existsSync(marker)?'existing':'initialize';
-      if(mode==='initialize'&&readdirSync(selected).length)throw new Error('New storage must be an empty folder. Existing data was preserved.');
-      const storageId=mode==='existing'?z.uuid().parse(readFileSync(marker,'utf8').trim()):randomUUID();
-      picked={id:randomUUID(),path:selected,storageId,mode};return {id:picked.id,displayPath:selected,mode};
-    }finally{documents.end(ticket);}
-  });
-  handler('desktop:container-start',async input=>{
-    const choice=z.object({selectionId:z.uuid().optional()}).strict().parse(input);
-    const selected=choice.selectionId?(picked?.id===choice.selectionId?picked:undefined):controller.selection?{...controller.selection,mode:'existing' as const}:undefined;
-    if(!selected)throw new Error('Choose storage with the native folder picker.');
+  handler('desktop:start',async input=>{
     const ticket=documents.begin();let thaw:(()=>void)|undefined,started=false;
     try {
-      const result=await dialog.showMessageBox(window!,{type:'question',title:'Open persistent storage',message:selected.mode==='initialize'?'Initialize this empty app storage folder?':'Open this existing app storage?',detail:selected.path+'\nProjects, chats, settings and dependencies stay here. Docker images and engine cache use separate engine storage; this choice does not relocate them.',buttons:['Cancel','Open workspace'],defaultId:0,cancelId:0});
-      if(result.response!==1)return documents.status(controller.state);
-      documents.check(ticket);thaw=await freezeWindow(ticket);await previews.drain();
-      // Persist the deliberate selection before launch, preserving partial setup for recovery.
-      mkdirSync(path.dirname(selectionFile),{recursive:true});
-      const temporary=selectionFile+'.tmp';writeFileSync(temporary,JSON.stringify({path:selected.path,storageId:selected.storageId}),{mode:0o600});renameSync(temporary,selectionFile);
-      const previous=documents.sessionId;
-      const status=await controller.start({path:selected.path,storageId:selected.storageId},selected.mode);
-      started=true;documents.check(ticket);documents.publish(status);picked=undefined;
-      if(previous&&previous!==status.sessionId){window!.destroy();createWindow();}
-      return status;
-    }catch(error){if(started)await controller.stop();throw error;}finally{thaw?.();documents.end(ticket);}
+    const {startSchema}=await import('./policy.js');const selected=startSchema.parse(input);
+    const confirmed=await dialog.showMessageBox(window!,{type:'question',message:`${selected.mode==='initialize'?'Initialize':'Open'} the selected Linux profile?`,detail:`Environment: ${JSON.stringify(selected.environment)}\nProfile: ${selected.home}${selected.legacyRoot?'\nLegacy source: '+selected.legacyRoot+'\nStop every old backend before migration.':''}`,buttons:['Cancel','Continue'],defaultId:0,cancelId:0});
+    if(confirmed.response!==1)return {...documents.status(controller.state),message:'Profile selection cancelled.'};
+    documents.check(ticket);thaw=await freezeWindow(ticket);
+    const previousSession=documents.sessionId;
+    const result=await controller.start(input);
+    started=true;documents.check(ticket);
+    mkdirSync(path.dirname(selectionFile),{recursive:true});
+    const temporary=selectionFile+'.tmp';writeFileSync(temporary,JSON.stringify(result.selection),{mode:0o600});renameSync(temporary,selectionFile);
+    // A previous document's requests cannot reach a new backend session. Replace
+    // the entire renderer (after the dirty guard), including all stale callbacks.
+    documents.publish(result);
+    if(previousSession&&previousSession!==result.sessionId){window!.destroy();createWindow();}
+    return result;
+    } catch(error) {
+      // A ready but uncommitted backend never receives the old document's API.
+      // Drain it without discarding the old buffers or releasing failed ownership.
+      if(started)await controller.stop();
+      throw error;
+    } finally{thaw?.();documents.end(ticket);}
   });
-  handler('desktop:container-restart',async()=>{
-    const ticket=documents.begin();let thaw:(()=>void)|undefined,started=false;
-    try {
-      if(!controller.selection)throw new Error('Open storage first.');
-      const answer=await dialog.showMessageBox(window!,{type:'question',message:'Restart the owned runtime?',detail:'Waits for active work and installs to drain. Persistent data remains; goals and uncertain work do not replay.',buttons:['Cancel','Restart'],defaultId:0,cancelId:0});
-      if(answer.response!==1)return documents.status(controller.state);
-      documents.check(ticket);thaw=await freezeWindow(ticket);await previews.drain();await controller.stop();documents.check(ticket);
-      const status=await controller.start(controller.selection,'existing');started=true;documents.check(ticket);documents.publish(status);window!.destroy();createWindow();return status;
-    }catch(error){if(started)await controller.stop();throw error;}finally{thaw?.();documents.end(ticket);}
+  handler('desktop:pick',async()=>{
+    const selected=controller.state.selection;if(!selected||controller.state.phase!=='ready')throw new Error('Open the selected environment first.');
+    const result=await dialog.showOpenDialog(window!,{title:'Choose a Linux project folder',properties:['openDirectory'],...(selected.environment.kind==='wsl'?{defaultPath:`\\\\wsl.localhost\\${selected.environment.distribution}\\home`}:{})});
+    if(result.canceled||result.filePaths.length!==1)return null;
+    return pickerPath(result.filePaths[0],selected.environment.kind==='wsl'?selected.environment.distribution:undefined);
   });
-  handler('desktop:transfer',async input=>{
-    const selection=z.discriminatedUnion('kind',[z.object({kind:z.literal('import')}).strict(),z.object({kind:z.literal('export'),projectId:z.uuid()}).strict()]).parse(input);
-    const ticket=documents.begin();let handle:string|undefined;
+  handler('desktop:helper',async input=>{
+    const ticket=documents.begin();let thaw:(()=>void)|undefined;
     try {
-      const target=controller.target();if(!target||target.sessionId!==documents.sessionId)throw new Error('Open the current workspace first.');
-      let project:string|null=null;
-      if(selection.kind==='export'){
-        const response=await fetch(target.address+'/api/projects',{headers:{authorization:'Bearer '+target.token},redirect:'error',signal:AbortSignal.timeout(5000)});
-        if(!response.ok)throw new Error('Managed project identity could not be checked.');
-        const projects=z.array(z.object({id:z.uuid(),path:z.string()})).parse(await response.json());
-        const match=projects.find(item=>item.id===selection.projectId);if(!match||!/^\/workspace\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(match.path))throw new Error('Choose a registered managed project.');project=path.posix.basename(match.path);
-      }
-      const choice=selection.kind==='import'?await dialog.showOpenDialog(window!,{title:'Import a one-time project copy',properties:['openDirectory']}):await dialog.showSaveDialog(window!,{title:'Export to a new folder',defaultPath:'project-export',buttonLabel:'Choose new destination'});
-      documents.check(ticket);if(choice.canceled)return null;
-      const selected='filePaths' in choice?choice.filePaths[0]:choice.filePath;if(!selected)return null;
-      const history=await dialog.showMessageBox(window!,{type:'question',message:'Choose Git history for this copy',detail:'Working files preserve your current edits. Git history may contain deleted secrets. Dependency/build caches and sensitive configuration files are excluded; no source files are modified.',buttons:['Cancel','Working files only','Include safe Git history'],defaultId:1,cancelId:0});
-      documents.check(ticket);if(history.response===0)return null;
-      const review=await controller.selectTransfer({kind:selection.kind,path:selected,project,included:[],history:history.response===2});handle=review.handle;
-      const confirmed=await dialog.showMessageBox(window!,{type:'question',message:`Copy ${review.files} entries (${review.bytes} bytes)?`,detail:selected+'\n'+review.excludedCount+' excluded entries.\n'+review.excluded.map(item=>item.path+': '+item.reason).join('\n'),buttons:['Cancel','Authorize copy'],defaultId:0,cancelId:0});
-      documents.check(ticket);if(confirmed.response!==1)return null;
-      const authorized=await controller.authorizeTransfer(handle);handle=undefined;return authorized;
-    }finally{if(handle)await controller.discardTransfer(handle).catch(()=>{});documents.end(ticket);}
+    const action=z.enum(['setup','repair','uninstall']).parse(input);
+    const result=await dialog.showMessageBox(window!,{type:'warning',title:'System-install helper',message:`${action==='setup'?'Enable':action==='repair'?'Repair':'Remove'} system-install authority in the selected Linux environment?`,detail:`Environment: ${JSON.stringify(controller.state.selection?.environment)}. OS authentication is required. Approved packages may run root scripts. Removal preserves installed packages, audit and your data.`,buttons:['Cancel','Continue to OS authentication'],defaultId:0,cancelId:0});
+    if(result.response!==1)return {...documents.status(controller.state),message:'Helper operation cancelled. Existing authority is unchanged.'};
+    documents.check(ticket);thaw=await freezeWindow(ticket);
+    return await controller.helper(action);
+    }finally{thaw?.();documents.end(ticket);}
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'abysSUS',submenu:[{label:'Quit',accelerator:'CmdOrCtrl+Q',click:()=>void closeApp()}]}]));
   app.on('before-quit',event=>{if(!quitting){event.preventDefault();void closeApp();}});

@@ -12,7 +12,7 @@ const overlap=(a:string,b:string)=>inside(a,b)||inside(b,a);
 function canonical(input:string):string {
   try{return realpathSync(input);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;const parent=path.dirname(input);if(parent===input)throw error;return path.join(canonical(parent),path.basename(input));}
 }
-export interface SandboxPolicy { home:string; protectedPaths:string[]; projects:()=>string[]; executionMode?:'direct'|'container' }
+export interface SandboxPolicy { home:string; protectedPaths:string[]; projects:()=>string[]; localCommands?:boolean; executionMode?:'direct'|'container' }
 export interface SandboxLaunch {file:string;args:string[];env:Record<string,string>;close:()=>Promise<void>}
 export class LinuxSandbox {
   private policy:SandboxPolicy={home:applicationHome(),protectedPaths:[],projects:()=>[]};

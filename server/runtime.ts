@@ -17,6 +17,7 @@ import { nativeStorageActive, runNativeOperation } from './native-storage.js';
 import { advisoryEstimate, coderAdvisory, coderScopes, historicalCoderSources, loadCoderSources, recheckCoderSources, type CoderSourceContext } from './coder-context.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
 import { hash, inAssignedPath, safeRelative } from './tools/paths.js';
+import { reviewWorkspaceCommand } from './command-review.js';
 import { definitionFor, parseToolArguments, publishedTools, toolRegistry, validateAction, validateToolResult, skillControls } from './tool-registry.js';
 import {Skills,skillsPolicy,skillSelectionInput,skillDraftInput} from './skills.js';
 import type {SkillDocument} from './skill-files.js';
@@ -1571,11 +1572,24 @@ export class Runtime {
             continue;
           }
 
-          const mode = this.store.chat(chatId).approvalMode;
+          const reviewChat = this.store.chat(chatId);
+          const mode = reviewChat.approvalMode;
+          const aiDecision = mode==='ai' && definition.command && definition.approval!=='owned_stop'
+            ? await reviewWorkspaceCommand(this.hooks.complete,reviewChat.models?.critic ?? this.config.models.critic,this.store.project(reviewChat.projectId).path,inspection.commandCwd,action,signal)
+            : undefined;
+          if(aiDecision!==undefined) {
+            await this.refreshInstructions(chatId,state,signal);
+            const current=this.store.chat(chatId);
+            if(state.generation!==generation||current.modeVersion!==reviewChat.modeVersion||current.approvalMode!==mode||state.steering.length) {
+              this.deliverSteering(chatId,state);
+              continue;
+            }
+            if(aiDecision==='reject')throw new Error('AI command review rejected the proposed workspace scope.');
+          }
 
           const needsApproval =
             definition.approval !== 'owned_stop' && inspection.effect !== 'read' &&
-            (mode === 'review' ||
+            (mode === 'review' || mode === 'ai' ||
               (mode === 'balanced' &&
                 (inspection.effect === 'execute' ||
                   inspection.risk === 'elevated')));
@@ -1597,7 +1611,8 @@ export class Runtime {
               agentId: frame.id,
               action,
               inspection,
-              status: 'pending',
+              status: aiDecision==='approve'?'approved':'pending',
+              ...(aiDecision?{aiReview:aiDecision==='approve'?'approved':'needs_human'}:{}),
               createdAt: new Date().toISOString(),
             };
 

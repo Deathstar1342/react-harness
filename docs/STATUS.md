@@ -1,5 +1,9 @@
 # Coordinator status
 
+## Current source launch
+
+The user selected `npm start` as the supported local application launch on 2026-11-18. Follow the [setup guide](setup.md) for local web launch, checkout settings and workspace command approvals. Earlier deployment entries below record historical milestones. M21 installer packaging remains paused.
+
 ## Active M33–M37 product improvements — kickoff 2026-10-26
 
 **M37 DELIVERED; all five M33–M37 improvements complete.** Reviewed implementation main `1eccc68c3b5fdb23f7ac3f468451bdf8bd6083e4` / tree `c8398364a3522b8f7f9c81eb48f7326704ed753a` from report-only53a1aa3/testedd013. EVERY applicable exact-main step across6requiredworkflows/10jobs independently green:118ordered declared steps/97applicable successes/21expected skips plus job boundaries. ALL9fresh main archives independently downloaded/publishedSHA-size/path-nolinks-collisions-private.env/fullCRC/source/strictsemantic audited. CompleteWindows12691545618 SHAa7470ef1b28f31a6c5b18e922e794a04a9383744eb754ffca1ccf8ea5e6b05e8:10403members/ALL10402hashes/exactset587749973B/42exactGitcopiedhelpers/lock-images verified. Actual connected running/recovered queue409/pending-nochat/starts1then0/provider0/checkpoint409/errors[]/noadoption and both DesktopM34–M37 strict gates pass. Original npm ECONNRESET failed attempt retained/excluded;ONE unchanged diagnosed retry passed full source/Windows gates. Own1205Windows/47skips/typecheck/build/actualChrome+Electron/publication6/Pythonreader/replays and195integration/1skip pass. [Delivery evidence](reports/milestone-37-coordinator.md).

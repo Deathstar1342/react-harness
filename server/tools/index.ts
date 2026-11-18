@@ -1,6 +1,7 @@
 import {runNativeOperation,assertNativePath} from '../native-storage.js';
 import { observePlanningPath, reconnaissancePath, reconnaissanceRoot } from '../repository-reconnaissance.js';
 import {ContainerShellPool} from '../container-shell.js';
+import {LocalCommands} from './local-commands.js';
 import { lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -26,7 +27,9 @@ export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<Omi
 export class WorkspaceTools implements ToolService {
   readonly processLifecycle='sandbox-dispatch-v1' as const;
   private files: WorkspaceFiles;
-  private shells: ShellPool | ContainerShellPool;
+  private shells: ShellPool | ContainerShellPool | LocalCommands;
+  private local?:LocalCommands;
+  private shellOptions:ShellOptions;
   private container?:ContainerShellPool;
   readonly sandbox = new LinuxSandbox();
   private disposed = false;
@@ -94,10 +97,15 @@ export class WorkspaceTools implements ToolService {
     this.maxOutputBytes = options.maxOutputBytes ?? 1_000_000;
     this.maxReportBytes = options.maxReportBytes ?? 2_000_000;
     this.files = new WorkspaceFiles({ maxFileBytes: options.maxFileBytes ?? 2_000_000, maxEntries: options.maxEntries ?? 10_000, maxSearchFiles: options.maxSearchFiles ?? 20_000, leaseMs: options.leaseMs ?? 45_000 });
-    this.shells = new ShellPool({ maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash', sandbox:this.sandbox });
+    this.shellOptions = { maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash', sandbox:this.sandbox };
+    this.shells = new ShellPool(this.shellOptions);
   }
-  configureSandbox(policy:SandboxPolicy){this.sandbox.configure(policy);if(policy.executionMode==='container'){this.container??=new ContainerShellPool();this.shells=this.container;}}
-  async resetSandbox(root:string):Promise<void>{await this.removeScope(root,undefined,async()=>{if(this.container)await this.container.reset(root);else this.sandbox.reset(root);});}
+  configureSandbox(policy:SandboxPolicy){
+    this.sandbox.configure(policy);
+    if(policy.localCommands){this.local??=new LocalCommands(this.shellOptions);this.shells=this.local;}
+    else if(policy.executionMode==='container'){this.container??=new ContainerShellPool();this.shells=this.container;}
+  }
+  async resetSandbox(root:string):Promise<void>{await this.removeScope(root,undefined,async()=>{if(this.container)await this.container.reset(root);else if(!this.local)this.sandbox.reset(root);});}
   private check(): void { if (this.disposed) throw new ToolError('Tool service has been disposed.'); }
   read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.tracked(root,()=>this.files.read(root, path)); }
   list(root: string, path = '') { this.check(); return this.tracked(root,()=>this.files.list(root, path)); }
@@ -153,6 +161,10 @@ export class WorkspaceTools implements ToolService {
     }
     if (definitionFor(action.name).command) {
       if (args.reportPath) await scoped(context.projectRoot, args.reportPath);
+      if(this.local){
+        const commandCwd=this.local.check({...context,commandCwd:args.cwd},typeof args.command==='string'?args.command:undefined);
+        return {effect:'execute',risk:'elevated',commandCwd,description:`${action.name}: local command from ${commandCwd}. Runs with your OS account permissions.`};
+      }
       return { effect: 'execute', risk: 'elevated', description: `${action.name}: sandboxed execution can modify the selected project and private dependencies. ${this.container?'Public HTTP(S) proxy; private network targets denied.':'Registry-only network capability.'} Requires runtime authorization.` };
     }
     return { effect: 'read', risk: 'routine', description: action.name, ...(args.path !== undefined ? { path: args.path } : {}) };
@@ -174,6 +186,10 @@ export class WorkspaceTools implements ToolService {
       this.check(); const args = validate(action);
       if (context.signal?.aborted) return { ok: false, output: 'Cancelled before execution.' };
       const root = rootPathSync(context.projectRoot);
+      if(this.local&&definitionFor(action.name).command){
+        const before=context.beforeCommand;
+        context={...context,commandCwd:args.cwd,beforeCommand:()=>{this.files.assertRemovable(root);before?.();}};
+      } else if(args.cwd!==undefined)throw new ToolError('A separate working directory is supported only for local commands.');
       if(this.container&&definitionFor(action.name).command){const before=context.beforeCommand;context={...context,beforeCommand:binding=>{this.files.assertRemovable(root);before?.(binding);}};}
       if (definitionFor(action.name).fileMutation) {
         const changes = await this.fileChanges(root, action), change = changes[0];
@@ -207,6 +223,7 @@ export class WorkspaceTools implements ToolService {
         case 'search': { const result = await this.files.search(root, args.query, args.path); return { ok: true, output: JSON.stringify(result), data: result }; }
         case 'run_shell': return this.commandResult(await this.shells.run(context, args.command, args.timeoutMs));
         case 'execute_python': {
+          if(this.local)return this.commandResult(await this.local.python(context,args.code,args.timeoutMs));
           const encoded = Buffer.from(args.code).toString('base64');
           const command = `python3 -c 'import base64; exec(compile(base64.b64decode("${encoded}"), "<workspace-python>", "exec"))'`;
           return this.commandResult(await this.shells.run(context, command, args.timeoutMs));
@@ -222,7 +239,7 @@ export class WorkspaceTools implements ToolService {
     return { ok: result.exitCode === 0 && !result.error && !result.cancelled && !result.timedOut, output: [result.output, result.error, result.truncated ? '[Output truncated]' : ''].filter(Boolean).join('\n'), data: result };
   }
   private async git(root:string,args:string[],limit:number,signal?:AbortSignal,context?:ToolContext){
-    if(!this.container)return gitCommand(root,args,limit,signal,this.sandbox);
+    if(!this.container)return gitCommand(root,args,limit,signal,this.sandbox,this.local?.git.bind(this.local));
     const owned={...(context??{projectRoot:root,chatId:'fixed-git',agentId:'fixed-git',signal}),agentId:(context?.agentId??'fixed-git')+':git'};
     try{return await this.container.git(owned,args,limit);}finally{await this.container.closeContext(owned);}
   }

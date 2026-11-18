@@ -43,13 +43,13 @@ import {workerAvailable} from './worker-client.js';
 import { containerExecutionUnavailable } from './container-contract.js';
 
 const queueRoutes=new Set(['/api/projects/:id/queue','/api/projects/:id/queue/start','/api/projects/:id/queue/cancel-active']);
-const approvalMode = z.enum(['autonomous','balanced','review']);
-export interface AppOptions { browserPreview?:'direct'|'source-fixed-3000'; config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
+const approvalMode = z.enum(['autonomous','balanced','review','ai']);
+export interface AppOptions { localWeb?:boolean; browserPreview?:'direct'|'source-fixed-3000'; config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
   const sandbox=new LinuxSandbox();
-  const sandboxPolicy={executionMode:config.executionMode,home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
+  const sandboxPolicy={localCommands:options.localWeb,executionMode:config.executionMode,home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
   sandbox.configure(sandboxPolicy);tools.configureSandbox?.(sandboxPolicy);
   // Reject stale or tampered registrations before recovery/watchers/runtime can access them.
   if(config.executionMode==='container')for(const project of store.projects())sandbox.validateRoot(project.path);
@@ -136,6 +136,11 @@ export async function createApp(options: AppOptions) {
     // Fastify decodes static segments before routing. Reject encoded path spelling
     // before any raw-prefix policy; query values (including file paths) stay valid.
     if(request.url.split('?')[0].includes('%'))return reply.code(400).send({error:'Encoded route paths are not accepted'});
+    if (options.localWeb) {
+      const host=request.headers.host ?? '';
+      if (!/^(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/i.test(host)) return reply.code(403).send({error:'Only loopback access is allowed'});
+      if (request.headers['sec-fetch-site']==='cross-site' || request.headers.origin && request.headers.origin!==`http://${host.toLowerCase()}`) return reply.code(403).send({error:'Cross-origin access denied'});
+    }
     if (!request.url.startsWith('/api')) return;
     let hostname: string;
     try { hostname = new URL(`http://${request.headers.host ?? ''}`).hostname; } catch { return reply.code(403).send({error:'Invalid host'}); }
@@ -173,10 +178,10 @@ export async function createApp(options: AppOptions) {
   app.post('/api/chats/:id/skills/deselect',async request=>{const input=skillIdentity.extend({selectionRevision:z.number().int().nonnegative()}).parse(request.body);return runtime.deselectSkill(paramId(request.params),input.scope,input.name,input.selectionRevision);});
   app.post('/api/chats/:id/skills/save-preview',async request=>{const input=z.strictObject({name:skillName,content:z.string().max(32000),baseHash:skillRevision.nullable(),owner:z.string().min(1).max(200).optional()}).parse(request.body);return skillWrites.preview(paramId(request.params),input.name,input.content,input.baseHash,input.owner);});
   app.post('/api/chats/:id/skills/promote-preview',async request=>{
-    if(!options.transportAuth)throw Object.assign(new Error('Personal promotion requires an authenticated backend session.'),{statusCode:403});
+    if(!options.transportAuth&&!options.localWeb)throw Object.assign(new Error('Personal promotion requires a local backend session.'),{statusCode:403});
     const input=z.strictObject({name:skillName,revision:skillRevision}).parse(request.body);return skillWrites.promotion(paramId(request.params),input.name,input.revision);
   });
-  app.post('/api/chats/:id/skills/save',async request=>{const input=z.strictObject({id:z.string().uuid(),destination:z.string().min(1).max(4096)}).parse(request.body);return skillWrites.commit(paramId(request.params),input.id,input.destination,!!options.transportAuth);});
+  app.post('/api/chats/:id/skills/save',async request=>{const input=z.strictObject({id:z.string().uuid(),destination:z.string().min(1).max(4096)}).parse(request.body);return skillWrites.commit(paramId(request.params),input.id,input.destination,!!(options.transportAuth||options.localWeb));});
   // Track complete request lifetimes, including awaits before a save or registration.
   app.addHook('preHandler',async request=>{
     const route=request.routeOptions.url ?? '';

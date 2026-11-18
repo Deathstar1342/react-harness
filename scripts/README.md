@@ -1,8 +1,8 @@
-# Source setup and diagnostics
+# Scripts
 
-Supported source launchers are root setup.sh/start.sh and setup.ps1/start.ps1. They use source-desktop.sh/source-desktop.ps1 and the native bootstrap helper to select an external runtime, build exact container payloads, verify the complete target closure and open the native desktop. See [setup](../docs/setup.md), [acceptance](../docs/m32-acceptance.md) and [packaging delta](../docs/m32-packaging-handoff.md).
+Run the application with `npm start` from the checkout. The root Bash and PowerShell scripts are convenience wrappers for initial npm preparation and the same local launch. See the [setup guide](../docs/setup.md) for settings and command approval.
 
-container-source.sh, source-common.sh and source-setup.ts are historical direct/browser regression surfaces; they are not a supported production fallback. stage-support-runtime.py and source-payload.py are trusted build-time producers, not generic model/renderer tools. Source bootstraps accept no provider secret input.
+Desktop build, installer, and packaging scripts are maintenance tooling. M21 installer packaging remains paused.
 
 # Bounded native provider diagnostic
 

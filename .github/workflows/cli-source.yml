@@ -1,0 +1,40 @@
+name: CLI source validation
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  source:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    env:
+      CLI_SMOKE_HOME: ${{ runner.temp }}/abyssus-cli-profile
+      HARNESS_HOME: ${{ runner.temp }}/abyssus-cli-profile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Bash source setup
+        if: runner.os == 'Linux'
+        run: |
+          bash setup.sh --check
+          bash setup.sh
+          bash start.sh --check
+      - name: PowerShell source setup
+        if: runner.os == 'Windows'
+        run: |
+          ./setup.ps1 -Check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./setup.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./start.ps1 -Check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Native npm launch
+        run: node --import tsx tests/cli-source-smoke.ts npm
+      - name: Native wrapper launch
+        run: node --import tsx tests/cli-source-smoke.ts

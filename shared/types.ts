@@ -1,5 +1,5 @@
 export type AgentRole = 'architect' | 'coder' | 'critic';
-export type ApprovalMode = 'autonomous' | 'balanced' | 'review';
+export type ApprovalMode = 'autonomous' | 'balanced' | 'review' | 'ai';
 export type ChatStatus = 'idle' | 'running' | 'awaiting_approval' | 'paused' | 'interrupted' | 'error';
 export interface Project { id: string; name: string; path: string; createdAt: string; removalError?: string }
 export interface DeletionPreview { canonicalPath: string; confirmationToken: string; expiresAt: string }
@@ -72,6 +72,7 @@ export interface ChangePreview { change: FileChangeSummary; diff: string; undoDi
 export interface WorkerDispatchBinding {claimId:string;binding:string;sessionId:string;identity:{storageId:string;projectId:string;imageId:string;layout:string};expiresAt:number}
 export interface ToolContext {
   projectRoot: string; chatId: string; agentId: string; signal?: AbortSignal; onOutput?: (output: string) => void;
+  commandCwd?: string;
   /** Trusted in-memory capabilities; never serialized or accepted as native arguments. */
   previewPort?:number;
   mutationOwner?: symbol; prepareCommand?: () => Promise<void>; beforeCommand?: (binding?:WorkerDispatchBinding) => void;
@@ -85,7 +86,7 @@ export interface ProcessJob {
 /** Preview observations cannot authorize execution, acceptance or reconciliation. */
 export interface PreviewEntry {processId:string;projectId:string;chatId:string;generation:number;port:number;status:'starting'|'ready'|'stopped'|'failed'|'interrupted'|'uncertain'|'stale';reason:string}
 export interface PreviewSession {id:string;projectId:string;processId:string;chatId:string;generation:number;expiresAt:number}
-export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; before?: string; after?: string; diff?: string; changes?: {before: FileSnapshot; after: FileSnapshot}[] }
+export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; commandCwd?:string; before?: string; after?: string; diff?: string; changes?: {before: FileSnapshot; after: FileSnapshot}[] }
 export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }
 export interface TestReport { id: string; runner: string; command: string; createdAt: string; status: 'passed' | 'failed' | 'error' | 'cancelled'; tests: TestCase[]; output: string; exitCode?: number }
@@ -116,7 +117,7 @@ export interface ToolService {
   removeScope?<T>(root: string, chatId: string | undefined, mutation: () => T): T | Promise<T>;
   dispose(): Promise<void>;
 }
-export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string; install?: InstallRecord }
+export interface Approval { id: string; chatId: string; agentId: string; action: Action; inspection: ToolInspection; status: 'pending' | 'approved' | 'denied' | 'stale'; createdAt: string; aiReview?:'approved'|'needs_human'; install?: InstallRecord }
 export type ReviewDisposition = 'accepted'|'local_repair'|'replan'|'unaccepted';
 export interface ReviewReplan {
   reason: 'architecture_conflict'|'dependency_blocked'|'invalid_assumption'|'scope_change';

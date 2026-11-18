@@ -9,22 +9,30 @@ import { createManagedHooks } from './context.js';
 import { Store } from './store.js';
 import { WorkspaceTools } from './tools/index.js';
 import { loadPromptExtensions } from './prompts.js';
-import { prepareProfile, lockResources, durableWrite, privateDirectory, regularFile, type ProfileOptions } from './profile.js';
+import { prepareProfile, lockResources, ProfileOwnership, durableWrite, privateDirectory, regularFile, type ProfileOptions } from './profile.js';
 import { BackendLifecycle } from './lifecycle.js';
 import { TransportAuth } from './transport-auth.js';
-import { verifyContainerStorage } from './container-storage.js';
+import { installationRoot } from './locations.js';
 
-export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean;browserPreview?:'source-fixed-3000'}={}) {return runNativeOperation(()=>startBackendScoped(options));}
-async function startBackendScoped(options:ProfileOptions & {transportToken?:string;desktop?:boolean;browserPreview?:'source-fixed-3000'}) {
+export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean;web?:boolean}={}) {return runNativeOperation(()=>startBackendScoped(options));}
+async function startBackendScoped(options:ProfileOptions & {transportToken?:string;desktop?:boolean;web?:boolean}) {
   const env={...(options.env ?? process.env)};
-  if(env.HARNESS_EXECUTION_MODE==='container') {
-    verifyContainerStorage(env.HARNESS_STORAGE_ID ?? '');
-    if(env.HARNESS_HOME!=='/abyssus'||env.HARNESS_WORKSPACE_ROOT!=='/workspace'||env.HARNESS_INIT||env.HARNESS_DATA_DIR||env.HARNESS_LEGACY_ROOT||env.HARNESS_SELECT_DATA||env.HARNESS_MIGRATION_RETRY)throw new Error('Container storage overrides are not supported');
-  }
+  if(env.HARNESS_EXECUTION_MODE!==undefined&&env.HARNESS_EXECUTION_MODE!=='direct')throw new Error('Remove the unsupported HARNESS_EXECUTION_MODE override and run npm start');
   for(const name of ['HARNESS_DATA_DIR','HARNESS_WORKSPACE_ROOT','ARCHITECT_PROMPT_FILE','CODER_PROMPT_FILE','CRITIC_PROMPT_FILE']) {
     if(env[name] || name==='HARNESS_DATA_DIR' && env[name]!==undefined)env[name]=path.resolve(options.cwd ?? process.cwd(),env[name]!);
   }
-  const profile=await prepareProfile({...options,env});
+  const repository=options.web ? path.resolve(options.installRoot ?? installationRoot) : undefined;
+  const configurationLock=repository ? new ProfileOwnership(repository) : undefined;
+  const {profile,webConfig}=await (async()=>{
+    try {
+      const webConfig=repository ? loadBackendConfig(env,path.join(repository,'.env')) : undefined;
+      const profileEnv=webConfig ? {...env,HARNESS_HOME:webConfig.config.appHome,HARNESS_INIT:'1',HARNESS_LEGACY_ROOT:undefined,HARNESS_MIGRATION_RETRY:undefined} : env;
+      return {profile:await prepareProfile({...options,env:profileEnv}),webConfig};
+    } catch(error) {
+      configurationLock?.close();
+      throw error;
+    }
+  })();
   let resources:ReturnType<typeof lockResources>|undefined,store:Store|undefined;
   let app:Awaited<ReturnType<typeof createApp>>['app']|undefined;
   const tools=new WorkspaceTools();
@@ -38,21 +46,22 @@ async function startBackendScoped(options:ProfileOptions & {transportToken?:stri
     store?.close();store=undefined;
     const stopped={version:1,instanceId:lifecycle?.instanceId,profileId:lifecycle?.profileId,state:'stopped'};
     durableWrite(descriptor,JSON.stringify({...stopped,...(lifecycle?{mac:createHmac('sha256',lifecycle.key).update(JSON.stringify(stopped)).digest('hex')}:{})}));
-    resources?.close();profile.ownership.close();
+    resources?.close();profile.ownership.close();configurationLock?.close();
   });
   try {
     lifecycle=new BackendLifecycle(profile.id,env.HARNESS_LAUNCH_KEY);
-    const auth=new TransportAuth(lifecycle.instanceId,options.transportToken,!options.desktop);
-    privateDirectory(path.dirname(profile.paths.configFile));
-    if(!existsSync(profile.paths.configFile))throw new Error('Selected configuration is missing; restore profile/config/.env before startup');
-    const {config,file}=loadBackendConfig({...env,HARNESS_HOME:profile.paths.home},profile.paths.configFile);
+    const auth=new TransportAuth(lifecycle.instanceId,options.transportToken,!options.desktop&&!options.web);
+    if(!webConfig) {
+      privateDirectory(path.dirname(profile.paths.configFile));
+      if(!existsSync(profile.paths.configFile))throw new Error('Selected configuration is missing; restore profile/config/.env before startup');
+    }
+    const {config,file}=webConfig ?? loadBackendConfig({...env,HARNESS_HOME:profile.paths.home},profile.paths.configFile);
     config.appHome=profile.paths.home;
-    if(config.executionMode==='container'&&env.HARNESS_EXECUTION_MODE!=='container')throw new Error('Container mode must be selected by the trusted launcher, not profile configuration');
-    if(env.HARNESS_EXECUTION_MODE==='container' && (config.executionMode!=='container'||config.dataDir!=='/abyssus/profile/state'||config.workspaceRoot!=='/workspace'||Object.keys(config.promptFiles).length))throw new Error('Container profile path overrides are unsupported');
-    if(options.desktop&&config.executionMode!=='container'){config.host='127.0.0.1';config.port=0;}
+    if(config.executionMode!=='direct')throw new Error('Remove the unsupported HARNESS_EXECUTION_MODE profile setting and run npm start');
+    if(options.desktop){config.host='127.0.0.1';config.port=0;}
     if(config.port>65535)throw new Error('PORT must be at most 65535');
     // Home is already held. Preserve explicit overrides pointing exactly at it.
-    resources=lockResources([path.dirname(file.filename),config.dataDir].filter(dir=>{
+    resources=lockResources((webConfig?[config.dataDir]:[path.dirname(file.filename),config.dataDir]).filter(dir=>{
       return !(existsSync(dir) && realpathSync(dir)===realpathSync(profile.paths.home));
     }));
     config.dataDir=realpathSync(config.dataDir);
@@ -74,7 +83,7 @@ async function startBackendScoped(options:ProfileOptions & {transportToken?:stri
     store=new Store(database);
     durableWrite(dataMarker,JSON.stringify({version:1}));
     ({app}=await createApp({config,provider,store,providerSettingsFile:file,tools,
-      hooks:createManagedHooks(provider,store,config,{promptExtensions}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close},transportAuth:auth,browserPreview:options.desktop?undefined:options.browserPreview}));
+      hooks:createManagedHooks(provider,store,config,{promptExtensions}),staticRoot:profile.paths.staticRoot,lifecycle:{identity:lifecycle,close},localWeb:options.web,transportAuth:options.web?undefined:auth}));
     const address=await app.listen({host:config.host,port:config.port});
     config.port=Number(new URL(address).port);
     lifecycle.ready();

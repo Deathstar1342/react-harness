@@ -17,7 +17,7 @@ export function TransferDialog({project,onClose,onImported}:{project?:Project;on
   };
   return <Modal title={project?'Export project copy':'Import project copy'} titleId="transfer-title" onClose={onClose} busy={busy}>
     <p>{project?'Save a separate copy to a new destination. Existing folders are never overwritten.':'Copy a selected project once into managed storage. Your original folder stays separate.'}</p>
-    {!receipt&&<>{!native&&<p className="field-help">Container source flow: run <code>bash scripts/project-transfer.sh</code> in the source checkout’s host terminal. Review the selected folder, exclusions and Git-history choice there, then paste its single-use code below.</p>}
+    {!receipt&&<>{!native&&<p className="field-help">Enter the single-use code you received when you authorized this transfer.</p>}
       {project&&!native&&<p>Managed folder identity: <code>{project.path.split('/').at(-1)}</code></p>}
       {!project&&<label>Project name<input maxLength={100} value={name} disabled={busy} onChange={e=>setName(e.target.value)}/></label>}
       {native?<button className="button" disabled={busy} onClick={()=>{setBusy(true);setError('');void native.authorizeTransfer(project?{kind:'export',projectId:project.id}:{kind:'import'}).then(result=>{if(result)setCode(result.code);}).catch(e=>setError(errorText(e))).finally(()=>setBusy(false));}}>{code?'Choose another folder':project?'Choose export destination':'Choose source folder'}</button>:<label>Transfer code<input autoComplete="off" spellCheck={false} value={code} disabled={busy} onChange={e=>setCode(e.target.value.trim())}/></label>}

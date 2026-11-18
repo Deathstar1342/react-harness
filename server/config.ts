@@ -30,7 +30,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory =
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('STARK_BASE_URL must be an HTTP(S) API URL without credentials, query, or fragment');
   }
   const mode = env.APPROVAL_MODE ?? 'balanced';
-  if (!['autonomous', 'balanced', 'review'].includes(mode)) throw new Error('APPROVAL_MODE must be autonomous, balanced, or review');
+  if (!['autonomous', 'balanced', 'review', 'ai'].includes(mode)) throw new Error('APPROVAL_MODE must be autonomous, balanced, review, or ai');
   const host = env.HOST ?? '127.0.0.1';
   const executionMode=env.HARNESS_EXECUTION_MODE ?? 'direct';
   if(!['direct','container'].includes(executionMode))throw new Error('Unknown execution mode');

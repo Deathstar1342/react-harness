@@ -1,8 +1,8 @@
 # Integration contract
 
-## M28–M32 deployment boundary
+## Local source runtime
 
-[CONTAINERIZATION.md](../CONTAINERIZATION.md) defines the new deployment target. Preserve existing native tool/runtime API semantics; add separate typed host-path, managed-project and container-path identities. The trusted host launcher alone handles local engine lifecycle and native file transfers. A container service cannot use project import or worker execution to request arbitrary host filesystem/engine access. M28 proposes concrete storage/readiness/auth contracts; M29 proposes bounded owned execution/install claims and result/cleanup semantics; M30 proposes one-time transfer publication/export; M31 integrates Electron IPC. Document each accepted interface here at delivery. Existing APIs below remain implementation descriptions until superseded; no automatic sync/write-back API is planned. Backend secrets and Docker control never enter agent shells or renderer payloads.
+Source startup uses the local web backend, loopback Host and Origin checks, and the checkout’s .env. Native tool validation, command and file path checks, approvals, and durable uncertainty rules apply. The [setup guide](setup.md) describes the current launch. References to earlier execution and transfer capabilities below preserve their historical contracts.
 
 ## M25 scoped instructions, files and processes
 

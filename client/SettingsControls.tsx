@@ -89,7 +89,7 @@ export function SettingsControls({ chatId, onPreferences, providerRevision = 0 }
         <select aria-label="Default approval mode for future chats" disabled={saving || !preferences} value={preferences?.defaultApprovalMode ?? 'balanced'}
           onChange={event => update({ defaultApprovalMode: event.target.value as ApprovalMode }, 'Default saved for future chats. Existing chats are unchanged.')}>{options}</select>
       </label>
-      <p className="field-help">Balanced asks before elevated actions. Review asks before every change. Full workspace autonomy allows changes without individual approval.</p>
+      <p className="field-help">Balanced asks before elevated actions. AI command review checks command scope and asks you when scope is unclear. Review asks before every change. Full workspace autonomy allows changes without individual approval.</p>
     </section>
     <InstallSettingsControls />
     <section className="settings-section">

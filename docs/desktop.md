@@ -1,10 +1,10 @@
 # Desktop development and setup
 
-M20 adds a runnable Electron shell; M21 owns signed/final installers and fresh-device release acceptance. Use the exact evidence and limitations in [the M20 report](reports/milestone-20.md).
+This page records desktop maintenance and historical acceptance. For application use, follow the [terminal setup guide](setup.md). M21 installer packaging remains paused. Use the exact evidence and limitations in [the M20 report](reports/milestone-20.md).
 
 ## Build and run
 
-With Node 24+, run `npm ci` and `npm run desktop:build`. On Linux x64, `npm run desktop:stage-runtime` downloads the checksum-pinned official Node 24.16.0 distribution into ignored `build/runtime`, installs locked production modules in `build/app`, and verifies the runtime ABI/module load. Then `npm run desktop:start` launches Electron. No system installation occurs in these build commands. Rebuild the UI/application before restaging a release candidate. Source paths and runtime assets must not be mixed with personal profiles or project roots.
+With Node 24+, run `npm ci` and `npm run desktop:build`. On Linux x64, `npm run desktop:stage-runtime` downloads the checksum-pinned official Node 24.16.0 distribution into ignored `build/runtime`, installs locked production modules in `build/app`, and verifies the runtime ABI/module load. Use the desktop smoke suite to validate the staged shell. No system installation occurs in these build commands. Rebuild the UI/application before restaging a release candidate. Source paths and runtime assets must not be mixed with personal profiles or project roots.
 
 Native Linux uses `build/app` and sibling `build/runtime` during development; production layout is `/opt/abyssus/app` and `/opt/abyssus/runtime`. A Windows shell requires those fixed Linux assets already installed inside the explicitly selected Ubuntu/Debian WSL2 distribution. It does not run a backend on Windows or execute a checkout through `/mnt`. It enumerates WSL distributions without starting them, never selects a default/service distro, and never installs or changes WSL. Missing runtime/distribution prerequisites are setup failures with recovery guidance.
 
