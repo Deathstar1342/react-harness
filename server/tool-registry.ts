@@ -289,7 +289,7 @@ const descriptions: Record<string,string> = {
   draft_skill:'Draft or edit a reusable workflow in private chat storage; provide name, description, references, Markdown body and expected draft revision (0 for new). Use for turning completed work into a skill. Generates strict frontmatter. Does not save any file; permitted in planning. At most 16 drafts/128000 bytes.',
   invoke_skill:'Select the exact inspected workflow revision and current selectionRevision as guidance only. Does not start building, resume goals or launch execution. Explicit scope/name never rebinds through precedence. Refreshing stale guidance requires a new invocation. Must be last in a batch.',
   save_skill:'Save a complete validated project workflow to the fixed .abyssus/skills/<name>/SKILL.md path using fresh whole-file baseHash (null only if absent), normal diff approval, scope and editor/process protections. Supply the exact draft content; later draft edits cannot alter this call. Execution mode only. No personal writes or promotion.',
-  start_process:'Start one owned long command in the existing Linux sandbox after approval. Returns a process handle, never completed verification. At most one project mutation owner; while active only observations and exact owned cancellation are available. Maximum 600 seconds. Optional previewPort declares the exact worker loopback development-server port as part of this approved command (1024-65535 except reserved 3128). Bind that server to 127.0.0.1 and keep it foreground. Preview supports bounded GET and explicit Reload only, without WebSocket/HMR/POST/SSE. Inspect status/output; do not run another mutation or complete the assignment until terminal evidence is recorded.',
+  start_process:'Start an owned foreground command using the command approval policy. Use one command with literal arguments. Optional cwd is an existing workspace-relative directory. Maximum 600 seconds. Inspect the process result and fresh verification before completing the task.',
   process_status:'Observe an exact same-task process handle; optionally wait at most 1000 ms. Status cannot reconcile uncertainty or prove tests passed. Architects/critics can inspect only their current same-chat assignment evidence.',
   process_output:'Read up to 16000 retained UTF-8 output bytes using exact byte cursor, with base/end/next offsets and truncation. At most 64000 bytes retained. No process execution or replay.',
   cancel_process:'Stop only the requesting coder frame’s exact already-authorized process handle and await actual namespace cleanup. No additional approval; stop does not roll back effects or prove completion. Interrupted evidence conservatively blocks assignment acceptance.',
@@ -304,8 +304,8 @@ const descriptions: Record<string,string> = {
   read_file:'Read project UTF-8 and SHA-256. Cite planEvidenceCallId when returned. Use read_file_range for truncated output.',
   search:'Search bounded project text. Protected files are excluded.',
   write_file:'Replace a project file using its freshly observed SHA-256 baseHash, or null for a new file. Requires scope, lease, version and approval checks.',
-  run_shell:'Run a potentially modifying command in the Linux project sandbox. Requires execution permission and may require approval; an uncertain outcome must not be replayed.',
-  execute_python:'Run Python in the same Linux sandbox and approval policy as shell commands.',
+  run_shell:'Run one command with literal arguments from the workspace root or optional relative cwd. Keep paths inside the workspace; shell chaining, redirects and substitutions are unavailable. Commands can modify files and may require approval. Never replay uncertain work.',
+  execute_python:'Run Python from the workspace root or optional relative cwd with the command approval policy. Keep filesystem actions scoped to the workspace.',
   run_tests:'Run a potentially modifying test command and collect a fresh JUnit report. A command exit alone does not prove the report passed.',
   git_status:'Read confined Git status without hooks or credential access.',
   git_diff:'Read confined Git changes with protected paths excluded.',
@@ -332,7 +332,9 @@ export const toolRegistry: ReadonlyMap<string,ToolDefinition> = new Map(actionSc
     affectedPaths: action => action.name==='save_skill' ? [projectSkillPath(String(action.args.name))] : [action.args.path,action.args.destination].filter((value):value is string=>typeof value==='string'),
     modes: effect !== 'read' || name === 'delegate' || name === 'request_goal_completion' ? ['execute'] : ['plan','execute'],
     effect, risk:effect === 'execute' ? 'elevated' : 'routine', kind:workspace ? 'workspace' : name === 'install_decision' ? 'decision' : 'control', terminal:terminal.has(name)||name==='invoke_skill',
-    inspect:async (dispatch,action) => workspace && !processes.has(name) ? dispatch.workspace.inspect(dispatch.context,action) : {effect,risk:effect === 'execute' ? 'elevated' : 'routine',description:descriptions[name]},
+    inspect:async (dispatch,action) => name==='start_process'
+      ? dispatch.workspace.inspect(dispatch.context,{name:'run_shell',args:{command:action.args.command,cwd:action.args.cwd,timeoutMs:action.args.timeoutMs}})
+      : workspace && !processes.has(name) ? dispatch.workspace.inspect(dispatch.context,action) : {effect,risk:effect === 'execute' ? 'elevated' : 'routine',description:descriptions[name]},
     handler:async (dispatch,action) => {
       if(processes.has(name)&&!dispatch.process)throw new Error('Trusted process lifecycle is unavailable');
       const result=await (processes.has(name) ? dispatch.process!(action) : workspace ? dispatch.workspace.execute(dispatch.context,action) : dispatch.control(action));

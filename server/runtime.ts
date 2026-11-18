@@ -1592,7 +1592,7 @@ export class Runtime {
 
           const reviewChat = this.store.chat(chatId);
           const mode = reviewChat.approvalMode;
-          const aiDecision = mode==='ai' && definition.command && definition.approval!=='owned_stop'
+          const aiDecision = mode==='ai' && (definition.command || action.name==='start_process') && definition.approval!=='owned_stop'
             ? await reviewWorkspaceCommand(this.hooks.complete,reviewChat.models?.critic ?? this.config.models.critic,this.store.project(reviewChat.projectId).path,inspection.commandCwd,action,signal)
             : undefined;
           if(aiDecision!==undefined) {
