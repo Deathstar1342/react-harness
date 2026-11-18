@@ -221,20 +221,22 @@ export class ShellPool {
   async dispose(): Promise<void> { this.disposed = true; await Promise.all([...this.sessions.values()].map(session=>session.dispose())); await Promise.all([...this.queues.values()].map(q => q.tail)); if(this.quarantined.size)throw new ToolError('Sandbox cleanup is uncertain; retain backend ownership.','SANDBOX_CLEANUP_FAILED');this.sessions.clear(); this.queues.clear(); }
 }
 // Direct execution is reserved for fixed, read-only Git argv; model commands use the PTY.
-export async function gitCommand(root: string, args: string[], maxBytes: number, signal?: AbortSignal, sandbox=new LinuxSandbox()): Promise<CommandResult> {
+export async function gitCommand(root: string, args: string[], maxBytes: number, signal?: AbortSignal, sandbox=new LinuxSandbox(), local?:(root:string,file:string,args:string[],limit:number,signal?:AbortSignal)=>Promise<CommandResult>): Promise<CommandResult> {
   if (signal?.aborted) return { output: '', cancelled: true };
   // Git diff/status may execute configured clean filters even with --no-textconv.
   // Discover only config key names, never values (which may contain credentials).
   const overrides: string[] = [];
   if (args[0] !== 'config') {
-    const config = await gitCommand(root, ['config', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(clean|smudge|process|required)$'], maxBytes, signal,sandbox);
+    const config = await gitCommand(root, ['config', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(clean|smudge|process|required)$'], maxBytes, signal,sandbox,local);
     if (config.error || config.cancelled || config.timedOut || (config.exitCode !== 0 && config.exitCode !== 1)) return { output: '', error: 'Cannot safely inspect Git filter configuration.' };
     for (const name of new Set(config.output.split('\0').filter(Boolean).map(key => key.replace(/\.(clean|smudge|process|required)$/, '')))) {
       for (const operation of ['clean', 'smudge', 'process']) overrides.push('-c', `${name}.${operation}=`);
       overrides.push('-c', `${name}.required=false`);
     }
   }
-  const launch=await sandbox.launch(root,['/usr/bin/git','--no-optional-locks','--literal-pathspecs','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.hooksPath=/dev/null',...overrides,...args],false,true);
+  const argv=['--no-optional-locks','--literal-pathspecs','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c',process.platform==='win32'?'core.hooksPath=NUL':'core.hooksPath=/dev/null',...overrides,...args];
+  if(local)return local(root,process.platform==='win32'?'git.exe':'/usr/bin/git',argv,maxBytes,signal);
+  const launch=await sandbox.launch(root,['/usr/bin/git',...argv],false,true);
   return new Promise(resolve => {
     let output = '', bytes = 0, truncated = false, done = false;
     const child = spawn(launch.file,launch.args,{cwd:'/',env:launch.env,stdio:['ignore','pipe','pipe']});

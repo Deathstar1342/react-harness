@@ -72,5 +72,5 @@ it('does not expose host browsing or mutable workspace selection in container mo
 });
 it('does not let a profile file enable a public container listener outside trusted bootstrap',async()=>{
   const t=await fixture();durableWrite(t.profile.paths.configFile,'HARNESS_EXECUTION_MODE=container\nHOST=0.0.0.0\n');
-  await expect(startBackend({env:{HARNESS_HOME:t.home},cwd:t.root,installRoot:t.root})).rejects.toThrow(/trusted launcher/);
+  await expect(startBackend({env:{HARNESS_HOME:t.home},cwd:t.root,installRoot:t.root})).rejects.toThrow(/unsupported HARNESS_EXECUTION_MODE profile setting/);
 });

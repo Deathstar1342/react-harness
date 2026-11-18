@@ -8,5 +8,5 @@ export const testConnection = (signal: AbortSignal) => request<ConnectionReport>
   method: 'POST', body: '{}', signal: AbortSignal.any([signal, AbortSignal.timeout(190_000)]),
 });
 export const approvalNames: Record<ApprovalMode, string> = {
-  balanced: 'Balanced', review: 'Review every change', autonomous: 'Full workspace autonomy',
+  balanced: 'Balanced', ai: 'AI command review', review: 'Review every change', autonomous: 'Full workspace autonomy',
 };

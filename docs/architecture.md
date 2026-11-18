@@ -1,12 +1,8 @@
 # Architecture and implementation plan
 
-## Active container backend redesign — approved 2026-10-16
+## Local source runtime
 
-M28 controller/storage foundation is delivered on reviewed GitHub main `314e955435fdf05b4cd3e3a2067e7426a65da2f8`, with every applicable exact-main Validate/Desktop Windows+Ubuntu/helper/Container step independently green. Explicit Linux `setup.sh --container` / `start.sh --container` now support private persistent native state, fixed authenticated local readiness and real tested setup/recreate/crash recovery; M29 adds owned execution and installs as described below; managed transfers remain M30 work. This is not yet container-connected Electron, Windows D: acceptance or a customer installer. [Independent review](reports/milestone-28-coordinator.md).
-
-The user approved [CONTAINERIZATION.md](../CONTAINERIZATION.md) and M28–M32 in [milestones](milestones.md): native Electron GUI, containerized controller and project execution, stable configurable storage, one-time copy-on-import and optional explicit export. There is no automatic synchronization, source write-back or original-project mount. Imported/new managed copies are authoritative and survive container replacement. The trusted host launcher alone manages the local engine/import/export; workers cannot access Docker control, provider keys or controller state. Host and container paths are distinct. Persistent SQLite/storage and Windows D: behavior require actual acceptance, not assumptions from Linux.
-
-The container execution boundary replaces the selected Bubblewrap/host apt-helper deployment. Existing native tools, roles, goals, AGENTS/skills, approval levels, independent install decisions, versions/leases, durable claims and uncertain-effect no-replay remain; install targets become worker containers. No host-shell fallback is added. M28 first delivers service/storage foundation and an explicit container source path; M29 enables worker execution; M30 implements managed transfers; M31 connects Electron; M32 makes guided container setup the supported default and validates integration. Until those deliveries, existing code below still implements the older Linux/Bubblewrap mode. M21 installers/source-notices work stays paused and preserved. Historical no-Docker/no-M28 requirements are superseded only for this approved sequence.
+`npm start` launches the Node backend and serves the browser UI on loopback. Host and origin checks keep browser access on loopback. The backend reads the checkout’s .env and reopens its established local SQLite state. Commands start from a checked workspace directory and approved path operands. The [setup guide](setup.md) is the current source launch contract. M21 packaging remains paused.
 
 ## Active native-tool redesign — approved 2026-10-14
 
@@ -268,7 +264,7 @@ M30 original-folder protection stays exclusively in the trusted host: a bounded 
 
 ### M32 guided source payload boundary
 
-The supported setup.sh/start.sh and Windows setup.ps1/start.ps1 select the native container desktop. Trusted bootstrap builds from a bounded exact tracked Git snapshot with hooks/fsmonitor and inherited tool overrides disabled. A pinned Node image builds the application; a pinned Ubuntu22.04 stage produces private CPython for the Linux22.04/24.04 baseline, or stages the hash-pinned Windows runtime. Target Electron and the pure-JS desktop dependency closure are exported with complete member hashes and source/platform/image provenance. Optional host node-pty/native backend bindings are excluded; project PTYs remain in workers.
+Historical M32 source payload setup is recorded in the [milestone report](reports/milestone-32.md).
 
 The explicitly selected external source runtime root is distinct from persistent app storage and Docker's own backing/cache. A tiny ignored checkout selection pointer records its location. Desktop mutable state/temp/logs use the selected root. Setup journals build/export intent before dispatch, preserves incomplete attempts and refuses replay/reset. Start validates complete inventory and exact engine/source/image binding and performs no build/pull/provider update. Native onboarding owns storage/provider setup and all application container effects. This bootstrap integrity boundary does not grant workspace/install/goal authority or relax M31 native private-target/journal checks. See setup.md and m32-acceptance.md for platform evidence and open device gates.
 

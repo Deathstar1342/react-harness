@@ -3,7 +3,7 @@ import {z} from 'zod';
 import type {Store} from './store.js';
 import {parseNativeJSON} from './native-json.js';
 import {queueError} from './queue-state.js';
-const id=z.uuid(),time=z.string().datetime(),mode=z.enum(['autonomous','balanced','review']);
+const id=z.uuid(),time=z.string().datetime(),mode=z.enum(['autonomous','balanced','review','ai']);
 const chatSchema=z.strictObject({id,projectId:id,title:z.string().max(200),status:z.enum(['idle','running','awaiting_approval','paused','interrupted','error']),approvalMode:mode,createdAt:time,updatedAt:time,mode:z.enum(['plan','execute']).optional(),modeVersion:z.number().int().safe().nonnegative().optional(),models:z.strictObject({architect:z.string().max(1024),coder:z.string().max(1024),critic:z.string().max(1024)}).optional()});
 export function queueChat(store:Store,chatId:string,projectId:string){
  const row=store.db.prepare("SELECT CASE WHEN typeof(id)='text' AND length(CAST(id AS BLOB))<=200 THEN id END AS id,CASE WHEN typeof(project_id)='text' AND length(CAST(project_id AS BLOB))<=200 THEN project_id END AS project_id,CASE WHEN typeof(data)='text' AND length(CAST(data AS BLOB))<=8192 THEN data END AS data FROM chats WHERE id=?").get(chatId);

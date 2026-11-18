@@ -2,7 +2,7 @@
 
 ## Current target — approved 2026-10-16
 
-The selected desktop direction is now Electron GUI plus a local container backend/worker, with one-time copy-on-import and persistent managed projects/chats/settings. [CONTAINERIZATION.md](CONTAINERIZATION.md) is authoritative; [M28–M32](docs/milestones.md) replace the Docker-free/Bubblewrap/host-helper deployment assumptions below. Container runtime detection and guided storage/provider setup replace manual Ubuntu app-backend configuration. Windows may still need WSL2/virtualization for its container runtime. Do not bundle/install/reconfigure Docker or global WSL settings silently. Docker is a prerequisite, not supplied by this plan. Source scripts and customer onboarding are updated in the new sequence; current scripts have not yet been replaced. M21 final packaging remains paused, with previous work/gates preserved and a new packaging-delta handoff required after M32. No release is authorized by container implementation alone.
+Historical installer planning. M21 packaging remains paused. The supported source application launch is `npm start`; see the [setup guide](docs/setup.md).
 
 The remainder records the earlier desktop implementation and evidence; it is not the active container target where it conflicts.
 

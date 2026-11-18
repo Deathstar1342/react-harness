@@ -46,7 +46,7 @@ function observeCheckpointCatalog(store:Store){
 }
 export const checkpointCatalog=(store:Store)=>nativePrivateUnit(()=>observeCheckpointCatalog(store));
 const roleModels=z.strictObject({architect:z.string().max(200),coder:z.string().max(200),critic:z.string().max(200)});
-const chatSchema=z.strictObject({id:uuid,projectId:uuid,title:z.string().max(200),status:z.enum(['idle','running','awaiting_approval','paused','interrupted','error']),approvalMode:z.enum(['autonomous','balanced','review']),mode:z.enum(['plan','execute']).optional(),modeVersion:integer.optional(),createdAt:date,updatedAt:date,models:roleModels.optional()});
+const chatSchema=z.strictObject({id:uuid,projectId:uuid,title:z.string().max(200),status:z.enum(['idle','running','awaiting_approval','paused','interrupted','error']),approvalMode:z.enum(['autonomous','balanced','review','ai']),mode:z.enum(['plan','execute']).optional(),modeVersion:integer.optional(),createdAt:date,updatedAt:date,models:roleModels.optional()});
 /** Exact context bytes are hashed, never returned. Missing optional rows are explicit nulls in the fingerprint. */
 function observeCheckpointContext(store:Store,projectId:string,chatId?:string){
  const project=checkpointProject(store,projectId),rows=checkpointRows(store,'SELECT id AS key,data FROM chats WHERE project_id=? ORDER BY id',[projectId],CHECKPOINT_STATE_LIMITS.chats,32768,1024*1024);

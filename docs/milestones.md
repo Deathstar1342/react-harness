@@ -1,5 +1,7 @@
 # Delivery milestones
 
+Current source launch follows the [terminal setup guide](setup.md). The completed milestones below preserve their acceptance scope and history. M21 packaging remains paused.
+
 ## Active M33–M37 product improvements — kickoff 2026-10-26
 
 User authorization: cancel the native-local deployment redesign, keep current deployment, identify five concrete improvements and continue the previous dedicated-chat/coordinator-review/15-minute workflow. [Full contracts and acceptance](../PRODUCT_IMPROVEMENTS.md). Run sequentially from independently reviewed published main; no M38 or final release. M21 remains paused and preserved. All code, Git metadata, builds and fixtures stay on physical D.

@@ -142,7 +142,7 @@ export class ProviderSettings {
 }
 
 export function loadBackendConfig(env: NodeJS.ProcessEnv = process.env, filename = profilePaths(applicationHome(env)).configFile) {
-  if (Object.keys(env).some(key => /^DOTENV_(?:CONFIG_)?(?:PATH|ENCODING|OVERRIDE|FAST)$/.test(key) && env[key] !== undefined)) throw new Error('Custom dotenv path, encoding, override and parser options are unsupported; use the selected profile config/.env');
+  if (Object.keys(env).some(key => /^DOTENV_(?:CONFIG_)?(?:PATH|ENCODING|OVERRIDE|FAST)$/.test(key) && env[key] !== undefined)) throw new Error('Custom dotenv path, encoding, override and parser options are unsupported; use the application .env');
   const file = new ProviderSettingsFile(filename,env);
   return {file, config:file.config()};
 }

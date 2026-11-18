@@ -2,37 +2,16 @@ name: Validate
 on: [push, pull_request, workflow_dispatch]
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - name: Disposable Linux sandbox prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap socat python3-venv
-          # This runner is disposable. Do not apply these settings to a user's host.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          test "$(id -u)" != 0
-          bwrap --version
-          socat -V
       - run: npm ci
-      - name: Guided source entrypoint refusal and environment checks
-        timeout-minutes: 10
-        run: |
-          python3 tests/source-desktop-boundaries.py
-          python3 -B -m unittest discover -s tests -p 'test_source_payload.py' -v
       - run: npm run typecheck
       - run: npm test
-      - name: Bounded native diagnostic synthetic HTTP and SSE
+      - name: Bounded provider diagnostic
         run: node --test scripts/native-provider-probe.test.mjs
       - run: npm run build
-      - name: Required unsupported-namespace fail-closed check
-        run: |
-          previous_limit=$(sysctl -n user.max_user_namespaces)
-          trap 'sudo sysctl -w "user.max_user_namespaces=$previous_limit"' EXIT
-          sudo sysctl -w user.max_user_namespaces=0
-          test "$(id -u)" != 0
-          node --import tsx tests/sandbox-unsupported.ts

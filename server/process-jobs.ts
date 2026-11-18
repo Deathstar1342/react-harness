@@ -133,7 +133,7 @@ export class ProcessJobs {
       onOutput:output=>{if(persistenceFailed)return;try{outputBuffer.write(output);}catch{persistenceFailed=true;live.controller.abort();}},
     };
     try {
-      result=await this.tools.execute(context,{name:'run_shell',args:{command:record.action.args.command,timeoutMs:record.action.args.timeoutMs??600_000}});
+      result=await this.tools.execute(context,{name:'run_shell',args:{command:record.action.args.command,timeoutMs:record.action.args.timeoutMs??600_000,...(record.action.args.cwd===undefined?{}:{cwd:record.action.args.cwd})}});
     } catch {result={ok:false,output:'Process executor failed; inspect retained claim.',data:{uncertain:acknowledged}};}
     try {await this.tools.closeCommandContext!(context);cleanupConfirmed=true;}catch{ /* durable uncertainty below retains ownership */ }
     if(!persistenceFailed)try{outputBuffer.flush();this.output(record.id,'',true);}catch{persistenceFailed=true;live.controller.abort();}
@@ -143,7 +143,7 @@ export class ProcessJobs {
     current.status=uncertain?'uncertain':!acknowledged?'not_started':interrupted?'interrupted':data?.exitCode===0&&result?.ok?'completed':'failed';
     current.exitCode=['completed','failed'].includes(current.status)&&Number.isInteger(data?.exitCode)?data!.exitCode:undefined;
     current.truncated ||= data?.truncated===true;
-    current.message=current.status==='not_started'?'Command was not dispatched; no trusted dispatch acknowledgement.':current.status==='interrupted'?'Sandbox terminated after dispatch; completed effects were not rolled back.':current.status==='uncertain'?'Outcome or namespace cleanup is uncertain. No replay, automatic undo or status-based reconciliation is authorized.':`Observed command exit ${current.exitCode}; this is not a test report.`;
+    current.message=current.status==='not_started'?'Command was not dispatched; no trusted dispatch acknowledgement.':current.status==='interrupted'?'Command terminated after dispatch; completed effects were not rolled back.':current.status==='uncertain'?'Outcome or command cleanup is uncertain. No replay, automatic undo or status-based reconciliation is authorized.':`Observed command exit ${current.exitCode}; this is not a test report.`;
     current.updatedAt=new Date().toISOString();
     try {
       if(persistenceFailed)throw new Error('An earlier output persistence boundary failed.');

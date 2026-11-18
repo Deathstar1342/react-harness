@@ -108,7 +108,7 @@ export const actionSchema = z.discriminatedUnion('name', [
   z.strictObject({name:z.literal('draft_skill'),args:skillDraftInput}),
   z.strictObject({name:z.literal('invoke_skill'),args:skillSelectionInput}),
   z.strictObject({name:z.literal('save_skill'),args:z.strictObject({name:skillName,content:z.string().max(32000),baseHash:z.string().regex(/^[a-f0-9]{64}$/).nullable()})}),
-  z.strictObject({name:z.literal('start_process'),args:z.strictObject({command:text(PROTOCOL_LIMITS.commandCharacters),timeoutMs,previewPort:z.number().int().min(1024).max(65535).refine(port=>port!==3128,'Worker control port is reserved').optional()})}),
+  z.strictObject({name:z.literal('start_process'),args:z.strictObject({command:text(PROTOCOL_LIMITS.commandCharacters),timeoutMs,cwd:path.optional(),previewPort:z.number().int().min(1024).max(65535).refine(port=>port!==3128,'Worker control port is reserved').optional()})}),
   z.strictObject({name:z.literal('process_status'),args:z.strictObject({processId:z.string().uuid(),waitMs:z.number().int().min(0).max(1000).optional()})}),
   z.strictObject({name:z.literal('process_output'),args:z.strictObject({processId:z.string().uuid(),offset:z.number().int().min(0).max(64_000),limit:z.number().int().min(4).max(16_000).optional(),waitMs:z.number().int().min(0).max(1000).optional()})}),
   z.strictObject({name:z.literal('cancel_process'),args:z.strictObject({processId:z.string().uuid()})}),
@@ -149,6 +149,7 @@ export const actionSchema = z.discriminatedUnion('name', [
     name: z.literal('run_shell'),
     args: z.strictObject({
       command: text(PROTOCOL_LIMITS.commandCharacters),
+      cwd:path.optional(),
       timeoutMs,
     }),
   }),
@@ -156,6 +157,7 @@ export const actionSchema = z.discriminatedUnion('name', [
     name: z.literal('execute_python'),
     args: z.strictObject({
       code: text(PROTOCOL_LIMITS.commandCharacters),
+      cwd:path.optional(),
       timeoutMs,
     }),
   }),
@@ -172,6 +174,7 @@ export const actionSchema = z.discriminatedUnion('name', [
     args: z.strictObject({
       command: text(PROTOCOL_LIMITS.commandCharacters),
       reportPath: path.optional(),
+      cwd:path.optional(),
       timeoutMs,
     }),
   }),
