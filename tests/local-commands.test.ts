@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorkspaceTools } from '../server/tools/index.js';
+import { definitionFor } from '../server/tool-registry.js';
 import { reviewWorkspaceCommand } from '../server/command-review.js';
 import type { RuntimeHooks } from '../server/runtime.js';
 
@@ -20,6 +21,10 @@ it('runs ordinary rooted commands and refuses escaping operands or cwd in every 
   const context={projectRoot:root,chatId:'test',agentId:'test'};
   const run=(command:string,cwd?:string)=>tools.execute(context,{name:'run_shell',args:{command,...(cwd?{cwd}:{})}});
   await expect(run('mkdir "child dir"')).resolves.toMatchObject({ok:true});
+  const inspect=definitionFor('start_process').inspect;
+  const dispatcher={workspace:tools,context,control:async()=>{throw new Error('Unused');}};
+  await expect(inspect(dispatcher,{name:'start_process',args:{command:'ls',cwd:'child dir'}})).resolves.toMatchObject({commandCwd:path.join(root,'child dir')});
+  await expect(inspect(dispatcher,{name:'start_process',args:{command:'rm ../*'}})).rejects.toThrow(/traversal/);
   await expect(run('ls')).resolves.toMatchObject({ok:true,output:expect.stringContaining('child dir')});
   await expect(run('pwd','child dir')).resolves.toMatchObject({ok:true,output:expect.stringContaining(path.join(root,'child dir'))});
   await expect(run('node -e "process.stdout.write(process.cwd())"','child dir')).resolves.toMatchObject({ok:true,output:path.join(root,'child dir')});
