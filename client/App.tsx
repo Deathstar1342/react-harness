@@ -1,7 +1,5 @@
 import {QueuePanel} from './QueuePanel';
 import {InspectorPanel} from './InspectorPanel';
-import {PreviewPanel} from './PreviewPanel';
-import {TransferDialog} from './TransferDialog';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallHistory } from './InstallControls';
 import {RecoveryPanel} from './RecoveryPanel';
@@ -86,7 +84,6 @@ export function Conversation({
   const [inspectorReport,setInspectorReport]=useState<{id:string;nonce:number}>();
   const inspectorControl=useRef<HTMLButtonElement>(null);
   const [checkpointsOpen,setCheckpointsOpen]=useState(false);
-  const [previewOpen,setPreviewOpen]=useState(false);
   const [recoveryInstall,setRecoveryInstall]=useState<string>();
   const [recoveryProcess,setRecoveryProcess]=useState<string>();
   const recoveryControl=useRef<HTMLButtonElement>(null);
@@ -245,7 +242,6 @@ export function Conversation({
           </button>
           <button ref={planControl} className="text-button" aria-expanded={planOpen} aria-controls="chat-plan" onClick={()=>setPlanOpen(open=>!open)}>{detail.goal ? `Goal · ${detail.goal.status.replaceAll('_',' ')} · ${detail.plan.phases.filter(phase=>phase.steps.length && phase.steps.every(step=>step.status==='done' && detail.goal!.reviews.some(review=>review.planStep.planId===detail.plan.id && review.planStep.planVersion===detail.plan.version && review.planStep.phaseId===phase.id && review.planStep.stepId===step.id))).length}/${detail.plan.phases.length} phases` : 'Plan'}</button>
           <button className="text-button" aria-expanded={terminalOpen} aria-controls="command-terminal" onClick={()=>setTerminalOpen(open=>!open)}>Terminal</button>
-          <button className="text-button" aria-expanded={previewOpen} onClick={()=>setPreviewOpen(open=>!open)}>Preview</button>
           <button ref={inspectorControl} className="text-button" aria-expanded={inspectorOpen} aria-controls="chat-inspector" onClick={()=>setInspectorOpen(open=>!open)}>Run and usage</button>
           <button ref={recoveryControl} className="text-button" aria-expanded={recoveryOpen} aria-controls="chat-recovery" onClick={()=>setRecoveryOpen(open=>!open)}>Recovery</button>
           <button className="text-button" aria-expanded={skillsOpen} onClick={()=>setSkillsOpen(true)}>Skills</button>
@@ -253,7 +249,6 @@ export function Conversation({
           <button className="text-button" aria-expanded={checkpointsOpen} onClick={()=>setCheckpointsOpen(true)}>Checkpoints</button>
         </div>
       </header>
-      {previewOpen&&<PreviewPanel key={project.id+chatId} projectId={project.id} revision={detail.events.filter(event=>event.type==='command').at(-1)?.id??0} connected={connection==='connected'} onClose={()=>setPreviewOpen(false)}/>}
       {checkpointsOpen&&<CheckpointsPanel key={chatId} projectId={project.id} chatId={chatId} revision={fileRevision} onClose={()=>setCheckpointsOpen(false)}/>}
       {inspectorOpen&&<InspectorPanel detail={detail} connected={connection==='connected'} onClose={()=>{setInspectorOpen(false);inspectorControl.current?.focus();}} onNavigate={link=>{if(link.kind==='files'&&link.path)onInspectFile(link.path);else if(link.kind==='plan')navigateRecovery('plan');else if(link.kind==='tests'&&detail.tests.some(report=>report.id===link.id)){setInspectorReport({id:link.id,nonce:Date.now()});setInspectorOpen(false);}}}/>}
       {recoveryOpen&&<RecoveryPanel detail={detail} connected={connection==='connected'} onClose={()=>{setRecoveryOpen(false);recoveryControl.current?.focus();}} onNavigate={navigateRecovery} onResume={precondition=>void act('resume',()=>post(`/chats/${id(chatId)}/control`,{action:'resume',precondition}))} resumePending={!!busy || !configured}/>}
@@ -629,15 +624,13 @@ export function App() {
   const editorLayout = useEditorLayout();
   const [dirty, setDirty] = useState(false);
   const dirtySources=useRef({file:false,skills:false});
-  const updateDirty=useCallback((source:'file'|'skills',value:boolean)=>{dirtySources.current[source]=value;const combined=dirtySources.current.file||dirtySources.current.skills;setDirty(combined);void window.abyssusDesktop?.dirty(combined).catch(()=>{});},[]);
+  const updateDirty=useCallback((source:'file'|'skills',value:boolean)=>{dirtySources.current[source]=value;const combined=dirtySources.current.file||dirtySources.current.skills;setDirty(combined);},[]);
   const fileDirty=useCallback((value:boolean)=>updateDirty('file',value),[updateDirty]);
   const skillsDirty=useCallback((value:boolean)=>updateDirty('skills',value),[updateDirty]);
-  useEffect(()=>{void window.abyssusDesktop?.dirty(dirtySources.current.file||dirtySources.current.skills).catch(()=>{});},[dirty]);
   const [fileRevision, setFileRevision] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [exporting,setExporting]=useState<Project>();
   const [removing, setRemoving] = useState<{project:Project;chat?:Chat}>();
   const project = projects.find((item) => item.id === projectId);
   const mounted = useRef(true);
@@ -780,9 +773,9 @@ export function App() {
           </select>
           <ChevronsUpDown size={14} />
         </div>
-        {project && <Overflow label={`Project ${project.name}`} onExport={settings?.executionMode==='container'?()=>setExporting(project):undefined} onRemove={()=>setRemoving({project})}/>}
+        {project && <Overflow label={`Project ${project.name}`} onRemove={()=>setRemoving({project})}/>}
         </div>
-        {project?.removalError && <button className="navigation-row danger-text" onClick={()=>project.removalError?.startsWith('Export is')?setExporting(project):setRemoving({project})}>{project.removalError?.startsWith('Export is')?'Review export reservation':'Review incomplete removal'}</button>}
+        {project?.removalError && <button className="navigation-row danger-text" onClick={()=>setRemoving({project})}>Review incomplete removal</button>}
         <button
           className="new-chat navigation-row"
           onClick={() => void newChat()}
@@ -991,7 +984,6 @@ export function App() {
         </div>
       </div>
       {showSettings && <SettingsDialog chatId={chatId || undefined} onPreferences={setPreferences} onSettings={setSettings} onClose={() => setShowSettings(false)} />}
-      {exporting && <TransferDialog project={exporting} onClose={()=>{setExporting(undefined);void request<Project[]>('/projects').then(setProjects).catch(e=>setError(errorText(e)));}}/>}
       {removing && <RemovalDialog project={projects.find(p=>p.id===removing.project.id) ?? removing.project} chat={removing.chat} blocked={dirty}
         onClose={()=>setRemoving(undefined)} onFailure={()=>{void request<Project[]>('/projects').then(setProjects).catch(e=>setError(errorText(e)));}}
         onRemoved={()=>{

@@ -7,7 +7,7 @@ import type {ApprovalMode,QueueView} from '../shared/types.js';
 import type {Runtime,RunState,Frame} from './runtime.js';
 import {goalOf} from './goals.js';
 import {readProjectInstructions} from './project-instructions.js';
-import {nativePrivateUnit} from './native-storage.js';
+
 import {reserveMutation} from './tools/mutations.js';
 import {parseNativeJSON} from './native-json.js';
 import {QUEUE_LIMITS as L,readQueue,writeQueue,revokeQueue,queueError,queueText,queueDigest,queueEvidence,queueRoot,type QueueState,type QueueClaim} from './queue-state.js';
@@ -33,14 +33,14 @@ export class TaskQueue {
   const projectId=String(row.project_id),q=readQueue(this.store,projectId),task=q.tasks.find(t=>t.id===row.task_id);
   if(!task?.claim||task.claim.id!==row.claim_id||task.claim.rootId!==row.root_id||task.claim.chatId!==chatId)throw queueError('Queue claim reference unavailable.',503);queueChat(this.store,chatId,projectId);return {q,task,projectId};
  }
- view(projectId:string,cursor?:string):QueueView{return nativePrivateUnit(()=>{
+ view(projectId:string,cursor?:string):QueueView{return (()=>{
   const q=readQueue(this.store,projectId);let offset=0;
   if(cursor){try{const c=z.strictObject({projectId:uuid,revision,offset:revision.max(32)}).parse(parseNativeJSON(Buffer.from(cursor,'base64url').toString('utf8'),1024));if(c.projectId!==projectId||c.revision!==q.revision||c.offset%16||c.offset>=q.tasks.length)throw Error();offset=c.offset;}catch{throw queueError();}}
   const entries=q.tasks.slice(offset,offset+16).map(t=>{const v=t.versions.at(-1)!;if(t.claim){queueChat(this.store,t.claim.chatId,projectId);const link=this.store.db.prepare("SELECT CASE WHEN typeof(project_id)='text' AND length(CAST(project_id AS BLOB))<=200 THEN project_id END project_id,CASE WHEN typeof(task_id)='text' AND length(CAST(task_id AS BLOB))<=200 THEN task_id END task_id,CASE WHEN typeof(claim_id)='text' AND length(CAST(claim_id AS BLOB))<=200 THEN claim_id END claim_id,CASE WHEN typeof(root_id)='text' AND length(CAST(root_id AS BLOB))<=200 THEN root_id END root_id FROM queue_links WHERE chat_id=?").get(t.claim.chatId);if(link?.project_id!==projectId||link.task_id!==t.id||link.claim_id!==t.claim.id||link.root_id!==t.claim.rootId)throw queueError('Queue link unavailable.',503);}return {id:t.id,revision:v.revision,text:v.original.trim(),digest:v.digest,status:t.status==='running'&&t.claim?.session!==this.session?'stopped' as const:t.status,reason:t.status==='running'&&t.claim?.session!==this.session?'Retained consumed claim after restart. Execution is not adopted or replayed.':t.reason,...(t.claim?{chatId:t.claim.chatId}:{})};});
   const restarted=q.tasks.some(t=>t.status==='running'&&t.claim?.session!==this.session),status=restarted||q.session!==this.session&&q.status==='running'?'paused':q.status;
   const result:QueueView={schema:'queue-v1',projectId,revision:q.revision,status,reason:restarted?'Backend restarted. Claimed outcomes require inspection; no replay or adoption.':status==='paused'&&q.status==='running'?'Backend restarted. Start is required; claimed tasks cannot be replayed.':q.reason,entries,total:q.tasks.length,nextCursor:offset+16<q.tasks.length?Buffer.from(JSON.stringify({projectId,revision:q.revision,offset:offset+16})).toString('base64url'):null,startScope:q.tasks.filter(t=>t.status==='pending').map(t=>({id:t.id,revision:t.versions.at(-1)!.revision,digest:t.versions.at(-1)!.digest})),limits:{tasks:32,textBytes:16000,page:16},activeTaskId:q.tasks.find(t=>t.status==='running'&&t.claim?.session===this.session)?.id??null};
   if(Buffer.byteLength(JSON.stringify(result))>L.pageBytes)throw queueError('Queue display capacity exceeded.',503);return result;
- });}
+ })();}
  edit(projectId:string,input:z.infer<typeof queueEditInput>){input=queueEditInput.parse(input);this.store.transaction(()=>{
   const q=readQueue(this.store,projectId);if(q.revision!==input.expectedRevision)throw queueError();
   if(input.action==='add'){if(q.tasks.length>=32)throw queueError('Queue retention capacity reached.');q.tasks.push({id:randomUUID(),versions:[queueText(input.text)],status:'pending',reason:'Waiting for explicit Start.'});}

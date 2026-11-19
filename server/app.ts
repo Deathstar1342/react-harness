@@ -2,10 +2,7 @@ import {TaskQueue,queueStartInput,queueEditInput} from './task-queue.js';
 import {assertNativeJSON} from './native-json.js';
 import {queueProject} from './queue-state.js';
 import {inspectorView} from './inspector.js';
-import {BrowserPreviews} from './browser-previews.js';
-import {browserProbeResult} from '../shared/browser-preview.js';
-import {registerNativeStorageScope} from './native-storage.js';
-import {ProjectTransfers,transferCode} from './project-transfers.js';
+
 import Fastify from 'fastify';
 import staticFiles from '@fastify/static';
 import { z } from 'zod';
@@ -31,38 +28,30 @@ import { Removal } from './removal.js';
 import { createManagedHooks } from './context.js';
 import type { ModelProvider, RunEvent, ToolService } from '../shared/types.js';
 import { installationRoot, applicationHome } from './locations.js';
-import { LinuxSandbox } from './tools/sandbox.js';
+import { WorkspacePolicy } from './tools/workspace-policy.js';
 import type { BackendLifecycle } from './lifecycle.js';
 import { InstallService, type InstallHelper } from './installs.js';
 import type { TransportAuth } from './transport-auth.js';
-import {ContainerInstallClient} from './container-installs.js';
-import {previewProject} from './preview-state.js';
-import {Previews,previewPath} from './previews.js';
 import {recoveryView} from './recovery.js';
-import {workerAvailable} from './worker-client.js';
-import { containerExecutionUnavailable } from './container-contract.js';
 
 const queueRoutes=new Set(['/api/projects/:id/queue','/api/projects/:id/queue/start','/api/projects/:id/queue/cancel-active']);
 const approvalMode = z.enum(['autonomous','balanced','review','ai']);
-export interface AppOptions { localWeb?:boolean; browserPreview?:'direct'|'source-fixed-3000'; config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
+export interface AppOptions { localWeb?:boolean; config: Config; provider: ModelProvider; tools: ToolService; hooks: RuntimeHooks; store?: Store; staticRoot?: string; providerSettingsFile?: ProviderSettingsFile; lifecycle?:{identity:BackendLifecycle;close:()=>Promise<void>}; packageHelper?:()=>Promise<InstallHelper>; transportAuth?:TransportAuth }
 export async function createApp(options: AppOptions) {
   const {config,provider,tools,hooks} = options;
   const store = options.store ?? new Store(path.join(config.dataDir,'state.sqlite'));
-  const sandbox=new LinuxSandbox();
-  const sandboxPolicy={localCommands:options.localWeb,executionMode:config.executionMode,home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
-  sandbox.configure(sandboxPolicy);tools.configureSandbox?.(sandboxPolicy);
-  // Reject stale or tampered registrations before recovery/watchers/runtime can access them.
-  if(config.executionMode==='container')for(const project of store.projects())sandbox.validateRoot(project.path);
+  const workspacePolicy=new WorkspacePolicy();
+  const workspaceOptions={home:config.appHome ?? applicationHome(),protectedPaths:[config.dataDir,...Object.values(config.promptFiles).filter((p):p is string=>!!p),...(options.providerSettingsFile?[options.providerSettingsFile.filename]:[])],projects:()=>store.projects().map(p=>p.path)};
+  workspacePolicy.configure(workspaceOptions);tools.configureWorkspace?.(workspaceOptions);
   store.initializeModels(config.models);
   store.recover();
   const managedComplete=hooks.complete ?? createManagedHooks(provider,store,config).complete!;
-  const installs=new InstallService(store,config.models.critic,managedComplete,options.packageHelper,Date.now,20000,config.executionMode==='container'?{connect:(id,target)=>ContainerInstallClient.connect(store.project(id).path,target),available:workerAvailable}:undefined);
+  const installs=new InstallService(store,config.models.critic,managedComplete,options.packageHelper);
   const runtime = new Runtime(store,provider,tools,config,hooks,installs);
-  const previews=new Previews(store,runtime.processes,config.executionMode==='container');
   const skillWrites=new SkillWrites(runtime);
   const changes = new Changes(store,tools,runtime);
   const checkpoints=new Checkpoints(store,runtime);
-  const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>sandbox.validateRoot(root),config.executionMode==='container');
+  const locations = new WorkspaceLocations(store,config.workspaceRoot,root=>workspacePolicy.validateRoot(root));
   const settings = new Settings(store,config.approvalMode);
   const providerSettings = new ProviderSettings(config,store,options.providerSettingsFile);
   const diagnostics = new ConnectionDiagnostics(config,provider,managedComplete,CONNECTION_TIMEOUT_MS,hooks.textJSON);
@@ -73,8 +62,6 @@ export async function createApp(options: AppOptions) {
     if(queueRoutes.has(request.routeOptions.url??'')){try{assertNativeJSON(String(body),600000);}catch{done(Object.assign(new Error('Invalid or ambiguous JSON request'),{statusCode:400}));return;}}
     ordinaryJson(request,String(body),done);
   });
-  const browserPreviews=new BrowserPreviews(previews,()=>{if(!options.transportAuth?.browserPairingEnabled)return;const address=app.server.address();if(!address||typeof address==='string')return;if(options.browserPreview==='direct'&&address.address==='127.0.0.1')return address.port;if(options.browserPreview==='source-fixed-3000'&&config.executionMode==='container'&&config.host==='0.0.0.0'&&config.port===3000&&address.port===3000)return 3000;});
-  browserPreviews.register(app);
   const watchers = new Map<string,FSWatcher>();
   const pendingChanges = new Map<string,ReturnType<typeof setTimeout>>();
   const recentWrites = new Map<string,{hash:string|null;at:number}>();
@@ -82,7 +69,6 @@ export async function createApp(options: AppOptions) {
   const chatStreams = new Map<string,Map<ServerResponse,()=>void>>();
   const removedProjects = new Set<string>();
   const requests = new Map<string,string>();
-  const resetting=new Set<string>();
   const removal = new Removal(store,runtime,tools,config,locations,(projectId,chatIds,wholeProject)=>{
     for (const chatId of chatIds) for (const [stream,cleanup] of chatStreams.get(chatId) ?? []) {
       cleanup();
@@ -162,7 +148,7 @@ export async function createApp(options: AppOptions) {
     reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({error:e.message.replaceAll(config.apiKey || '\u0000','[redacted]')});
   });
   options.transportAuth?.register(app);
-  registerNativeStorageScope(app);
+
   options.lifecycle?.identity.register(app,options.lifecycle.close);
   const paramId = (params: unknown) => z.object({id:z.string().min(1)}).parse(params).id;
   app.get('/api/chats/:id/inspector',async(request,reply)=>{const query=z.object({cursor:z.string().max(1024).optional()}).strict().parse(request.query);reply.header('Cache-Control','no-store');return inspectorView(store,paramId(request.params),query.cursor);});
@@ -189,21 +175,13 @@ export async function createApp(options: AppOptions) {
       if(closing)throw Object.assign(new Error('Backend is closing'),{statusCode:503});
       const {id}=z.strictObject({id:z.uuid()}).parse(request.params),project=queueProject(store,id);
       if(['POST','PUT','PATCH','DELETE'].includes(request.method))store.assertCheckpointSafe(id);
-      if(resetting.has(id))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
       if(project.removalError&&['POST','PUT','PATCH','DELETE'].includes(request.method))throw Object.assign(new Error('Project removal needs recovery'),{statusCode:409});
       return;
     }
     // This synchronous read validates bounded chat/project rows in its snapshot.
     if(route==='/api/chats/:id/recovery'||route==='/api/chats/:id/inspector')return;
-    if(route.startsWith('/api/projects/:id/previews')){
-      const {id}=z.strictObject({id:z.uuid()}).passthrough().parse(request.params),project=previewProject(store,id);
-      if(request.method==='POST')store.assertCheckpointSafe(id);
-      if(resetting.has(id))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
-      if(project.removalError&&request.method==='POST')throw Object.assign(new Error('Project removal needs recovery'),{statusCode:409});
-      requests.set(request.id,id);return;
-    }
     if (request.method==='DELETE' || route.endsWith('/deletion-preview') || route.endsWith('/events')) return;
-    if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { if(resetting.size)throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});requests.set(request.id,'*');return; }
+    if (route==='/api/projects' && request.method==='POST' || route==='/api/workspace' && request.method==='PATCH') { requests.set(request.id,'*');return; }
     const params=request.params as {id?:string};
     if (!params?.id) return;
     let projectId:string|undefined;
@@ -212,8 +190,7 @@ export async function createApp(options: AppOptions) {
     else if (route.startsWith('/api/approvals/:id')) projectId=store.chat(store.getApproval(params.id).chatId).projectId;
     if (projectId) {
       if(['POST','PUT','PATCH'].includes(request.method)&&!route.endsWith('/editor')&&!route.endsWith('/control'))store.assertCheckpointSafe(projectId);
-      if(resetting.has(projectId))throw Object.assign(new Error('Sandbox reset is pending'),{statusCode:409});
-      if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control') && !route.endsWith('/transfer-release')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
+      if (store.project(projectId).removalError && ['POST','PUT','PATCH'].includes(request.method) && !route.endsWith('/editor') && !route.endsWith('/control')) throw Object.assign(new Error('Project removal needs recovery before work can resume'),{statusCode:409});
       if(!route.endsWith('/control') && ['POST','PUT','PATCH','DELETE'].includes(request.method))queues.intervention(projectId);
       requests.set(request.id,projectId);
     }
@@ -242,7 +219,7 @@ export async function createApp(options: AppOptions) {
     z.object({}).strict().parse(request.body);const id=paramId(request.params);assertNoRequests(store.chat(id).projectId);return removal.chat(id);
   });
   app.get('/api/health',async()=>({ok:true}));
-  app.get('/api/settings',async()=>({...publicSettings(config),...(hooks.textJSON?{protocol:'text-json-v1'}:{}),executionAvailable:config.executionMode==='container'?await workerAvailable():true,approvalMode:settings.get().defaultApprovalMode}));
+  app.get('/api/settings',async()=>({...publicSettings(config),...(hooks.textJSON?{protocol:'text-json-v1'}:{}),executionAvailable:true,approvalMode:settings.get().defaultApprovalMode}));
   app.get('/api/provider-settings',async()=>providerSettings.get());
   app.patch('/api/provider-settings',async request=>providerSettings.update(request.body));
   app.get('/api/preferences',async()=>settings.get());
@@ -266,42 +243,16 @@ export async function createApp(options: AppOptions) {
     const catalog=provider.catalog?await provider.catalog(): (await provider.models()).map(id=>({id,metadata:{},capabilities:{ordinary:'unknown',native:'unknown',streaming:'unknown'}}));
     return {models:catalog.map(entry=>entry.id),catalog};
   });
-  const transfers=new ProjectTransfers(store,runtime,tools);
-  const transferSignal=(request:any,reply:any)=>{
-    const abort=new AbortController();
-    const cancel=()=>{if(!reply.raw.writableEnded)abort.abort();};
-    request.raw.once('aborted',cancel);reply.raw.once('close',cancel);
-    return {signal:abort.signal,done:()=>{request.raw.off('aborted',cancel);reply.raw.off('close',cancel);}};
-  };
-  app.post('/api/project-transfers/import',async(request,reply)=>{
-    if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');
-    const input=z.object({name:z.string().trim().min(1).max(100),code:transferCode}).strict().parse(request.body);
-    const pending=transferSignal(request,reply);
-    try {const result=await transfers.import(input.name,input.code,pending.signal);watchProject(result.project.id);return reply.code(201).send(result);}
-    finally {pending.done();}
-  });
-  app.post('/api/projects/:id/transfer-release',async request=>{
-    if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');
-    const {code}=z.object({code:transferCode}).strict().parse(request.body);return transfers.release(paramId(request.params),code);
-  });
-  app.post('/api/projects/:id/export',async(request,reply)=>{
-    if(config.executionMode!=='container')throw new Error('Managed transfer requires container mode');
-    const input=z.object({code:transferCode}).strict().parse(request.body),id=paramId(request.params);
-    assertNoRequests(id,request.id);
-    const pending=transferSignal(request,reply);
-    try {return await transfers.export(id,input.code,pending.signal);} finally {pending.done();}
-  });
   app.get('/api/projects',async()=>store.projects());
   app.get('/api/workspace',async()=>locations.settings());
   app.patch('/api/workspace',async request=>{const body=z.object({workspaceRoot:z.string().min(1).max(4096)}).strict().parse(request.body);return locations.update(body.workspaceRoot);});
   app.get('/api/directories',async request=>{const query=z.object({path:z.string().min(1).max(4096).optional()}).strict().parse(request.query);return locations.browse(query.path);});
   app.post('/api/projects',async(request,reply)=> {
     const body = z.object({name:z.string().trim().min(1).max(100),path:z.string().trim().min(1).max(4096).optional(),mode:z.enum(['create','import'])}).strict().parse(request.body);
-    if(config.executionMode==='container' && body.mode==='import')throw new Error('Use the trusted host transfer flow to import a managed copy');
     if (body.mode==='import' && !body.path) throw new Error('Select the existing project folder to import');
     if (body.path && (!path.isAbsolute(body.path) || body.path.includes('\0'))) throw new Error('Use an absolute project folder path');
     let root = body.path ? path.resolve(body.path) : await locations.allocate(body.name);
-    sandbox.validateRoot(root);
+    workspacePolicy.validateRoot(root);
     if (root === path.parse(root).root) throw new Error('Choose a project folder, not the filesystem root');
     if (body.mode === 'create') {
       if (existsSync(root) && (await readdir(root)).length) throw new Error('New project folder must be empty; import an existing project instead');
@@ -318,17 +269,6 @@ export async function createApp(options: AppOptions) {
     return reply.code(201).send(project);
   });
   app.get('/api/projects/:id/chats',async request=> {const id = paramId(request.params);store.project(id);return store.chats(id);});
-  app.post('/api/projects/:id/sandbox/reset',async request=>{
-    z.object({}).strict().parse(request.body);
-    const id=paramId(request.params),project=store.project(id);
-    assertNoRequests(id,request.id);
-    if(!tools.resetSandbox)throw Object.assign(new Error('Sandbox reset is unavailable for this tool service'),{statusCode:503});
-    return runtime.exclusiveRemoval(id,async()=>{
-      resetting.add(id);
-      try{await tools.resetSandbox!(project.path);return {ok:true};}
-      finally{resetting.delete(id);}
-    });
-  });
   app.post('/api/projects/:id/chats',async(request,reply)=> {
     const body = z.object({title:z.string().trim().min(1).max(200).optional(),approvalMode:approvalMode.optional()}).strict().parse(request.body);
     const id = paramId(request.params); watchProject(id);
@@ -385,27 +325,6 @@ export async function createApp(options: AppOptions) {
   });
   app.post('/api/approvals/:id',async request=> {const {decision} = z.object({decision:z.enum(['approve','deny'])}).strict().parse(request.body);await runtime.decide(paramId(request.params),decision);return {ok:true};});
   app.get('/api/projects/:id/files',async request=> {const {path:relative} = z.object({path:z.string().optional()}).parse(request.query);return tools.list(store.project(paramId(request.params)).path,relative);});
-  app.get('/api/projects/:id/previews',async request=>{z.strictObject({}).parse(request.query);return {...previews.list(paramId(request.params)),browserSupported:browserPreviews.supported()};});
-  app.post('/api/projects/:id/previews/:processId/browser-probe',{bodyLimit:2048},async request=>{
-    const {id,processId}=z.strictObject({id:z.uuid(),processId:z.uuid()}).parse(request.params),{documentId}=z.strictObject({documentId:z.uuid()}).parse(request.body);if(!options.transportAuth)throw new Error('Paired browser required');return browserPreviews.start(id,processId,options.transportAuth.browserPrincipal(request),documentId,request);
-  });
-  app.post('/api/projects/:id/previews/browser-advance',{bodyLimit:2048},async request=>{
-    const {id}=z.strictObject({id:z.uuid()}).parse(request.params),input=z.strictObject({documentId:z.uuid(),result:browserProbeResult}).parse(request.body);if(!options.transportAuth)throw new Error('Paired browser required');return browserPreviews.advance(id,options.transportAuth.browserPrincipal(request),input);
-  });
-  app.post('/api/projects/:id/previews/:browserId/browser-close',{bodyLimit:2048},async request=>{
-    const {id,browserId}=z.strictObject({id:z.uuid(),browserId:z.uuid()}).parse(request.params),{documentId}=z.strictObject({documentId:z.uuid()}).parse(request.body);if(!options.transportAuth)throw new Error('Paired browser required');return browserPreviews.close(id,options.transportAuth.browserPrincipal(request),documentId,browserId);
-  });
-  app.post('/api/projects/:id/previews/:processId/open',async request=>{
-    const {id,processId}=z.strictObject({id:z.uuid(),processId:z.uuid()}).parse(request.params);z.strictObject({}).parse(request.body);return previews.open(id,processId);
-  });
-  app.post('/api/projects/:id/previews/:previewId/resource',async(request,reply)=>{
-    const {id,previewId}=z.strictObject({id:z.uuid(),previewId:z.uuid()}).parse(request.params);const input=z.strictObject({path:previewPath}).parse(request.body);
-    const abort=new AbortController();const cancel=()=>abort.abort();request.raw.once('aborted',cancel);const close=()=>{if(!reply.raw.writableEnded)abort.abort();};reply.raw.once('close',close);
-    try{return await previews.resource(id,previewId,input.path,abort.signal);}finally{request.raw.off('aborted',cancel);reply.raw.off('close',close);}
-  });
-  app.post('/api/projects/:id/previews/:previewId/close',async request=>{
-    const {id,previewId}=z.strictObject({id:z.uuid(),previewId:z.uuid()}).parse(request.params);z.strictObject({}).parse(request.body);return previews.close(id,previewId);
-  });
   app.get('/api/projects/:id/checkpoints',async request=>checkpoints.list(paramId(request.params)));
   app.post('/api/projects/:id/checkpoints',async(request,reply)=>reply.code(201).send(await checkpoints.capture(paramId(request.params),captureCheckpointInput.parse(request.body))));
   app.post('/api/projects/:id/checkpoints/:checkpointId/preview',async request=>{
@@ -474,7 +393,7 @@ export async function createApp(options: AppOptions) {
   }
   // Persist runtime/goal shutdown before an embedding owner's onClose hook can
   // close its supplied Store. Runtime.close is idempotent for the later hook.
-  app.addHook('preClose',async()=>{closing=true;browserPreviews.shutdown();previews.shutdown();installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
+  app.addHook('preClose',async()=>{closing=true;installs.beginClose();for(const stream of eventStreams) stream.end();await diagnostics.close();await runtime.close();});
   app.addHook('onClose',async()=> {for (const watcher of watchers.values()) watcher.close();for (const timer of pendingChanges.values()) clearTimeout(timer);await runtime.close();await tools.dispose();if (!options.store) store.close();});
-  return {app,store,runtime,installs,previews,browserPreviews,queues};
+  return {app,store,runtime,installs,queues};
 }

@@ -5,7 +5,7 @@ import {lstatSync} from 'node:fs';
 import {z} from 'zod';
 import type {Store} from './store.js';
 import {assertNativeJSON,parseNativeJSON} from './native-json.js';
-import {nativePrivateUnit} from './native-storage.js';
+
 import {rootPathSync} from './tools/paths.js';
 export const QUEUE_LIMITS={tasks:32,revisions:8,textBytes:16000,retainedBytes:512000,envelopeBytes:600000,page:16,pageBytes:327680,referenceBytes:8192} as const;
 const uuid=z.uuid(),int=z.number().int().safe().nonnegative(),digest=z.string().regex(/^[a-f0-9]{64}$/),stamp=z.string().datetime();
@@ -32,15 +32,15 @@ function validate(value:unknown):QueueState {
  if(q.tasks.filter(t=>t.status==='running').length>1)throw queueError('Conflicting queue claims.',503);return q;
 }
 export function installQueue(store:Store){store.db.function('queue_run_idle',{deterministic:true},raw=>validQueueIdleRun(raw)?1:0);store.db.function('queue_goal_ok',{deterministic:true},raw=>validQueueGoal(raw)?1:0);store.db.function('queue_json_ok',{deterministic:true},(raw,max)=>{if(typeof raw!=='string'||typeof max!=='number'||!Number.isSafeInteger(max)||max<1||max>1100000)return 0;try{assertNativeJSON(raw,max);return 1;}catch{return 0;}});store.db.exec('CREATE TABLE IF NOT EXISTS task_queues (project_id TEXT PRIMARY KEY NOT NULL,data TEXT NOT NULL);CREATE TABLE IF NOT EXISTS queue_links (chat_id TEXT PRIMARY KEY NOT NULL,project_id TEXT NOT NULL,task_id TEXT NOT NULL,claim_id TEXT UNIQUE NOT NULL,root_id TEXT NOT NULL,UNIQUE(project_id,task_id))');}
-export function queueProject(store:Store,projectId:string){return nativePrivateUnit(()=>{
+export function queueProject(store:Store,projectId:string){return (()=>{
  if(!uuid.safeParse(projectId).success)throw queueError('Project unavailable.',404);
  const p=store.db.prepare("SELECT CASE WHEN typeof(root)='text' AND length(CAST(root AS BLOB))<=4096 THEN root END AS root,CASE WHEN typeof(data)='text' AND length(CAST(data AS BLOB))<=8192 THEN data END AS data FROM projects WHERE id=?").get(projectId);
  if(typeof p?.root!=='string'||typeof p.data!=='string')throw queueError('Project unavailable.',503);
  const original=z.strictObject({id:uuid,name:z.string().min(1).max(100),path:z.string().min(1).max(4096),createdAt:stamp,removalError:z.string().max(4000).optional()}).parse(parseNativeJSON(p.data,8192));if(original.id!==projectId||original.path!==p.root)throw queueError('Project identity unavailable.',503);
  return original;
-});}
+})();}
 /** SQL gates precede JS. A display read never loads RunState or mutates durable data. */
-export function readQueue(store:Store,projectId:string):QueueState{return nativePrivateUnit(()=>{
+export function readQueue(store:Store,projectId:string):QueueState{return (()=>{
  const p=queueProject(store,projectId);
  const row=store.db.prepare("SELECT CASE WHEN typeof(data)='text' AND length(CAST(data AS BLOB))<=600000 THEN data END AS data FROM task_queues WHERE project_id=?").get(projectId);
  if(!row&&store.db.prepare('SELECT 1 AS retained FROM queue_links WHERE project_id=? OR chat_id IN (SELECT id FROM chats WHERE project_id=?) LIMIT 1').get(projectId,projectId))throw queueError('Original queue envelope unavailable; retained claim links require inspection.',503);
@@ -50,7 +50,7 @@ export function readQueue(store:Store,projectId:string):QueueState{return native
  if(q.projectId!==projectId||q.root!==p.path)throw queueError('Queue project reference unavailable.',503);
  const links=store.db.prepare("SELECT CASE WHEN typeof(chat_id)='text' AND length(CAST(chat_id AS BLOB))<=200 THEN chat_id END chat_id,CASE WHEN typeof(task_id)='text' AND length(CAST(task_id AS BLOB))<=200 THEN task_id END task_id,CASE WHEN typeof(claim_id)='text' AND length(CAST(claim_id AS BLOB))<=200 THEN claim_id END claim_id,CASE WHEN typeof(root_id)='text' AND length(CAST(root_id AS BLOB))<=200 THEN root_id END root_id FROM queue_links WHERE project_id=? LIMIT 33").all(projectId);
  if(links.length>32||links.length!==q.tasks.filter(t=>t.claim).length||links.some(l=>!q.tasks.some(t=>t.id===l.task_id&&t.claim?.id===l.claim_id&&t.claim?.chatId===l.chat_id&&t.claim?.rootId===l.root_id)))throw queueError('Original queue claim links unavailable. No claim can be reset or replayed.',503);return q;
-});}
+})();}
 export function writeQueue(store:Store,input:QueueState){const q=validate(input),data=JSON.stringify(q);if(Buffer.byteLength(data)>600000)throw queueError('Queue retention capacity reached.',409);store.db.prepare('INSERT INTO task_queues VALUES (?,?) ON CONFLICT(project_id) DO UPDATE SET data=excluded.data').run(q.projectId,data);}
 export function revokeQueue(q:QueueState,reason:string){if(q.revision>=Number.MAX_SAFE_INTEGER)throw queueError('Queue revision exhausted.',503);q.revision++;q.status='paused';q.reason=reason.slice(0,256);q.scope=[];q.session=null;q.policyDigest=null;}
 export function queueEvidence(store:Store,table:'events'|'messages'|'state',key:number|string,chatId?:string,max=8192):Record<string,unknown>{

@@ -1,7 +1,7 @@
 import {createTwoFilesPatch} from 'diff';
 import type {ModelMessage, PlanTaskCheck} from '../shared/types.js';
 import {advisoryEstimate, observeAdvisoryFile, mountPaths} from './coder-context.js';
-import {nativeStorageActive} from './native-storage.js';
+
 import {readPlanningFile, withinReconnaissance, type PathObservation, type ReconnaissanceRoot} from './repository-reconnaissance.js';
 import {estimateTokens} from './scheduler.js';
 import type {Store} from './store.js';
@@ -67,13 +67,13 @@ export async function observeReviewFiles(
           }
         } catch {
           budget.throwIfAborted();
-          nativeStorageActive();
+
         }
       }
     });
   } catch {
     signal.throwIfAborted();
-    nativeStorageActive();
+
     return {files:[]};
   }
   return {identity:root.identity,files};
@@ -88,7 +88,7 @@ export function recheckReviewFiles(root: ReconnaissanceRoot, previous: ReviewFil
     try {
       return observeAdvisoryFile(root,source.path,mounts,guard).stamp === source.observation.stamp;
     } catch {
-      nativeStorageActive();
+
       return false;
     }
   });

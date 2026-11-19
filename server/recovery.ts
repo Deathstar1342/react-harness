@@ -242,10 +242,10 @@ function observe(store:Store,chatId:string,settingsBinding:string):RecoveryView 
     if(originalUncertainty){
       const receipt=state(`install-reconciliation:${installId}`,RECOVERY_LIMITS.recordBytes,`install receipt ${installId}`),target=object(object(item.settings).target);
       const eventId=integer(receipt?.eventId),event=eventId?store.db.prepare("SELECT created_at,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM events WHERE chat_id=? AND id=? AND type='install_reconciliation'").get(RECOVERY_LIMITS.recordBytes,chatId,eventId):undefined,data=parse(event?.data,RECOVERY_LIMITS.recordBytes);
-      const settings=target.scope==='project-container'?undefined:state('system-installs:v1',RECOVERY_LIMITS.recordBytes,`install target ${installId}`);
+      const settings=state('system-installs:v1',RECOVERY_LIMITS.recordBytes,`install target ${installId}`);
       const currentReconciliation=object(item.reconciliation);
       const valid=item.state==='succeeded'&&item.recoveryRequired===false&&currentReconciliation.healthy===true&&currentReconciliation.matches===true&&receipt&&receipt.installId===installId&&receipt.chatId===chatId&&receipt.state==='succeeded'&&receipt.healthy===true&&receipt.matches===true&&['status','reconcile'].includes(String(receipt.method))&&typeof item.previewDigest==='string'&&receipt.previewDigest===item.previewDigest&&identity(target.id)&&receipt.targetKey===helperCanonical(target)
-        &&(target.scope==='project-container'?!!item.containerReceipt&&helperCanonical(receipt.containerReceipt??null)===helperCanonical(item.containerReceipt):helperCanonical(settings?.target??null)===helperCanonical(target))
+        &&helperCanonical(settings?.target??null)===helperCanonical(target)
         &&data?.installId===installId&&data.method===receipt.method&&data.state==='succeeded'&&data.healthy===true&&data.matches===true;
       if(s!=='completed'||!valid)s='uncertain';else receiptEventId=eventId;
     }

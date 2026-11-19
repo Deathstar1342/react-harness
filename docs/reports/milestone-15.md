@@ -1,6 +1,6 @@
 # Milestone 15 - same-chat planning bridge and evidence-linked progress
 
-Implemented only M15 on `codex/milestone-15`, based on reviewed/published main `9b6339f`. Worktree: `C:/Users/joshu/.codex/worktrees/eef8/REACT harness` (physical junction target `D:/CodexData/.codex/worktrees/eef8/REACT harness`). Coordinator owns integration, STATUS/milestone dispatch, and final main publication. No successor, dependency, packaging, import, container or data-migration expansion.
+Implemented only M15 on `codex/milestone-15`, based on reviewed/published main `9b6339f`. Worktree: `C:/Users/joshu/.codex/worktrees/eef8/REACT harness` (physical junction target `D:/CodexData/.codex/worktrees/eef8/REACT harness`). Coordinator owns integration, STATUS/milestone dispatch, and final main publication. This report covers the planning and execution bridge.
 
 ## Behavior and review contract
 

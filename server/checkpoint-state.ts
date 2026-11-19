@@ -1,4 +1,4 @@
-import {nativePrivateUnit} from './native-storage.js';
+
 import {z} from 'zod';
 import path from 'node:path';
 import type {Store} from './store.js';
@@ -29,7 +29,7 @@ function observeCheckpointRows(store:Store,select:string,args:SQLInputValue[],ro
  const values=store.db.prepare(`WITH bounded_source AS (${select} LIMIT ?), sized AS (SELECT key,data,length(CAST(data AS BLOB)) AS bytes FROM bounded_source), budget AS (SELECT *,SUM(bytes) OVER(ORDER BY key) AS total FROM sized) SELECT CASE WHEN length(CAST(key AS BLOB))<=512 THEN key END AS key,bytes,CASE WHEN bytes<=? AND total<=? THEN data END AS data FROM budget ORDER BY key`).all(...args,rows+1,per,total);
  if(values.length>rows)fail();return values.map(v=>{if(typeof v.key!=='string'||typeof v.data!=='string'||!Number.isSafeInteger(v.bytes))return fail();return {key:v.key,data:v.data,bytes:Number(v.bytes)};});
 }
-export const checkpointRows=(...args:Parameters<typeof observeCheckpointRows>)=>nativePrivateUnit(()=>observeCheckpointRows(...args));
+export const checkpointRows=(...args:Parameters<typeof observeCheckpointRows>)=>observeCheckpointRows(...args);
 export function checkpointJSON(source:string,max:number):unknown{try{return parseNativeJSON(source,max);}catch{return fail();}}
 const projectSchema=z.strictObject({id:uuid,name:z.string().min(1).max(200),path:z.string().min(1).max(4096),createdAt:date,removalError:z.string().max(4000).optional()});
 function observeCheckpointProject(store:Store,id:string){
@@ -37,14 +37,14 @@ function observeCheckpointProject(store:Store,id:string){
  const result=projectSchema.safeParse(checkpointJSON(rows[0].data,16384));if(!result.success||result.data.id!==id||path.resolve(result.data.path)!==result.data.path)return fail();
  const root=store.db.prepare('SELECT CASE WHEN length(CAST(root AS BLOB))<=4096 THEN root END AS root FROM projects WHERE id=?').get(id);if(root?.root!==result.data.path)return fail();return result.data;
 }
-export const checkpointProject=(...args:Parameters<typeof observeCheckpointProject>)=>nativePrivateUnit(()=>observeCheckpointProject(...args));
+export const checkpointProject=(...args:Parameters<typeof observeCheckpointProject>)=>observeCheckpointProject(...args);
 /** Complete bounded private catalog. Unknown keys/records/references fail closed, never disappear as an empty list. */
 function observeCheckpointCatalog(store:Store){
  const metadata=checkpointMetadata(store);
  const records=metadata.records.map(entry=>({record:loadCheckpointBody(store,entry.record),storedBytes:entry.storedBytes}));
  const journals=metadata.journals.map(entry=>({...entry,journal:loadCheckpointJournal(store,entry.journal)}));return {records,journals};
 }
-export const checkpointCatalog=(store:Store)=>nativePrivateUnit(()=>observeCheckpointCatalog(store));
+export const checkpointCatalog=(store:Store)=>observeCheckpointCatalog(store);
 const roleModels=z.strictObject({architect:z.string().max(200),coder:z.string().max(200),critic:z.string().max(200)});
 const chatSchema=z.strictObject({id:uuid,projectId:uuid,title:z.string().max(200),status:z.enum(['idle','running','awaiting_approval','paused','interrupted','error']),approvalMode:z.enum(['autonomous','balanced','review','ai']),mode:z.enum(['plan','execute']).optional(),modeVersion:integer.optional(),createdAt:date,updatedAt:date,models:roleModels.optional()});
 /** Exact context bytes are hashed, never returned. Missing optional rows are explicit nulls in the fingerprint. */
@@ -78,7 +78,7 @@ function observeCheckpointContext(store:Store,projectId:string,chatId?:string){
  return {project,chats,revision:hash(JSON.stringify([rows.map(r=>[r.key,r.data]),states.map(r=>[r.key,r.data]),eventIds,approvals.map(r=>[r.key,r.data]),installs.map(r=>[r.key,r.data])]))};
 }
 
-export const checkpointContext=(...args:Parameters<typeof observeCheckpointContext>)=>nativePrivateUnit(()=>observeCheckpointContext(...args));
+export const checkpointContext=(...args:Parameters<typeof observeCheckpointContext>)=>observeCheckpointContext(...args);
 
 export const checkpointHeaderSchema=checkpointRecordSchema.omit({files:true});
 export const checkpointJournalHeaderSchema=checkpointJournalSchema.omit({changes:true});
@@ -109,14 +109,14 @@ function observeCheckpointMetadata(store:Store){
   return {journal:r,storedBytes:row.bytes+Number(effects.bytes),historyBytes:Number(history.bytes)};});
  if(journals.reduce((n,j)=>n+j.storedBytes+j.historyBytes,0)>CHECKPOINT_STATE_LIMITS.journalBytesTotal)fail();return {records,journals};
 }
-export const checkpointMetadata=(store:Store)=>nativePrivateUnit(()=>observeCheckpointMetadata(store));
+export const checkpointMetadata=(store:Store)=>observeCheckpointMetadata(store);
 function loadCheckpointBody(store:Store,header:z.infer<typeof checkpointHeaderSchema>){
  const rows=checkpointRows(store,'SELECT key,data FROM state WHERE key=?',[checkpointKey(header.id)],1,CHECKPOINT_STATE_LIMITS.recordBytes,CHECKPOINT_STATE_LIMITS.recordBytes);if(rows.length!==1)return fail();const parsed=checkpointRecordSchema.safeParse(checkpointJSON(rows[0].data,CHECKPOINT_STATE_LIMITS.recordBytes));if(!parsed.success)return fail();const r=parsed.data;
  if(JSON.stringify(headerOf(r))!==JSON.stringify(header)||r.fileCount!==r.files.length||r.integrity!==checkpointIntegrity(r)||r.digest!==manifestDigest(r.files)||r.bytes!==r.files.reduce((n,f)=>n+Buffer.byteLength(f.content),0))return fail();uniqueFiles(r.files);return r;
 }
-export const checkpointLoad=(store:Store,projectId:string,id:string)=>nativePrivateUnit(()=>{
+export const checkpointLoad=(store:Store,projectId:string,id:string)=>(()=>{
  const header=checkpointMetadata(store).records.find(r=>r.record.id===id&&r.record.projectId===projectId)?.record;if(!header)return fail();return loadCheckpointBody(store,header);
-});
+})();
 function loadCheckpointJournal(store:Store,header:z.infer<typeof checkpointJournalHeaderSchema>){
  const rows=checkpointRows(store,"SELECT printf('%04d',ordinal)||':'||change_id AS key,data FROM checkpoint_effects WHERE restore_id=? ORDER BY ordinal",[header.id],checkpointLimits.files*2,1100000,CHECKPOINT_STATE_LIMITS.journalBytes);
  const changes=rows.map((row,index)=>{const parsed=change.safeParse(checkpointJSON(row.data,1100000));if(!parsed.success||row.key!==String(index).padStart(4,'0')+':'+parsed.data.id||parsed.data.digest!==checkpointChangeDigest(parsed.data))return fail();return parsed.data;});
@@ -128,7 +128,7 @@ export function checkpointSaveJournal(store:Store,journal:CheckpointJournal){con
 export function checkpointSaveEffects(store:Store,journal:CheckpointJournal){
  for(const [ordinal,c]of journal.changes.entries())store.db.prepare('INSERT INTO checkpoint_effects VALUES (?,?,?,?)').run(journal.id,ordinal,c.id,JSON.stringify(c));
 }
-export const checkpointExactClaim=(store:Store,expected:CheckpointJournal,index:number)=>nativePrivateUnit(()=>{
+export const checkpointExactClaim=(store:Store,expected:CheckpointJournal,index:number)=>(()=>{
  if(!Number.isSafeInteger(index)||index<0||index>=expected.changes.length)return fail();
  const rows=metadataRows(store,'checkpoint-restore:v1:',checkpointJournalKey(expected.id));if(rows.length!==1)return fail();const parsed=checkpointJournalHeaderSchema.safeParse(rows[0].data);if(!parsed.success)return fail();const header=parsed.data;
  if(header.status!=='claiming'||header.integrity!==checkpointJournalIntegrity(header)||JSON.stringify(header)!==JSON.stringify(journalHeaderOf(expected)))return fail();
@@ -136,8 +136,8 @@ export const checkpointExactClaim=(store:Store,expected:CheckpointJournal,index:
  if(typeof row?.data!=='string'||row.change_id!==expected.changes[index].id)return fail();const selected=change.safeParse(checkpointJSON(row.data,1100000));
  if(!selected.success||selected.data.digest!==checkpointChangeDigest(selected.data)||JSON.stringify(selected.data)!==JSON.stringify(expected.changes[index]))return fail();
  assertCheckpointRoot(expected.root,expected.rootIdentity);
-});
-export const checkpointValidateJournal=(store:Store,expected:CheckpointJournal)=>nativePrivateUnit(()=>{
+})();
+export const checkpointValidateJournal=(store:Store,expected:CheckpointJournal)=>(()=>{
  const rows=metadataRows(store,'checkpoint-restore:v1:',checkpointJournalKey(expected.id));if(rows.length!==1)return fail();const header=checkpointJournalHeaderSchema.safeParse(rows[0].data);if(!header.success||header.data.integrity!==checkpointJournalIntegrity(header.data))return fail();
  const j=loadCheckpointJournal(store,header.data);if(JSON.stringify(j)!==JSON.stringify(expected))return fail();assertCheckpointRoot(expected.root,expected.rootIdentity);
-});
+})();

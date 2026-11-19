@@ -222,14 +222,21 @@ describe('workflow HTTP/runtime persistence',()=>{
     release();await t.runtime.processes.drainChat(t.chat.id);releaseModel({text:'Stopped'});await t.runtime.wait(t.chat.id);
     expect(dispatches).toBe(0);expect(processRecords(t.store)[0].status).toBe('not_started');
   });
-  it.each(['prepare','before','cleanup','dispatched'])('real ToolService/Runtime preserves narrow synchronous command %s outcome',async kind=>{
+  it.each(['prepare','before','dispatched'])('real ToolService/Runtime preserves narrow synchronous command %s outcome',async kind=>{
     const t=await fixture();await t.seed();const doc=await t.runtime.skills.files(t.chat.id).load('project','verify');await t.runtime.selectSkill(t.chat.id,{scope:'project',name:'verify',revision:doc.revision,selectionRevision:0});t.store.updateChat(t.chat.id,{approvalMode:'autonomous'});
-    // Synthetic PTY session only: the actual Runtime -> WorkspaceTools ->
-    // ShellPool callback/cleanup/classification path remains intact.
-    const shells=(t.tools as unknown as {shells:{sessions:Map<string,unknown>;layouts:Map<string,string>}}).shells;
-    const id=JSON.stringify([t.projectRoot,t.chat.id,'coder-primary']);
-    const run=vi.fn(async()=>{throw new Error('Lost response after session.run');}),dispose=vi.fn(async()=>{if(kind==='cleanup')throw new ToolError('Cleanup unconfirmed','SANDBOX_CLEANUP_FAILED');});
-    shells.sessions.set(id,{alive:true,run,dispose});shells.layouts.set(id,t.tools.sandbox.layout(t.projectRoot).stamp);
+    // Inject only process dispatch and cleanup. Runtime authorization stays real.
+    const executor=(t.tools as unknown as {commands:import('../server/tools/local-commands.js').LocalCommands}).commands;
+    const run=vi.fn(async()=>{throw new Error('Lost command response');});
+    vi.spyOn(executor,'run').mockImplementation(async(context)=>{
+      try {
+        await context.prepareCommand?.();
+        context.beforeCommand?.();
+      } catch(error) {
+        return {status:'not_started',output:'',error:error instanceof Error?error.message:'Vetoed'};
+      }
+      await run();
+      return {output:'',uncertain:true,error:'Lost command response'};
+    });
     const execute=t.tools.execute.bind(t.tools);
     vi.spyOn(t.tools,'execute').mockImplementation(async(context,action)=>{
       if(action.name==='run_shell') {
@@ -238,19 +245,16 @@ describe('workflow HTTP/runtime persistence',()=>{
       }
       return execute(context,action);
     });
-    t.replies.push(nativeReply('delegate',{objective:'Inspect command safety',acceptanceCriteria:['Never run forbidden command']}),nativeReply('run_shell',{command:'printf forbidden > forbidden.txt'}),{text:'Observed failure',finishReason:'stop'},{text:'Waiting',finishReason:'stop'},{text:'Waiting',finishReason:'stop'});
+    t.replies.push(nativeReply('delegate',{objective:'Inspect command safety',acceptanceCriteria:['Never run forbidden command']}),nativeReply('run_shell',{command:'mkdir forbidden.txt'}),{text:'Observed failure',finishReason:'stop'},{text:'Waiting',finishReason:'stop'},{text:'Waiting',finishReason:'stop'});
     await t.runtime.submit(t.chat.id,'Inspect callback veto');await t.runtime.wait(t.chat.id);
     const commands=t.store.events(t.chat.id).filter(e=>e.type==='command').map(e=>e.data as any),outcome=commands.at(-1);
     expect(outcome.exitCode).toBeUndefined();expect((await t.tools.read(t.projectRoot,'forbidden.txt')).hash).toBeNull();
     if(kind==='prepare'||kind==='before'){expect(run).not.toHaveBeenCalled();expect(outcome.status).toBe('not_started');expect(t.store.getState<any>(`run:${t.chat.id}`,null).frames.flatMap((f:any)=>f.acceptanceEvidence?.uncertainEventIds??[])).toEqual([]);}
     else expect(outcome.status).toBe('uncertain');
-    if(kind==='cleanup'){// Restore the injected setup owner for fixture teardown only.
-      dispose.mockResolvedValue(undefined);(shells as unknown as {quarantined:Set<string>}).quarantined.clear();
-    }
   });
   it.skipIf(process.platform!=='linux')('actual Linux shell setup veto produces no command or irreversible uncertainty',async()=>{
     const t=await fixture();
-    const result=await t.tools.execute({projectRoot:t.projectRoot,chatId:t.chat.id,agentId:'linux-veto',prepareCommand:async()=>{throw new Error('Changed selected workflow');}},{name:'run_shell',args:{command:'printf forbidden > forbidden.txt'}});
+    const result=await t.tools.execute({projectRoot:t.projectRoot,chatId:t.chat.id,agentId:'linux-veto',prepareCommand:async()=>{throw new Error('Changed selected workflow');}},{name:'run_shell',args:{command:'mkdir forbidden.txt'}});
     expect(result.ok).toBe(false);expect(result.data).toMatchObject({status:'not_started'});expect(result.data).not.toHaveProperty('exitCode');expect((await t.tools.read(t.projectRoot,'forbidden.txt')).hash).toBeNull();
     const after=await t.tools.execute({projectRoot:t.projectRoot,chatId:t.chat.id,agentId:'fresh-linux-session'},{name:'run_shell',args:{command:'printf observed'}});expect(after.ok).toBe(true);expect(after.output).toContain('observed');
   });

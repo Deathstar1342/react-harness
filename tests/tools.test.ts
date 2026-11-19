@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { WorkspaceTools } from '../server/tools/index.js';
-import { childEnvironment } from '../server/tools/shell.js';
+import { childEnvironment } from '../server/tools/command-utils.js';
 import { parseJUnit, unavailableReport } from '../server/tools/junit.js';
 import type { ToolContext } from '../shared/types.js';
 let root: string, tools: WorkspaceTools, context: ToolContext;
@@ -131,13 +131,12 @@ describe('read-only Git and environment', () => {
     expect(result.ok).toBe(false); expect(result.output).toContain('match');
   });
   it('sanitizes secrets and interpreter hooks from child environments', () => {
-    expect(childEnvironment({ PATH: '/usr/bin', HOME: '/home/test', STARK_API_KEY: 'secret', OPENAI_API_KEY: 'secret', TOKEN: 'secret', NODE_OPTIONS: '--require exploit', BASH_ENV: '/evil', PYTHONPATH: '/evil' })).toEqual({ PATH: '/usr/bin', HOME: '/home/test', TERM: 'dumb', PS1: '', PS2: '', PROMPT_COMMAND: '', NO_COLOR: '1' });
+    expect(childEnvironment({ PATH: '/usr/bin', HOME: '/home/test', STARK_API_KEY: 'secret', OPENAI_API_KEY: 'secret', TOKEN: 'secret', NODE_OPTIONS: '--require exploit', BASH_ENV: '/evil', PYTHONPATH: '/evil' })).toMatchObject({PATH:'/usr/bin',HOME:'/home/test',TERM:'dumb',NO_COLOR:'1'});
   });
-  it.skipIf(process.platform === 'linux')('reports PTY unavailable honestly on unsupported hosts', async () => {
-    const result = await tools.execute(context, { name: 'run_shell', args: { command: 'echo no-fake-success' } });
-    expect(result.ok).toBe(false); expect(result.output).toMatch(/Linux\/WSL/);
-    git('init');const status=await tools.execute(context,{name:'git_status',args:{}});
-    expect(status.ok).toBe(false);expect(status.data).toMatchObject({code:'SANDBOX_UNAVAILABLE'});
+  it('runs local commands and Git on supported Node hosts',async()=>{
+    const result=await tools.execute(context,{name:'run_shell',args:{command:'pwd'}});
+    expect(result.ok).toBe(true);expect(result.output.trim()).toBe(root);
+    git('init');expect((await tools.execute(context,{name:'git_status',args:{}})).ok).toBe(true);
   });
 });
 

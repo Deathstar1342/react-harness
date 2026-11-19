@@ -2,7 +2,6 @@ import http from 'node:http';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -22,8 +21,7 @@ import { envCanaryKey, envCanaryValue, oraclePath, oracleSource, reportPath, sce
 const model = 'fixture-model';
 const apiKey = 'evaluation-only-loopback-bearer';
 const baseline = process.env.ABYSSUS_EVALUATION_REF === 'baseline';
-const useSandbox = process.platform === 'linux' && process.getuid?.() !== 0 &&
-  ['/usr/bin/bwrap', '/usr/bin/socat', '/usr/bin/bash'].every(existsSync);
+const useLocalCommands = true;
 const stop: CompletionResult = {text: 'Controlled fixture status.', finishReason: 'stop'};
 const done = () => nativeReply('submit_completion', {summary: 'Observe the original fixture receipts.'});
 const review = (pass: boolean, findings: string[] = []) => nativeReply('review_result', {verdict: pass ? 'pass' : 'changes_requested', findings});
@@ -66,7 +64,7 @@ async function fixture(id: string, {stream = false, tinyContext = false, tinyAcc
   await mkdir(home, {mode: 0o700});
   const store = new Store(path.join(home, 'state.sqlite'));
   const tools = new WorkspaceTools();
-  tools.configureSandbox({home, protectedPaths: [], projects: () => [workspace]});
+  tools.configureWorkspace({home, protectedPaths: [], projects: () => [workspace]});
   const execute = vi.spyOn(tools, 'execute');
   const script: Script[] = [], wire: Capture[] = [], failures: string[] = [];
   const nativeCalls = new Map<string, NativeToolCall>();
@@ -209,7 +207,7 @@ async function fixture(id: string, {stream = false, tinyContext = false, tinyAcc
           const calls = execute.mock.calls.map(([, action]) => action);
           const results = await outcomes();
           const dispatch = wire.map(({role, body}) => ({role, inputEstimate: estimateTokens(body.messages, body.tools), outputBudget: body.max_tokens}));
-          const receipt = {id, assertionPassed, metrics, runElapsedMs, baseline, useSandbox, highWater, requests, reservations, dispatch,
+          const receipt = {id, assertionPassed, metrics, runElapsedMs, baseline, useLocalCommands, highWater, requests, reservations, dispatch,
             calls, results, events: events(), inspection, wire, failures, remaining: script.map(step => step.role)};
           await writeFile(path.join(root, id + '-' + path.basename(base) + '.json'), JSON.stringify(receipt), {mode: 0o600, flag: 'wx'});
         }
@@ -241,8 +239,8 @@ function plan(trial: Trial, scenario: Scenario, names: string[], title: string, 
   });
 }
 
-function verifyInSandbox(trial: Trial) {
-  if (useSandbox) trial.stage('coder', nativeReply('run_tests', {command: 'node ' + oraclePath, reportPath, timeoutMs: 5_000}));
+function verifyWithCommand(trial: Trial) {
+  if (useLocalCommands) trial.stage('coder', nativeReply('run_tests', {command: 'node ' + oraclePath, reportPath, timeoutMs: 5_000}));
 }
 
 function prepare(trial: Trial, scenario: Scenario) {
@@ -281,7 +279,7 @@ function prepare(trial: Trial, scenario: Scenario) {
     trial.stage('critic', batch([...reads([repair.path]), review(false, ['Correct the observed bad local helper identifier.'])]));
     trial.stage('coder', write(repair.path, scenario.final[repair.path], repair.content));
   }
-  verifyInSandbox(trial);
+  verifyWithCommand(trial);
   trial.stage('coder', done());
   trial.stage('critic', batch([...reads(targets), review(true)]));
   trial.stage('architect', done());
@@ -309,7 +307,7 @@ async function runScenario(scenario: Scenario, stream: boolean) {
     const after = await snapshot(trial.workspace);
     const final = {...before, ...scenario.final};
     const commands = trial.execute.mock.calls.filter(([, action]) => action.name === 'run_tests');
-    if (useSandbox) {
+    if (useLocalCommands) {
       expect(commands).toHaveLength(1);
       const reports = trial.store.detail(trial.chat.id).tests;
       expect(reports).toMatchObject([{status: 'passed', tests: [{name: 'fixture acceptance', status: 'passed'}]}]);

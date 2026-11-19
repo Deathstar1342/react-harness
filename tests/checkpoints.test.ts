@@ -128,9 +128,9 @@ it('refuses file/directory topology replacement before claiming',async()=>{
  const t=await fixture();await t.write('a','file');const checkpoint=await t.capture();await rm(path.join(t.root,'a'));await mkdir(path.join(t.root,'a'));await t.write('a/nested.ts','later');
  await expect(t.preview(checkpoint.id)).rejects.toThrow(/topology/);expect(t.service.list(t.project.id).restores).toHaveLength(0);expect(await readFile(path.join(t.root,'a/nested.ts'),'utf8')).toBe('later');
 });
-it('worker cleanup confirmation gates capture and excludes concurrent tool/editor writers',async()=>{
+it('command cleanup confirmation gates capture and excludes concurrent tool/editor writers',async()=>{
  const t=await fixture();await t.write('a.ts','source');let release!:()=>void,enter!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>enter=r);
- const shells=(t.tools as unknown as {shells:{removeScope:(root:string)=>Promise<void>}}).shells;
+ const shells=(t.tools as unknown as {commands:{removeScope:(root:string)=>Promise<void>}}).commands;
  vi.spyOn(shells,'removeScope').mockImplementation(async()=>{enter();await held;});
  const capture=t.capture();await entered;expect(t.service.list(t.project.id).items).toHaveLength(0);
  await expect(t.tools.save(t.root,'a.ts','other',hash('source'))).rejects.toThrow(/mutation/);expect(()=>t.tools.setDirty(t.root,'a.ts','editor',true)).toThrow(/cleanup/);

@@ -1,4 +1,4 @@
-import {runNativeOperation} from './native-storage.js';
+
 import path from 'node:path';
 import { createHmac } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
@@ -14,8 +14,8 @@ import { BackendLifecycle } from './lifecycle.js';
 import { TransportAuth } from './transport-auth.js';
 import { installationRoot } from './locations.js';
 
-export async function startBackend(options:ProfileOptions & {transportToken?:string;desktop?:boolean;web?:boolean}={}) {return runNativeOperation(()=>startBackendScoped(options));}
-async function startBackendScoped(options:ProfileOptions & {transportToken?:string;desktop?:boolean;web?:boolean}) {
+export async function startBackend(options:ProfileOptions & {transportToken?:string;web?:boolean}={}) {return startBackendScoped(options);}
+async function startBackendScoped(options:ProfileOptions & {transportToken?:string;web?:boolean}) {
   const env={...(options.env ?? process.env)};
   if(env.HARNESS_EXECUTION_MODE!==undefined&&env.HARNESS_EXECUTION_MODE!=='direct')throw new Error('Remove the unsupported HARNESS_EXECUTION_MODE override and run npm start');
   for(const name of ['HARNESS_DATA_DIR','HARNESS_WORKSPACE_ROOT','ARCHITECT_PROMPT_FILE','CODER_PROMPT_FILE','CRITIC_PROMPT_FILE']) {
@@ -39,7 +39,7 @@ async function startBackendScoped(options:ProfileOptions & {transportToken?:stri
   let lifecycle:BackendLifecycle|undefined;
   const descriptor=path.join(profile.paths.home,'backend.json');
   let closePromise:Promise<void>|undefined;
-  const close=():Promise<void>=>closePromise ??= runNativeOperation(async()=>{
+  const close=():Promise<void>=>closePromise ??= (async()=>{
     // Failed or hanging drains retain ownership. Process exit releases the OS locks.
     await app?.close();
     if(!app)await tools.dispose();
@@ -47,18 +47,16 @@ async function startBackendScoped(options:ProfileOptions & {transportToken?:stri
     const stopped={version:1,instanceId:lifecycle?.instanceId,profileId:lifecycle?.profileId,state:'stopped'};
     durableWrite(descriptor,JSON.stringify({...stopped,...(lifecycle?{mac:createHmac('sha256',lifecycle.key).update(JSON.stringify(stopped)).digest('hex')}:{})}));
     resources?.close();profile.ownership.close();configurationLock?.close();
-  });
+  })();
   try {
     lifecycle=new BackendLifecycle(profile.id,env.HARNESS_LAUNCH_KEY);
-    const auth=new TransportAuth(lifecycle.instanceId,options.transportToken,!options.desktop&&!options.web);
+    const auth=new TransportAuth(lifecycle.instanceId,options.transportToken,!options.web);
     if(!webConfig) {
       privateDirectory(path.dirname(profile.paths.configFile));
       if(!existsSync(profile.paths.configFile))throw new Error('Selected configuration is missing; restore profile/config/.env before startup');
     }
     const {config,file}=webConfig ?? loadBackendConfig({...env,HARNESS_HOME:profile.paths.home},profile.paths.configFile);
     config.appHome=profile.paths.home;
-    if(config.executionMode!=='direct')throw new Error('Remove the unsupported HARNESS_EXECUTION_MODE profile setting and run npm start');
-    if(options.desktop){config.host='127.0.0.1';config.port=0;}
     if(config.port>65535)throw new Error('PORT must be at most 65535');
     // Home is already held. Preserve explicit overrides pointing exactly at it.
     resources=lockResources((webConfig?[config.dataDir]:[path.dirname(file.filename),config.dataDir]).filter(dir=>{

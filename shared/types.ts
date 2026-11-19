@@ -4,7 +4,7 @@ export type ChatStatus = 'idle' | 'running' | 'awaiting_approval' | 'paused' | '
 export interface Project { id: string; name: string; path: string; createdAt: string; removalError?: string }
 export interface DeletionPreview { canonicalPath: string; confirmationToken: string; expiresAt: string }
 export type ProjectRemoval = { mode: 'app-only' } | { mode: 'disk'; canonicalPath: string; confirmationToken: string };
-export interface WorkspaceSettings { transferMode?:'source-code'; workspaceRoot: string; defaultWorkspaceRoot: string }
+export interface WorkspaceSettings {  workspaceRoot: string; defaultWorkspaceRoot: string }
 export interface Preferences { debugMode: boolean; defaultApprovalMode: ApprovalMode }
 export interface ConnectionCheck { evidence?: 'ordinary'|'native'|'json'|'streaming'; model?:string; requestId?:string; target: 'catalog' | AgentRole; status: 'passed' | 'failed' | 'skipped'; message: string }
 export interface ConnectionReport { catalog?:ModelCatalogEntry[]; ok: boolean; checks: ConnectionCheck[]; completedAt: string }
@@ -69,13 +69,11 @@ export interface FileChange { source?:'agent'|'checkpoint';restoreId?:string; id
 export type FileChangeSummary = Omit<FileChange, 'before' | 'after' | 'destination'> & {destinationPath?: string};
 export interface ProjectChanges { git: { status: string; path: string; originalPath?: string }[]; gitError?: string; history: FileChangeSummary[]; historyTruncated: boolean }
 export interface ChangePreview { change: FileChangeSummary; diff: string; undoDiff: string; expectedHash: string | null; previewToken?: string; reason?: string }
-export interface WorkerDispatchBinding {claimId:string;binding:string;sessionId:string;identity:{storageId:string;projectId:string;imageId:string;layout:string};expiresAt:number}
 export interface ToolContext {
   projectRoot: string; chatId: string; agentId: string; signal?: AbortSignal; onOutput?: (output: string) => void;
   commandCwd?: string;
   /** Trusted in-memory capabilities; never serialized or accepted as native arguments. */
-  previewPort?:number;
-  mutationOwner?: symbol; prepareCommand?: () => Promise<void>; beforeCommand?: (binding?:WorkerDispatchBinding) => void;
+  mutationOwner?: symbol; prepareCommand?: () => Promise<void>; beforeCommand?: () => void;
 }
 export interface ProcessJob {
   id:string; projectId:string; chatId:string; frameId:string; callId:string; commandId:string;
@@ -83,9 +81,6 @@ export interface ProcessJob {
   createdAt:string; updatedAt:string; output:string; baseOffset:number; endOffset:number; truncated:boolean;
   exitCode?:number; message?:string;
 }
-/** Preview observations cannot authorize execution, acceptance or reconciliation. */
-export interface PreviewEntry {processId:string;projectId:string;chatId:string;generation:number;port:number;status:'starting'|'ready'|'stopped'|'failed'|'interrupted'|'uncertain'|'stale';reason:string}
-export interface PreviewSession {id:string;projectId:string;processId:string;chatId:string;generation:number;expiresAt:number}
 export interface ToolInspection { effect: 'read' | 'write' | 'execute'; risk: 'routine' | 'elevated'; description: string; path?: string; commandCwd?:string; before?: string; after?: string; diff?: string; changes?: {before: FileSnapshot; after: FileSnapshot}[] }
 export interface ToolResult { ok: boolean; output: string; data?: unknown }
 export interface TestCase { name: string; classname?: string; status: 'passed' | 'failed' | 'skipped' | 'error'; duration?: number; error?: string; output?: string }
@@ -97,12 +92,11 @@ export interface ToolService {
   assertCoderContextPath?(root:string, relative:string):void;
   /** Trusted synchronous queue admission observation; no cleanup or dispatch. */
   assertQueueIdle?(root:string):void;
-  readonly processLifecycle?: 'sandbox-dispatch-v1';
+  readonly processLifecycle?: 'local-dispatch-v1';
   configureMutationGuard?(guard:(root:string, owner?:symbol)=>void):void;
   closeCommandContext?(context:ToolContext):Promise<void>;
   /** Trusted backend-only policy, never accepted from model/browser input. */
-  configureSandbox?(policy:{home:string;protectedPaths:string[];projects:()=>string[]}):void;
-  resetSandbox?(root:string):Promise<void>;
+  configureWorkspace?(policy:{home:string;protectedPaths:string[];projects:()=>string[]}):void;
   inspect(context: ToolContext, action: Action): Promise<ToolInspection>;
   execute(context: ToolContext, action: Action): Promise<ToolResult>;
   read(root: string, path: string): Promise<FileSnapshot>;
@@ -166,15 +160,14 @@ export interface RecoveryView {
   continuation?:TaskContinuation;
   coverage:{source:string;limit:number;truncated:boolean;unavailable:number}[];
 }
-export interface PublicSettings { executionMode?:'direct'|'container'; executionAvailable?:boolean; limitSource?:'application-budget'; providerLimits?:'unknown'; configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
+export interface PublicSettings { executionAvailable?:boolean; limitSource?:'application-budget'; providerLimits?:'unknown'; configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
 /** Private launcher protocol; keys and provider secrets are never included. */
 export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; profileId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }
 export interface BackendProofRequest { instanceId:string; nonce:string; expiresAt:number; mac:string }
 export interface BackendProof { action:'readiness'|'shutdown'; identity:BackendIdentity; nonce:string; mac:string }
 // M18 trusted backend/helper DTOs. These are not model actions or HTTP routes.
 export interface LocalPackageTarget {scope?:undefined; id:string; installationId:string; machineId:string; distribution:'ubuntu'|'debian'; release:string; architecture:'amd64'; manager:'apt'; adapterVersion:1 }
-export interface ContainerPackageTarget {scope:'project-container';id:string;storageId:string;projectId:string;baseImageId:string;generation:string;distribution:'debian';release:'12';architecture:'amd64';manager:'apt';adapterVersion:1}
-export type PackageHelperTarget=LocalPackageTarget|ContainerPackageTarget;
+export type PackageHelperTarget=LocalPackageTarget;
 export interface PackageHelperRequest { requestId:string; targetId:string; manager:'apt'; packages:{name:string;version?:string}[] }
 export interface PackageHelperDecision { requestId:string; previewDigest:string; decisionNonce:string; expiresAt:number }
 export interface PackageHelperPreview {
@@ -183,9 +176,7 @@ export interface PackageHelperPreview {
   stateDigest:string; repositoryDigest:string;
   impact:{newPackages:number;downloadBytes:number;installedBytes:number;removals:0;upgrades:0;downgrades:0;maintainerScripts:'trusted-package-root-execution';triggers:'may-modify-existing-packages-and-services';serviceChanges:'package-defined'};
 }
-export interface ContainerInstallReceipt {targetId:string;baseImageId:string;imageId:string;generation:string;manifestDigest:string}
 export interface PackageHelperRecord {
-  containerReceipt?:ContainerInstallReceipt;
   requestId:string;request:PackageHelperRequest;preview:PackageHelperPreview;previewDigest:string;
   state:'prepared'|'noop'|'authorized'|'running'|'succeeded'|'failed'|'uncertain';
   createdAt:number;updatedAt:number;expiresAt:number;code:string;decision?:PackageHelperDecision;
@@ -193,29 +184,16 @@ export interface PackageHelperRecord {
 }
 export type InstallPolicy = 'ask' | 'auto' | 'ai';
 export interface InstallSettings { policy: InstallPolicy; reviewerModel: string; revision: number; target?: PackageHelperTarget }
-export interface InstallSettingsView extends InstallSettings { available: boolean; message: string; scope: 'current-profile-local-linux-target'|'project-execution-container' }
+export interface InstallSettingsView extends InstallSettings { available: boolean; message: string; scope: 'current-profile-local-linux-target' }
 export type InstallState = 'preparing' | 'reviewing' | 'pending' | 'approved' | 'authorizing' | 'dispatching' | 'succeeded' | 'failed' | 'noop' | 'rejected' | 'stale' | 'uncertain';
 /** Public evidence only. Helper authorization nonce/descriptor never belong here. */
 export interface InstallRecord {
-  containerReceipt?:ContainerInstallReceipt;
   id: string; chatId: string; projectId: string; frameId: string; role: AgentRole; generation: number; modeVersion: number;
   recommendation: { packages: {name:string;version?:string}[]; reason: string };
   settings: InstallSettings; state: InstallState; createdAt: number; updatedAt: number;
   preview?: PackageHelperPreview; previewDigest?: string; expiresAt?: number;
   decision?: { source: 'human'|'auto'|'ai'; outcome: 'approve'|'reject'|'ask'; reason: string; at: number };
   code: string; recoveryRequired: boolean; reconciliation?: PackageHelperRecord['reconciliation'];
-}
-
-/** Sanitized receipt; original host source/destination paths never cross this boundary. */
-export interface ProjectTransferReceipt {
-  id:string;kind:'import'|'export';project:string;phase:'copying'|'publishing'|'succeeded'|'failed'|'cancelled'|'uncertain';
-  code:string;residue:boolean;manifestDigest:string;files:number;bytes:number;excludedCount:number;
-  excluded:{path:string;reason:string}[];history:boolean;storageId:string;sessionId:string;identity:[string,string]|null;
-}
-/** M31 supplies the native host runtime; the current source adapter uses terminal-issued codes. */
-export interface HostProjectTransferPicker {
-  authorizeImport():Promise<{code:string}|null>;
-  authorizeExport(managedFolder:string):Promise<{code:string}|null>;
 }
 
 /** Human-only project file recovery; never a native tool or execution authority. */

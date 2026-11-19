@@ -17,7 +17,7 @@ it('runs ordinary rooted commands and refuses escaping operands or cwd in every 
   await mkdir(root);await mkdir(home);
   const tools=new WorkspaceTools();
   cleanups.push(()=>tools.dispose());
-  tools.configureSandbox({home,protectedPaths:[],projects:()=>[root],localCommands:true});
+  tools.configureWorkspace({home,protectedPaths:[],projects:()=>[root]});
   const context={projectRoot:root,chatId:'test',agentId:'test'};
   const run=(command:string,cwd?:string)=>tools.execute(context,{name:'run_shell',args:{command,...(cwd?{cwd}:{})}});
   await expect(run('mkdir "child dir"')).resolves.toMatchObject({ok:true});

@@ -56,7 +56,6 @@ export class Removal {
   private validate(projectId:string): {root:string;stamp:string} {
     const project=this.store.project(projectId),root=path.resolve(project.path);
     if (!path.isAbsolute(project.path) || root!==project.path) throw conflict('Registered project path is not canonical');
-    if(this.config.executionMode==='container' && path.dirname(root)!==this.locations.settings().workspaceRoot)throw conflict('Only managed copies can be removed in container mode');
     const stamp=ancestry(root);
     const protectedTrees=[path.resolve(fileURLToPath(new URL('..',import.meta.url))),process.cwd(),this.config.dataDir,...(this.config.appHome?[this.config.appHome]:[]),
       ...(this.store.filename===':memory:' ? [] : [path.dirname(path.resolve(this.store.filename))]),
@@ -108,7 +107,7 @@ export class Removal {
       return this.tools.removeScope(project.path,undefined,()=>{
         if (request.mode==='disk') {
           const {token,entries}=confirmed!;
-          // Async sandbox draining cannot carry a stale disk authorization into
+          // Async command cleanup cannot carry a stale disk authorization into
           // the final synchronous mutation boundary.
           if(this.tokens.get(request.confirmationToken)!==token || token.expires<=Date.now())throw conflict('Deletion confirmation expired during resource cleanup; request a new confirmation');
           const checked=this.validate(projectId);

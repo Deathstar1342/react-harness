@@ -4,7 +4,7 @@ import type {Store} from './store.js';
 import type {InspectorView,InspectorLink} from '../shared/types.js';
 import {INSPECTOR_LIMITS as L,parseInspector} from './inspector-records.js';
 import {parseNativeJSON} from './native-json.js';
-import {nativePrivateUnit} from './native-storage.js';
+
 import {readPlanEvidence} from './plan-evidence.js';
 const identity=z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/),int=z.number().safe().int().nonnegative();
 const cursorSchema=z.object({v:z.literal(1),chatId:identity,revision:z.string().regex(/^[a-f0-9]{64}$/),upper:int,before:int}).strict();
@@ -18,9 +18,9 @@ function checkedPlan(plan:Record<string,unknown>|null):boolean {
  return true;
 }
 /** SQL byte/row windows precede all original JSON materialization. No Runtime or effect services. */
-export function inspectorView(store:Store,chatId:string,cursor?:string):InspectorView{return nativePrivateUnit(()=>{
+export function inspectorView(store:Store,chatId:string,cursor?:string):InspectorView{return (()=>{
  store.db.exec('SAVEPOINT inspector_observation');try{const v=observe(store,chatId,cursor);store.db.exec('RELEASE inspector_observation');return v;}catch(e){store.db.exec('ROLLBACK TO inspector_observation');store.db.exec('RELEASE inspector_observation');throw (e as {statusCode?:number})?.statusCode?e:fail(503);}
-});}
+})();}
 function observe(store:Store,chatId:string,cursor?:string):InspectorView{
  if(!identity.safeParse(chatId).success)throw fail(404);
  const chatRow=store.db.prepare('SELECT CASE WHEN length(project_id)<=200 THEN project_id END AS project_id,CASE WHEN length(CAST(data AS BLOB))<=? THEN data END AS data FROM chats WHERE id=?').get(L.rowBytes,chatId),chat=parse(chatRow?.data),projectId=String(chatRow?.project_id??'');

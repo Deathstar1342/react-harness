@@ -10,7 +10,7 @@ import Fastify from 'fastify';
 import { startBackend } from '../server/bootstrap.js';
 import { BackendLifecycle, signBackendRequest, verifyBackendProof } from '../server/lifecycle.js';
 import { ProfileOwnership } from '../server/profile.js';
-import { childEnvironment } from '../server/tools/shell.js';
+import { childEnvironment } from '../server/tools/command-utils.js';
 import { Store } from '../server/store.js';
 
 const cleanups:(()=>void|Promise<void>)[]=[];

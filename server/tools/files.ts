@@ -1,4 +1,4 @@
-import {assertNativePath} from '../native-storage.js';
+
 import { constants,lstatSync } from 'node:fs';
 import { open, lstat, mkdir, rename, unlink, opendir } from 'node:fs/promises';
 import path from 'node:path';
@@ -116,11 +116,11 @@ export class WorkspaceFiles {
       // mkdir can partially create a chain before rejecting. Mark possible
       // directory effects first; never erase them during uncertain recovery.
       if(parentMissing)afterCreate?.();
-      assertNativePath(root,false);
+
       await mkdir(path.dirname(target.absolute), {recursive: true});
       await scoped(root,destination);
       for(const id of ids)this.checkLease(id);
-      assertNativePath(root,false);
+
       const handle = await open(target.absolute, 'wx', Number(identity.mode & 0o777n));
       let destinationIdentity;
       try { afterCreate?.(); await handle.writeFile(before.content, 'utf8'); await handle.sync(); destinationIdentity = await handle.stat({bigint:true}); } finally { await handle.close(); }
@@ -134,7 +134,7 @@ export class WorkspaceFiles {
         throw new ToolError('Rename changed after destination creation; outcome is uncertain. Inspect both paths; do not replay.', 'CONFLICT');
       }
       for (const id of ids) this.checkLease(id);
-      assertNativePath(root,false);
+
       await unlink(source.absolute);
       return {source: {path: source.relative, content: '', hash: null}, destination: {...before, path: target.relative}};
     });
@@ -161,7 +161,7 @@ export class WorkspaceFiles {
         const same=(a:typeof current,b:typeof current)=>a.dev===b.dev&&a.ino===b.ino&&a.ctimeNs===b.ctimeNs&&a.mtimeNs===b.mtimeNs&&a.mode===b.mode&&a.size===b.size&&a.nlink===1n&&b.nlink===1n&&a.isFile()&&b.isFile();
         if(!same(opened,again)||!same(again,current))throw new ToolError('Checkpoint permission descriptor/path identity changed');
         // chmod is a distinct effect: repeat the exact durable claim after every awaited observation.
-        this.checkLease(key(target.absolute));claim();assertNativePath(root,false);await handle.chmod(file.mode);
+        this.checkLease(key(target.absolute));claim();await handle.chmod(file.mode);
       }finally{await handle.close();}
     }
     return result;
@@ -176,7 +176,7 @@ export class WorkspaceFiles {
   }
   async save(root: string, input: string, content: string, baseHash: string | null, owner?: string, beforeMutation?: () => void, remove = false, effectGuard?:()=>void): Promise<FileSnapshot> {
     let claimed=false;
-    const claim=()=>{assertNativePath(root,false);if(!claimed){beforeMutation?.();claimed=true;}};
+    const claim=()=>{if(!claimed){beforeMutation?.();claimed=true;}};
     if (typeof content !== 'string' || Buffer.from(content).toString('utf8') !== content || content.includes('\0') || Buffer.byteLength(content) > this.options.maxFileBytes) throw new ToolError('Invalid content or file exceeds size limit.');
     if (baseHash !== null && !/^[a-f0-9]{64}$/.test(baseHash)) throw new ToolError('Expected SHA-256 baseHash or null for a new file.');
     const target = await scoped(root, input), id = key(target.absolute);
@@ -187,7 +187,7 @@ export class WorkspaceFiles {
     locks.set(id, tail);
     await previous;
     let temporary: string | undefined,temporaryOwned=false,temporaryIdentity:{dev:bigint;ino:bigint}|undefined;
-    const guard=()=>{effectGuard?.();if(effectGuard){leasePath(root,input);if(temporary){leasePath(root,path.relative(target.root,temporary));if(temporaryIdentity){const current=lstatSync(temporary,{bigint:true});if(!current.isFile()||current.nlink!==1n||current.dev!==temporaryIdentity.dev||current.ino!==temporaryIdentity.ino)throw new ToolError('Checkpoint temporary file identity changed');}}}assertNativePath(root,false);};
+    const guard=()=>{effectGuard?.();if(effectGuard){leasePath(root,input);if(temporary){leasePath(root,path.relative(target.root,temporary));if(temporaryIdentity){const current=lstatSync(temporary,{bigint:true});if(!current.isFile()||current.nlink!==1n||current.dev!==temporaryIdentity.dev||current.ino!==temporaryIdentity.ino)throw new ToolError('Checkpoint temporary file identity changed');}}}};
     try {
       this.checkLease(id, owner);
       const before = await this.read(root, input);
@@ -218,7 +218,7 @@ export class WorkspaceFiles {
           if(!info){guard();await mkdir(parent);}
           await scoped(root,input);
         }
-      }else{assertNativePath(root,false);await mkdir(path.dirname(target.absolute), {recursive:true});}
+      }else{await mkdir(path.dirname(target.absolute), {recursive:true});}
       await scoped(root, input);
       temporary = path.join(path.dirname(target.absolute), `.rh-write-${randomUUID()}`);
       const info = await lstat(target.absolute).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });

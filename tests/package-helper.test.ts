@@ -1,7 +1,7 @@
 import { describe,it,expect } from 'vitest';
 import { helperCanonical,helperMac,packageRequestSchema,PackageHelperClient } from '../server/package-helper.js';
 import { randomUUID } from 'node:crypto';
-import { LinuxSandbox } from '../server/tools/sandbox.js';
+import { WorkspacePolicy } from '../server/tools/workspace-policy.js';
 import { WorkspaceTools } from '../server/tools/index.js';
 
 describe('M18 trusted helper client',()=>{
@@ -21,7 +21,7 @@ describe('M18 trusted helper client',()=>{
     await expect(PackageHelperClient.connect()).rejects.toThrow('HELPER_UNSUPPORTED_CLIENT');
   });
   it.skipIf(process.platform!=='linux')('rejects helper state and ancestor roots for registration and file tools',async()=>{
-    const sandbox=new LinuxSandbox(),tools=new WorkspaceTools();
+    const sandbox=new WorkspacePolicy(),tools=new WorkspaceTools();
     for(const root of ['/var/lib/abyssus-helper','/var/lib','/etc/abyssus-helper','/run/abyssus-helper','/usr/lib/abyssus-helper']){
       expect(()=>sandbox.validateRoot(root)).toThrow();
       await expect(tools.read(root,'audit.sqlite')).rejects.toThrow();

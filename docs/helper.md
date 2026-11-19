@@ -1,10 +1,10 @@
 # Privileged package helper (M18)
 
-The backend remains non-root. System installs are unavailable unless an administrator explicitly provisions the helper in the **selected Linux/WSL environment**. Starting the app neither provisions nor starts the service. There is no M18 model action, browser API, settings policy or install-approval UI. The trusted backend adapter is `server/package-helper.ts`; M19 supplies policy decisions and M20 supplies the guided OS authorization flow.
+The backend remains non-root. System installs are unavailable unless an administrator explicitly provisions the helper in the **selected Linux/WSL environment**. Starting the app neither provisions nor starts the service. Use the web Settings panel to choose Ask every time, Auto-approve, or AI review. The backend adapter is `server/package-helper.ts`; every install remains bound to the exact reviewed package request.
 
 ## Prerequisites and trust
 
-Initial adapter: x86_64 Ubuntu/Debian, systemd, distro `/usr/bin/python3`, `python3-apt`, `acl` (`setfacl`), apt/dpkg, and the usual GNU loader layout. The release build needs `cc` and static libc; the installed system needs no compiler, Node modules or pip packages for privileged execution. Unsupported architectures, managers, runtimes and unsafe permission hierarchies fail closed. Actual evidence and exact tested versions belong in the M18 report; this is not blanket WSL/distribution acceptance.
+Initial adapter: x86_64 Ubuntu/Debian, systemd, distro `/usr/bin/python3`, `python3-apt`, `acl` (`setfacl`), apt/dpkg, and the usual GNU loader layout. The release build needs `cc` and static libc; the installed system needs no compiler, Node modules or pip packages for privileged execution. Unsupported architectures, managers, runtimes and unsafe permission hierarchies fail closed. Compatibility requires validation on the selected target environment.
 
 A trusted OS administrator/package installer must first verify and install the release artifact into `/usr/lib/abyssus-helper`, owned by root with non-writable ancestors. Never run a checkout, downloaded script, npm lifecycle or user-writable Python module as root. The administrator's OS authentication prompt owns the password; no password is accepted by the helper or passed through the renderer/model. M18 has no passwordless sudo rule or setuid binary. The CI workflow's explicit root staging is a disposable test setup, not an end-user installer.
 

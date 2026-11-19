@@ -2,7 +2,7 @@ import {lstatSync,realpathSync} from 'node:fs';
 import {lstat,opendir,realpath} from 'node:fs/promises';
 import path from 'node:path';
 import type {FileSnapshot,CheckpointAccess} from '../shared/types.js';
-import {assertNativePath} from './native-storage.js';
+
 import {hash,isProtected,safeRelative} from './tools/paths.js';
 
 export const checkpointLimits=Object.freeze({files:512,fileBytes:256*1024,bytes:8*1024*1024,entries:10000,depth:32,diffBytes:200000,projectCount:8,projectBytes:32*1024*1024,totalCount:64,totalBytes:64*1024*1024,journals:32});
@@ -27,12 +27,12 @@ export const manifestDigest=(files:CheckpointFile[])=>hash(JSON.stringify(files.
 const stamp=(s:Awaited<ReturnType<typeof lstat>>,directory=false)=>[String(s.dev),String(s.ino),String(s.birthtimeMs),...(directory?[]:[String(s.ctimeMs),String(s.mtimeMs),String(s.size),String(s.mode)])].join(':');
 /** Check the original project object again at every actual restore boundary. */
 export function assertCheckpointRoot(root:string,identity:string){
- assertNativePath(root,false);const current=lstatSync(root);
+ const current=lstatSync(root);
  if(!current.isDirectory()||current.isSymbolicLink()||realpathSync(root)!==root||stamp(current,true)!==identity)throw new Error('Checkpoint project root identity changed before file effect');
 }
 /** Enumerate every eligible entry. Unlike file browsing, unsafe/unreadable source is never silently skipped. */
 export async function checkpointTree(root:string,access:Pick<CheckpointAccess,'read'>):Promise<CheckpointTree> {
- assertNativePath(root,false);
+
  if(path.resolve(root)!==root||await realpath(root)!==root)throw new Error('Checkpoint requires the canonical registered project path');
  const initial=await lstat(root);if(!initial.isDirectory()||initial.isSymbolicLink())throw new Error('Checkpoint project identity is unsafe');
  const rootIdentity=stamp(initial,true),files:CheckpointFile[]=[],directories:string[]=[],observations:unknown[]=[['',rootIdentity]],aliases=new Set<string>();
@@ -61,7 +61,7 @@ export async function checkpointTree(root:string,access:Pick<CheckpointAccess,'r
   }
   if(stamp(before)!==stamp(await lstat(directory)))throw new Error('Checkpoint directory changed while reading');
  };
- await walk('',0);assertNativePath(root,false);
+ await walk('',0);
  if(stamp(await lstat(root),true)!==rootIdentity)throw new Error('Checkpoint project identity changed');
  files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
  return {rootIdentity,files,revision:hash(JSON.stringify(observations)),digest:manifestDigest(files),bytes,excluded,excludedCount,directories};

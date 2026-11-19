@@ -1,8 +1,8 @@
 import {installQueue,readQueue,queueError} from './queue-state.js';
 import {installInspector} from './inspector-records.js';
 import {checkpointCatalog,checkpointMetadata,checkpointJournalIntegrity,checkpointSaveJournal} from './checkpoint-state.js';
-import {nativeStateDatabase,nativeStateStore} from './native-state-database.js';
-import {nativePrivateUnit,nativePrivatePath} from './native-storage.js';
+
+
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -46,11 +46,11 @@ export class Store {
     return models;
   }
   constructor(readonly filename: string) {
-    this.db=nativePrivateUnit(()=>{
-    if(filename!==':memory:')nativePrivatePath(filename,true);
+    this.db=(()=>{
+
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
     if(filename !== ':memory:' && existsSync(filename)) {
-      nativePrivatePath(filename);
+
       const existing = new DatabaseSync(filename,{readOnly:true});
       try {
         const tables=existing.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
@@ -60,8 +60,8 @@ export class Store {
         }
       } finally {existing.close();}
     }
-    if(filename!==':memory:')nativePrivatePath(filename,true);
-    const database=nativeStateDatabase(new DatabaseSync(filename),filename);
+
+    const database=new DatabaseSync(filename);
     try{database.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), data TEXT NOT NULL);
@@ -88,9 +88,9 @@ export class Store {
     database.prepare('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run('prototype:protocol',JSON.stringify('native-tools-v1'));
     return database;
     }catch(error){database.close();throw error;}
-    });
+    })();
     this.changes.setMaxListeners(100);
-    return nativeStateStore(this);
+    return this;
   }
   transaction<T>(fn: () => T): T {
     // Nested domain transitions participate in the same atomic transaction.

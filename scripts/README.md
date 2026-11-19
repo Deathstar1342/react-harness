@@ -2,8 +2,6 @@
 
 Run the application with `npm start` from the checkout. The root Bash and PowerShell scripts are convenience wrappers for initial npm preparation and the same local launch. See the [setup guide](../docs/setup.md) for settings and command approval.
 
-Desktop build, installer, and packaging scripts are maintenance tooling. M21 installer packaging remains paused.
-
 # Bounded native provider diagnostic
 
 Run the reviewed redesigned checkout with Node 24+. No npm install or running app is needed. Put `STARK_BASE_URL`, `STARK_API_KEY` and `M27_MODEL` in a private environment file **outside the checkout**. The base URL must be your authorized HTTPS API base and the model must be an exact catalog ID. There is no default, alias, 3.5/3.8 substitution or migration.

@@ -10,7 +10,7 @@ import { ReloadingProvider } from '../server/provider.js';
 import { createApp } from '../server/app.js';
 import { createManagedHooks } from '../server/context.js';
 import { roleInstructions } from '../server/prompts.js';
-import { childEnvironment } from '../server/tools/shell.js';
+import { childEnvironment } from '../server/tools/command-utils.js';
 import type { ModelProvider, ToolService } from '../shared/types.js';
 import type { Frame, RunState } from '../server/runtime.js';
 import { Runtime } from '../server/runtime.js';

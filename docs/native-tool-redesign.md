@@ -2,11 +2,9 @@
 
 The `non-tools` branch uses [text JSON model transport](../README.md#text-only-model-branch) while retaining the internal action, approval, and persistence rules below. This report records the original native transport milestone.
 
-Approved for implementation on 2026-10-14. This supersedes the custom JSON recommendation architecture and compatibility requirements in historical records. Implementation sequence and ownership are in [milestones](milestones.md); dispatch and verified progress are in [STATUS](STATUS.md). M22–M27 is delivered on independently reviewed GitHub main `4a0036cd734f46e78aca879ea5436b10fe516294`, with every applicable exact-main CI step verified; [coordinator closeout](reports/milestone-27-coordinator.md) records evidence and limits. Live work-provider acceptance and M21 packaging/release remain separate holds, including the failed clean-portability and incomplete inner-manifest archive findings. The redesign heartbeat is paused; no automatic packaging resumption or release is implied.
 
 ## Product and model decisions
 
-Chat with the architect remains central. Retain the existing quiet dark interface, editable file panel, approvals/diffs, test reports and desktop/WSL foundation. Redesign the agent core, prompts and goal/skill experience; there is no authorization for an unrelated visual rebrand.
 
 The coder starts with a Gemini3.5 Flash native-tool candidate, initially `gemini-3.5-flash-withtools` where available. Architect and critic target verified standard-lane Gemini3.5 Pro IDs; `gemini-3.5-pro` is a catalog candidate, not live-verified here. Gemini3.8 Flash remains selectable if the endpoint exposes it; do not invent an alias. The supplied beta documentation inconsistently describes plain IDs versus required capability suffixes. Use catalog metadata plus harmless capability probes, preserve unknown versus verified support, and make exact IDs configurable. Do not infer context limits from older model names. Assist-lane models that ignore tools cannot serve execution roles.
 
@@ -44,7 +42,7 @@ Completion requests refer to a current goal/plan revision and reviewed evidence.
 
 Persist goal state and call history across backend/app restarts without replaying uncertain actions or auto-executing work on launch. Authorized continuation while the backend runs is supported; a new service that runs after the app is closed is not included.
 
-M24 implements these controls in the existing serialized runtime. `/goal` supplies explicit objective and optional newline acceptance bullets; workspace verification is the default, with literal human `- [observation]` opt-in for historical read-only observations. The final native request binds current goal/plan/mode revisions and exact accepted review IDs. Original step titles/identities remain protected across model removals/renames, and explicit human revisions retain visible superseded work. Failed checks persist beyond frames and unchanged criteria revisions; uncertainty persists regardless. Model summaries contain neither superseded archives nor private testcase ledgers. Bounded continuation pauses at 128 model dispatches, 256 model/queue transitions or 16 turns without newly accepted required scope. Freshness is confined observed text with explicit limits, not whole-workspace proof. See [API contract](api-contract.md#m24-durable-goals) and [M24 report](reports/milestone-24.md) for exact contracts and validation evidence.
+M24 implements these controls in the existing serialized runtime. `/goal` supplies explicit objective and optional newline acceptance bullets; workspace verification is the default, with literal human `- [observation]` opt-in for historical read-only observations. The final native request binds current goal/plan/mode revisions and exact accepted review IDs. Original step titles/identities remain protected across model removals/renames, and explicit human revisions retain visible superseded work. Failed checks persist beyond frames and unchanged criteria revisions; uncertainty persists regardless. Model summaries contain neither superseded archives nor private testcase ledgers. Bounded continuation pauses at 128 model dispatches, 256 model/queue transitions or 16 turns without newly accepted required scope. Freshness is confined observed text with explicit limits, not whole-workspace proof. See [API contract](api-contract.md#m24-durable-goals) and M24 report for exact contracts and validation evidence.
 
 ## Project instructions and tools
 
@@ -52,18 +50,11 @@ Read and refresh relevant bounded `AGENTS.md` before planning and affected opera
 
 Extend root guidance to deterministic scoped guidance with explicit priority, size/count/link bounds and current revisions. Repository guidance cannot change execution permissions, provider roles, secret handling or system-policy decisions.
 
-Audit existing tool gaps before adding them. Priority additions are version-checked patches, line-range reads, paginated search, explicit rename/delete and structured lifecycle/output access for long-running commands. Keep current file confinement, editor leases, diff approvals, write evidence/undo and shell sandbox. New tool names never create a generic approval bypass. Commands remain potentially modifying even when named as tests.
 
 ## Skills
 
 Skills are reusable workflow documents: when applicable, required context, steps, verification and expected handoff. Project skills live in `.abyssus/skills/<name>/SKILL.md`; personal skills live under the stable application home. Skills panel/native tools support draft, edit, save, discover, invoke and converting completed work into a workflow. Saving follows destination/write policies; explicit personal promotion has clear scope.
 
-Discover bounded metadata first and load full selected skills only as needed. Validate schema/names/paths/UTF-8/sizes and confine references without arbitrary link traversal. Record revisions used by active work and handle changes without silently replacing its instructions. Skills guide existing tools; they cannot grant approval, register executable handlers or escape the sandbox. Model-authored workflows and developer-added capabilities are distinct.
 
-## Delivery and packaging
 
 Run M22–M27 sequentially in dedicated isolated milestone chats. Coordinator reviews source and evidence independently, requests fixes, validates/pushes main and verifies applicable CI before the next dispatch. Monitor the active redesign child every 15 minutes; pause on a genuine user-assistance blocker and after the approved sequence. Work-only STARK access is known deferred acceptance, not a reason to poll credentials or block synthetic/Linux work.
-
-M21 packaging remains paused: preserve `codex/milestone-21`, worktree `6fd9`, its uncommitted source/license changes and failed/successful receipts. Do not merge that unfinished work into redesign. M27 validates the existing packaging integration against redesigned code; source-bundle/final release work resumes only after the redesign is delivered. Unsigned, clean-machine, native-picker, OS-auth, privileged-close and live-provider gates stay explicit. No release or installed-preview update is implied by implementation delivery.
-
-Use D: for large builds, fixtures and caches because C: is constrained. No local privileged package/helper installation or WSL/global configuration changes; use disposable CI/VMs. No Docker/SSHFS, native Windows agent-shell fallback or new numbered milestone beyond M27 is authorized. Never commit supplied private API documents, secrets, runtime data, user project contents or generated binaries/source archives.

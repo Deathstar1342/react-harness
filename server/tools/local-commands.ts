@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolContext } from '../../shared/types.js';
 import { key, rootPathSync, safeRelative, ToolError } from './paths.js';
-import { childEnvironment, type CommandResult, type ShellOptions } from './shell.js';
+import { childEnvironment, type CommandResult, type CommandOptions } from './command-utils.js';
 
 const windows = process.platform === 'win32';
 const fileCommands = new Set(['ls', 'dir', 'get-childitem', 'mkdir', 'md', 'rm', 'remove-item', 'del', 'erase', 'rmdir', 'rd', 'pwd']);
@@ -94,7 +94,7 @@ export class LocalCommands {
   private active = new Map<string,Active>();
   private uncertain = new Set<string>();
   private closing = false;
-  constructor(private options: ShellOptions) {}
+  constructor(private options: CommandOptions) {}
   private id(context:ToolContext) { return JSON.stringify([key(path.resolve(context.projectRoot)),context.chatId,context.agentId]); }
   check(context:ToolContext,command?:string) {
     const {directory}=commandDirectory(context.projectRoot,context.commandCwd);
@@ -152,7 +152,7 @@ export class LocalCommands {
     if([...this.active.values()].some(item=>item.root===target&&(!chatId||item.chatId===chatId)))throw new ToolError('A workspace command is still running.','CONFLICT');
   }
   private assertCleanup(root:string) {
-    if(this.uncertain.has(root))throw new ToolError('Command termination could not be confirmed. Inspect workspace processes before restarting.','SANDBOX_CLEANUP_FAILED');
+    if(this.uncertain.has(root))throw new ToolError('Command termination could not be confirmed. Inspect workspace processes before restarting.','COMMAND_CLEANUP_FAILED');
   }
   async dispose() {
     this.closing=true;

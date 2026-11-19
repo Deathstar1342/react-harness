@@ -6,7 +6,7 @@ import {
   assertReconnaissanceRoot, declarationNames, observePlanningPath, readPlanningFile,
   reconnaissancePath, withinReconnaissance, type PathObservation, type ReconnaissanceRoot,
 } from './repository-reconnaissance.js';
-import {nativeStorageActive} from './native-storage.js';
+
 import {estimateTokens} from './scheduler.js';
 import {inAssignedPath,safeRelative} from './tools/paths.js';
 
@@ -158,7 +158,7 @@ export async function loadCoderSources(
           }
         } catch (error) {
           budget.throwIfAborted();
-          nativeStorageActive(); // A poisoned gate must stop the request.
+           // A poisoned gate must stop the request.
           if (blockedRead(error)) card.state = 'omitted';
         }
         cards.push(card);
@@ -166,7 +166,7 @@ export async function loadCoderSources(
     });
   } catch {
     signal.throwIfAborted();
-    nativeStorageActive();
+
     return {observation:'unavailable',cards:[],outsideScope:references.length};
   }
   return {observation:'initial',cards,outsideScope};
@@ -185,7 +185,7 @@ export function recheckCoderSources(
       if (current.state === card.observation.state && current.stamp === card.observation.stamp) return card;
       return {...bare,state:current.state === 'absent' ? 'missing' : 'stale'};
     } catch (error) {
-      nativeStorageActive();
+
       return {...bare,state:blockedRead(error) ? 'omitted' : 'unreadable'};
     }
   })};

@@ -4,7 +4,6 @@ import {queueError, readQueue} from './queue-state.js';
 import {assertContinuationEvidence, continuationConflict, continuationDispatchCurrent, observeContinuation, recordContinuationControl, type ContinuationControl} from './task-continuation.js';
 import {observeRequest} from './inspector-records.js';
 import {maxTextReplyAttempts, TextReplyFormatError, textReplyCorrection, textReplyTransport, textRequest} from './text-replies.js';
-import {nativeOutputBuffer} from './native-output-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { commandEvent, isCommand } from './command-events.js';
 import type { Action, NativeToolCall, AgentRole, Approval, CompletionResult, ModelMessage, NativeToolDefinition, ModelProvider, ToolContext, ToolResult, ToolService, PlanStepRef, GoalRef, ReviewDisposition } from '../shared/types.js';
@@ -14,7 +13,7 @@ import { nativeResultFits, planningRead, planObservation, prepareAdmission, prep
 import { observePlanningPath, reconnaissanceRoot, reconnaissancePath, repositoryOverview, reconnaissanceLimits } from './repository-reconnaissance.js';
 import { estimateTokens } from './scheduler.js';
 import { assertTaskBudget, planOutline, type StoredPlan } from './plan-tasks.js';
-import { nativeStorageActive, runNativeOperation } from './native-storage.js';
+
 import { advisoryEstimate, coderAdvisory, coderScopes, historicalCoderSources, loadCoderSources, recheckCoderSources, type CoderSourceContext } from './coder-context.js';
 import { ProjectInstructionsError, projectInstructionsPolicy, readProjectInstructions } from './project-instructions.js';
 import { hash, inAssignedPath, safeRelative } from './tools/paths.js';
@@ -581,7 +580,7 @@ export class Runtime {
   }
 
   private async resumeContinuation(chatId:string,precondition:string) {
-    await runNativeOperation(async ()=>{
+    await (async ()=>{
       const current=()=>{
         const observation=observeContinuation(this.store,chatId,false,this.continuationSettingsBinding());
         if(this.active.has(chatId) || this.decisions.get(chatId)!==1 ||
@@ -598,7 +597,7 @@ export class Runtime {
         if(workspace!==state.frames.at(-1)?.continuationWorkspace) throw continuationConflict('The original registered workspace changed.');
         await this.continuationGuidance(chatId,state,root.path);
       } catch(error) {
-        nativeStorageActive();
+
         throw continuationConflict(error instanceof Error ? error.message : 'Current workspace evidence is unavailable.');
       }
       let history:ReturnType<typeof assertContinuationEvidence>=[];
@@ -636,7 +635,7 @@ export class Runtime {
       this.coderContexts.set(coder,{key:this.coderContextKey(chatId,live,coder)});
       this.launch(chatId,{control:live.continuationControl!,workspace,providerConfig,historical:{role:'user',content:
         'Explicit human Resume of the original assignment. Recorded tool outcomes are historical. Inspect current scoped source and reverify any relied-on checks before reporting completion.\n'+JSON.stringify(history)} });
-    });
+    })();
   }
 
   private async assertContinuationDispatch(chatId:string,state:RunState,admission:ContinuationDispatch,signal:AbortSignal) {
@@ -649,17 +648,17 @@ export class Runtime {
       if(root.identity!==admission.workspace)throw stale();
       return root;
     };
-    await runNativeOperation(async ()=>{
+    await (async ()=>{
       try {
         const root=current();
         await this.continuationGuidance(chatId,state,root.path);
         current();
       } catch {
         signal.throwIfAborted();
-        nativeStorageActive();
+
         throw stale();
       }
-    });
+    })();
   }
 
   private async controlInternal(chatId: string, action: 'pause' | 'resume' | 'interrupt') {
@@ -813,7 +812,7 @@ export class Runtime {
 
   private async initialRepositoryOverview(chatId: string, state: RunState, signal: AbortSignal): Promise<ModelMessage> {
     try {
-      return await runNativeOperation(async () => {
+      return await (async () => {
         signal.throwIfAborted();
         const root = this.planningWorkspace(chatId);
         const identity = JSON.stringify([root.path, root.identity, state.frames[0]?.id]);
@@ -822,7 +821,7 @@ export class Runtime {
         const message = await repositoryOverview(root, signal);
         this.repositoryOverviews.set(state, {identity, message});
         return message;
-      });
+      })();
     } catch {
       signal.throwIfAborted();
       return {role:'user', content:'Repository overview unavailable. Use confined native reads before saving a changed plan.'};
@@ -850,7 +849,7 @@ export class Runtime {
     try {
       const updates = prepareTaskProposal(previous, proposed, entries);
       if (!clearsExistingPlan && (updates.size || !unchangedPlanStructure(previous, proposed))) {
-        const prepared = await runNativeOperation(() => {
+        const prepared = await (() => {
           signal.throwIfAborted();
           const root = this.planningWorkspace(chatId);
           const recorded = this.store.getState<PlanObservation[]>('plan:observations:' + chatId, []);
@@ -861,7 +860,7 @@ export class Runtime {
             const result = this.store.getState<ToolResult | null>('native:result:' + chatId + ':' + frame.id + ':' + callId, null);
             return result?.ok && nativeResultFits(result) ? {observation, result} : undefined;
           }, signal);
-        });
+        })();
         for (const phase of proposed.phases) for (const step of phase.steps) {
           const task = prepared.tasks.get(stepKey(phase.id,step.id));
           if (task) step.task = task;
@@ -932,16 +931,16 @@ export class Runtime {
     let identity: string | undefined;
     if (!binding.previous && scopes.length && this.tools.assertCoderContextPath) {
       try {
-        context = await runNativeOperation(async () => {
+        context = await (async () => {
           signal.throwIfAborted();
           if (!live()) return absent;
           const root = this.planningWorkspace(chatId);
           identity = root.identity;
           return loadCoderSources(root,task,scopes,filename=>guard(root.path,filename),signal);
-        });
+        })();
       } catch {
         signal.throwIfAborted();
-        nativeStorageActive();
+
         context = absent;
       }
     }
@@ -955,16 +954,16 @@ export class Runtime {
       let checked = context;
       if (context.observation === 'initial' && identity) {
         try {
-          checked = await runNativeOperation(() => {
+          checked = await (() => {
             dispatchSignal.throwIfAborted();
             if (!live()) return absent;
             const root = this.planningWorkspace(chatId);
             if (root.identity !== identity) return absent;
             return recheckCoderSources(root,context,filename=>guard(root.path,filename));
-          });
+          })();
         } catch {
           dispatchSignal.throwIfAborted();
-          nativeStorageActive();
+
           checked = absent;
         }
       }
@@ -1040,15 +1039,15 @@ export class Runtime {
     let context = unavailableReview();
     if (!this.reviewedContext.has(frame) && scopes.length) {
       try {
-        context = await runNativeOperation(async () => {
+        context = await (async () => {
           signal.throwIfAborted();
           if (!live()) return unavailableReview();
           const root = this.planningWorkspace(chatId);
           return captureReviewContext(this.store,chat.projectId,chatId,evidence,root,filename=>this.guardReviewFile(chatId,root.path,filename),signal);
-        });
+        })();
       } catch {
         signal.throwIfAborted();
-        nativeStorageActive();
+
       }
     }
     signal.throwIfAborted();
@@ -1060,15 +1059,15 @@ export class Runtime {
       let checked = context;
       if (context.observation.identity) {
         try {
-          checked = await runNativeOperation(() => {
+          checked = await (() => {
             dispatchSignal.throwIfAborted();
             if (!live()) return unavailableReview();
             const root = this.planningWorkspace(chatId);
             return recheckReviewContext(context,recheckReviewFiles(root,context.observation,filename=>this.guardReviewFile(chatId,root.path,filename)));
-          });
+          })();
         } catch {
           dispatchSignal.throwIfAborted();
-          nativeStorageActive();
+
           checked = unavailableReview();
         }
       }
@@ -1096,14 +1095,14 @@ export class Runtime {
     let files: ReviewFileObservation = {files:[]}, workspaceIdentity: string|undefined;
     if (candidates.length || parent.acceptanceEvidence?.checks.length || reviewReplan(action.args)) {
       try {
-        files = await runNativeOperation(() => {
+        files = await (() => {
           const root = this.planningWorkspace(chatId);
           workspaceIdentity = root.identity;
           return observeReviewFiles(root,candidates,filename=>this.guardReviewFile(chatId,root.path,filename),signal);
-        });
+        })();
       } catch {
         signal.throwIfAborted();
-        nativeStorageActive();
+
       }
     }
     await this.refreshInstructions(chatId,state,signal);
@@ -1417,10 +1416,10 @@ export class Runtime {
         }};
       }
       this.save(chatId,state);
-      const deltas=nativeOutputBuffer(text=>this.store.event(chatId,'delta',{role:frame.role,text}));
+      const emitDelta=(text:string)=>{this.store.event(chatId,'delta',{role:frame.role,text});};
       const failures = formatRetry?.frameId === frame.id && formatRetry.generation === generation ? formatRetry.failures : 0;
       const withCorrection = (history: ModelMessage[]) => failures ? [...history,textReplyCorrection] : history;
-      const input = {model:this.store.chatModels(chatId)[frame.role],messages:withCorrection(advisoryRequest?.messages ?? messages),tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:deltas.write};
+      const input = {model:this.store.chatModels(chatId)[frame.role],messages:withCorrection(advisoryRequest?.messages ?? messages),tools,signal,maxTokens:this.config.maxOutputTokens,onDelta:emitDelta};
       const pendingAdvisory = advisoryRequest;
       const beforeProvider = pendingAdvisory ? async (dispatchSignal: AbortSignal) => withCorrection(await pendingAdvisory.beforeProvider(dispatchSignal)) : undefined;
       this.commitRunTransition(chatId,state,()=>{this.queue?.beforeProvider(chatId,state);const goal=goalOf(this.store,chatId);if(goal && goal.status!=='completed'){goal.budget.turns++;goal.budget.unchangedTurns++;saveGoal(this.store,chatId,goal);}});
@@ -1433,7 +1432,7 @@ export class Runtime {
           observed.onObservation?.({type:'invoked'});
         }
         return this.hooks.complete ? this.hooks.complete(frame.role,observed) : this.provider.complete(observed);
-      },this.hooks.scheduled || !!advisoryRequest).finally(()=>deltas.flush()).catch(error=>{
+      },this.hooks.scheduled || !!advisoryRequest).catch(error=>{
         if (continuation && (error as {code?:string})?.code==='CONTINUATION_STALE' &&
             state.generation!==continuation.control.generation && state.steering.length && !signal.aborted) {
           continuation = undefined;
@@ -1531,19 +1530,19 @@ export class Runtime {
           }
           const outcome = await definition.handler({workspace:this.tools, context:this.toolContext(chatId,frame,signal), control:async request => {
             const commit = () => this.controlAction(chatId,state,frame,call,request,review,admission);
-            if (review) return runNativeOperation(() => commit());
+            if (review) return commit();
             if (request.name==='delegate' && request.args.planStep && (request.args.paths as string[]|undefined)?.length) {
-              return runNativeOperation(()=>{
+              return (()=>{
                 signal.throwIfAborted();
                 if(state.generation!==generation || state.frames.at(-1)!==frame || frame.queuedCalls?.[0]?.id!==call.id)
                   throw new Error('The Coder delegation changed before commit.');
                 return commit();
-              });
+              })();
             }
             if (!admission?.checkWorkspaceAtCommit) return commit();
             // Refresh only the synchronous plan/file check and SQLite transition.
             // The surrounding tool handler and all provider work stay outside.
-            return runNativeOperation(() => admission.current() ? commit() : {ok:false,output:'The plan proposal was superseded before commit.'});
+            return admission.current() ? commit() : {ok:false,output:'The plan proposal was superseded before commit.'};
           }}, action);
           if(outcome.data==='pause')return;
           continue;
@@ -1925,11 +1924,11 @@ export class Runtime {
           const taskId=state.frames[0]?.id,assignment=JSON.stringify(frame.assignment),planBinding=JSON.stringify(this.store.plan(chatId)),goalBinding=JSON.stringify((({id,revision,generation,status})=>({id,revision,generation,status}))(goalOf(this.store,chatId)??{} as any));
           const current=()=>{
             signal.throwIfAborted();
-            if(state.frames[0]?.id!==taskId||JSON.stringify(frame.assignment)!==assignment||JSON.stringify(this.store.plan(chatId))!==planBinding||JSON.stringify((({id,revision,generation,status})=>({id,revision,generation,status}))(goalOf(this.store,chatId)??{} as any))!==goalBinding||pending.approvalId&&this.store.getApproval(pending.approvalId).status!=='approved')throw new Error('Task, assignment, plan, goal or approval changed during worker preparation.');
+            if(state.frames[0]?.id!==taskId||JSON.stringify(frame.assignment)!==assignment||JSON.stringify(this.store.plan(chatId))!==planBinding||JSON.stringify((({id,revision,generation,status})=>({id,revision,generation,status}))(goalOf(this.store,chatId)??{} as any))!==goalBinding||pending.approvalId&&this.store.getApproval(pending.approvalId).status!=='approved')throw new Error('Task, assignment, plan, goal or approval changed during command preparation.');
             if(frame.pending!==pending||state.generation!==generation||state.steering.length||state.planOnly&&definitionFor(pending.action.name).command||this.store.chat(chatId).modeVersion!==modeVersion||this.skills.binding(chatId)!==skillsHash)throw new Error('Command authorization or selected workflow changed during setup.');
           };
           context.prepareCommand=async()=>{await this.refreshInstructions(chatId,state,signal);current();};
-          context.beforeCommand=binding=>{current();if(binding)this.store.transaction(()=>{current();this.store.setState('worker-authorization:'+binding.claimId,{binding,chatId,frameId:frame.id,callId:pending.callId,commandId:pending.id,generation,modeVersion,skillsHash});});};
+          context.beforeCommand=()=>{current();};
         }
 
         const publishOutput = context.onOutput;
@@ -1943,7 +1942,7 @@ export class Runtime {
         try {
           validateAction(pending.action,frame.role,state.planOnly?'plan':'execute');
           const capture = frame.role === 'architect' && pending.callId && planningRead(pending.action.name)
-            ? await runNativeOperation(() => {
+            ? await (() => {
               signal.throwIfAborted();
               try {
                 const root = this.planningWorkspace(chatId);
@@ -1951,16 +1950,16 @@ export class Runtime {
                 const filename = reconnaissancePath(String(pending.action.args.path));
                 return {root, before: observePlanningPath(root, filename), binding: this.planningBinding(chatId, state, frame)};
               } catch { return; }
-            })
+            })()
             : undefined;
           executionResult = await definitionFor(pending.action.name).handler({workspace:this.tools,context,process:action=>this.processAction(chatId,state,frame,pending,action),control:async()=>{throw new Error('Not a workspace call');}},pending.action);
           if (capture && !signal.aborted && capture.binding === this.planningBinding(chatId, state, frame)) {
             try {
-              observedForPlan = await runNativeOperation(() => {
+              observedForPlan = await (() => {
                 signal.throwIfAborted();
                 if (capture.binding !== this.planningBinding(chatId, state, frame)) return;
                 return planObservation(pending.action, executionResult, pending.callId!, capture.binding, capture.root, capture.before);
-              });
+              })();
               if (observedForPlan) {
                 const annotated = {...executionResult, data: {...executionResult.data as object, planEvidenceCallId: pending.callId}};
                 if (nativeResultFits(annotated)) executionResult = annotated;
@@ -2277,7 +2276,7 @@ export class Runtime {
           if(reference && coder.scope?.length) {
             coder.delegationEventId=event.id;
             try { coder.continuationWorkspace=this.planningWorkspace(chatId).identity; }
-            catch { nativeStorageActive(); }
+            catch {  }
           }
           this.store.progress(chatId,reference,coder.id,'in_progress','started',objective,event.id);
           if (reference && this.store.planStep(chatId,reference)?.task) preparedCoder = coder;
@@ -2372,7 +2371,7 @@ export class Runtime {
         const root = this.planningWorkspace(chatId);
         currentWorkspace = root.identity === admission.workspaceIdentity;
         if (currentWorkspace) files = recheckReviewFiles(root,admission.files,filename=>this.guardReviewFile(chatId,root.path,filename));
-      } catch { nativeStorageActive(); }
+      } catch {  }
     }
     const currentFiles = currentReceiptFiles(evidence.receipts,files,this.store,chat.projectId,chatId);
     const currentCheck = (receipt: typeof evidence.receipts[number]) => {

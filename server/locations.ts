@@ -16,5 +16,5 @@ export function applicationHome(env: NodeJS.ProcessEnv = process.env, platform =
 export function profilePaths(home: string) {
   const profile = path.join(home, 'profile');
   return {home, profile, configFile:path.join(profile,'config','.env'), dataDir:path.join(profile,'state'),
-    cacheDir:path.join(home,'cache','sandboxes'), staticRoot:path.join(installationRoot,'dist','client')};
+    staticRoot:path.join(installationRoot,'dist','client')};
 }

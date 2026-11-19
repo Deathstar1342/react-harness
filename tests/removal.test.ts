@@ -12,7 +12,7 @@ import { WorkspaceTools } from '../server/tools/index.js';
 import { WorkspaceFiles } from '../server/tools/files.js';
 import { readConfig } from '../server/config.js';
 import { createApp } from '../server/app.js';
-import { ShellPool } from '../server/tools/shell.js';
+import { LocalCommands } from '../server/tools/local-commands.js';
 import type { CompletionResult, DeletionPreview, ModelProvider } from '../shared/types.js';
 
 const cleanups:(()=>Promise<void>)[]=[];
@@ -34,10 +34,10 @@ async function fixture() {
 }
 const paused:RunState={frames:[{id:'frame',role:'architect',messages:[],repairs:0}],steering:[],generation:0,steps:0,planOnly:false};
 
-it.each(['expiry','path swap'])('revalidates disk authorization after deferred sandbox drain: %s',async(kind)=>{
+it.each(['expiry','path swap'])('revalidates disk authorization after deferred command drain: %s',async(kind)=>{
   const t=await fixture();let release!:()=>void,entered!:()=>void;
   const draining=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});
-  vi.spyOn((t.tools as any).shells,'removeScope').mockImplementation(()=>{entered();return draining;});
+  vi.spyOn((t.tools as any).commands,'removeScope').mockImplementation(()=>{entered();return draining;});
   const pending=t.disk();await ready;
   if(kind==='expiry')vi.spyOn(Date,'now').mockReturnValue(Date.now()+300_001);
   else{await rename(t.root,t.root+'-original');await mkdir(t.root);await writeFile(path.join(t.root,'replacement'),'preserve');}
@@ -298,8 +298,8 @@ it.skipIf(process.platform!=='linux')('scoped PTY cleanup preserves sibling sess
   expect((await t.tools.execute(otherProject,shell('printf "%s" "$REMOVAL_TEST"'))).output).toContain('other-project');
 });
 
-it('shell pool refuses a queued command before a native PTY is created',async()=>{
-  const t=await fixture(),pool=new ShellPool({maxOutputBytes:1000,maxQueue:4,maxSessions:4,defaultTimeoutMs:1000,maxTimeoutMs:1000,shell:'/bin/bash'});
+it('command executor refuses a queued command before a child process is created',async()=>{
+  const t=await fixture(),pool=new LocalCommands({maxOutputBytes:1000,maxQueue:4,maxSessions:4,defaultTimeoutMs:1000,maxTimeoutMs:1000});
   const command=pool.run({projectRoot:t.root,chatId:t.chat.id,agentId:'coder'},'true').catch(()=>undefined);
-  expect(()=>pool.removeScope(t.root,t.chat.id)).toThrow('pending');await command;pool.removeScope(t.root,t.chat.id);await pool.dispose();
+  await expect(pool.removeScope(t.root,t.chat.id)).rejects.toThrow('running');await command;await pool.removeScope(t.root,t.chat.id);await pool.dispose();
 });

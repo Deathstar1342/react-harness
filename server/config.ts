@@ -4,7 +4,6 @@ import { applicationHome, profilePaths } from './locations.js';
 import type { AgentRole, ApprovalMode, PublicSettings } from '../shared/types.js';
 
 export interface Config {
-  executionMode?: 'direct'|'container';
   baseUrl: string; apiKey: string; streaming: boolean; host: string; port: number; dataDir: string; workspaceRoot: string;
   models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number;
   promptFiles: Partial<Record<AgentRole,string>>;
@@ -32,9 +31,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory =
   const mode = env.APPROVAL_MODE ?? 'balanced';
   if (!['autonomous', 'balanced', 'review', 'ai'].includes(mode)) throw new Error('APPROVAL_MODE must be autonomous, balanced, review, or ai');
   const host = env.HOST ?? '127.0.0.1';
-  const executionMode=env.HARNESS_EXECUTION_MODE ?? 'direct';
-  if(!['direct','container'].includes(executionMode))throw new Error('Unknown execution mode');
-  if (!['127.0.0.1', 'localhost', '::1'].includes(host) && !(executionMode==='container' && host==='0.0.0.0')) throw new Error('This local application must bind to a loopback address');
+  if(!['127.0.0.1','localhost','::1'].includes(host))throw new Error('This local application must bind to a loopback address');
   const promptFiles: Partial<Record<AgentRole,string>> = {};
   for(const role of ['architect','coder','critic'] as const) {
     const file = env[`${role.toUpperCase()}_PROMPT_FILE`]?.trim();
@@ -43,7 +40,6 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory =
     promptFiles[role] = path.resolve(baseDirectory,file);
   }
   return {
-    executionMode:executionMode as 'direct'|'container',
     baseUrl, apiKey: env.STARK_API_KEY ?? '', streaming: env.MODEL_STREAMING !== 'false', host,
     port: positive('PORT', 3000), dataDir: path.resolve(baseDirectory,env.HARNESS_DATA_DIR ?? profilePaths(applicationHome(env)).dataDir),
     appHome: applicationHome(env),
@@ -57,5 +53,5 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory =
   };
 }
 export function publicSettings(config: Config): PublicSettings {
-  return { executionMode:config.executionMode ?? 'direct',executionAvailable:config.executionMode!=='container',limitSource:'application-budget',providerLimits:'unknown',configured: Boolean(config.baseUrl && config.apiKey), models: config.models, approvalMode: config.approvalMode, maxParallelCoders: config.maxParallelCoders, platform: process.platform, protocol: 'native-tools-v1', limits: config.limits, contextLimits: config.contextLimits };
+  return { executionAvailable:true,limitSource:'application-budget',providerLimits:'unknown',configured: Boolean(config.baseUrl && config.apiKey), models: config.models, approvalMode: config.approvalMode, maxParallelCoders: config.maxParallelCoders, platform: process.platform, protocol: 'native-tools-v1', limits: config.limits, contextLimits: config.contextLimits };
 }

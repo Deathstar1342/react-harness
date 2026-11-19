@@ -20,7 +20,6 @@ const address=await app.listen({host:'127.0.0.1',port:config.port}),browser=awai
 const receipts=process.env.M26_RECEIPTS??'test-results';await mkdir(receipts,{recursive:true});
 try {
   const page=await browser.newPage({viewport:{width:1440,height:1050},extraHTTPHeaders:{authorization:`Bearer ${auth.token}`}}),errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.addInitScript(()=>{const win=window as unknown as {__dirty:boolean[];abyssusDesktop?:unknown};win.__dirty=[];Object.defineProperty(win,'abyssusDesktop',{value:undefined,writable:true});});
   await page.goto(address);await page.getByRole('navigation',{name:'Conversations'}).getByRole('button',{name:/^Workflow browser/}).click();
   await page.getByRole('button',{name:'Skills',exact:true}).click();
   await page.getByLabel('Skill name').fill('verify');await page.getByLabel('Skill description').fill('Repeat reliable verification');await page.getByLabel('Workflow steps').fill('Inspect changes. Run appropriate checks. Report observed results.');

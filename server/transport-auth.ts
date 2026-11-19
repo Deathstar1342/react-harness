@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual,createHmac } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 const equal=(a:string,b:string)=>Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
@@ -16,7 +16,6 @@ export class TransportAuth {
     this.token=token;this.cookieName=`abyssus_${instanceId.replaceAll('-','')}`;
   }
   get browserPairingEnabled(){return this.browserPairing;}
-  browserPrincipal(request:{headers:{cookie?:string}}){if(!this.browserPairing)throw new Error('Browser preview is unavailable for this desktop transport');const values=(request.headers.cookie??'').split(';').map(part=>part.trim().split('=')).filter(([name])=>name===this.cookieName).map(([,value])=>value);if(values.length!==1||!this.sessions.has(values[0]))throw new Error('Current paired browser session required');return createHmac('sha256',this.token).update('preview-browser:'+values[0]).digest('hex');}
   register(app:FastifyInstance) {
     app.addHook('onRequest',async(request,reply)=>{
       const pathname=request.routeOptions.url??request.url.split('?')[0];

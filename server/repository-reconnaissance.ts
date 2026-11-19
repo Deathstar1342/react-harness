@@ -3,7 +3,7 @@ import { open, opendir } from 'node:fs/promises';
 import path from 'node:path';
 import type { ModelMessage } from '../shared/types.js';
 import { checkpointExclusion } from './checkpoint-files.js';
-import { assertNativePath } from './native-storage.js';
+
 import { estimateTokens } from './scheduler.js';
 import { hash, safeRelative } from './tools/paths.js';
 
@@ -20,7 +20,7 @@ const stamp = (info: BigIntStats) =>
 
 export interface ReconnaissanceRoot { path: string; identity: string; device: bigint }
 export function reconnaissanceRoot(root: string): ReconnaissanceRoot {
-  assertNativePath(root, false);
+
   const stat = lstatSync(root, {bigint: true});
   if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(root) !== root) {
     throw new Error('Planning inspection requires the canonical registered workspace.');

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { TestCase, TestReport } from '../../shared/types.js';
-import type { CommandResult } from './shell.js';
+import type { CommandResult } from './command-utils.js';
 import { ToolError } from './paths.js';
 const array = (value: unknown): any[] => value === undefined ? [] : Array.isArray(value) ? value : [value];
 const text = (value: any): string => typeof value === 'string' || typeof value === 'number' ? String(value) : value && typeof value === 'object' ? [value['@_message'], value['#text']].filter(v => v !== undefined).join('\n') : '';

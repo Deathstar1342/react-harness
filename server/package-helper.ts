@@ -29,7 +29,6 @@ export class PackageHelperClient {
   private constructor(descriptor:z.infer<typeof descriptorSchema>){this.#descriptor=descriptor;}
   installationId(){return this.#descriptor.installationId;}
   static async connect():Promise<PackageHelperClient> {
-    if(process.env.HARNESS_EXECUTION_MODE==='container')throw new PackageHelperError('CONTAINER_EXECUTION_UNAVAILABLE');
     if(process.platform!=='linux'||!process.getuid?.())throw new PackageHelperError('HELPER_UNSUPPORTED_CLIENT');
     const file='/etc/abyssus-helper/client.json';
     for(const path of ['/','/etc','/etc/abyssus-helper',file]) {
@@ -71,7 +70,7 @@ export class PackageHelperClient {
   }
   async hello(){
     const reply=await this.request<{protocol:typeof helperProtocol;target:PackageHelperTarget}>('hello',{});
-    if(reply.protocol!==helperProtocol||reply.target.scope==='project-container'||reply.target.installationId!==this.#descriptor.installationId)throw new PackageHelperError('HELPER_TARGET_MISMATCH');
+    if(reply.protocol!==helperProtocol||reply.target.installationId!==this.#descriptor.installationId)throw new PackageHelperError('HELPER_TARGET_MISMATCH');
     return {...reply,target:reply.target as LocalPackageTarget};
   }
   prepare(request:PackageHelperRequest){return this.request<PackageHelperRecord>('prepare',packageRequestSchema.parse(request));}

@@ -75,7 +75,26 @@ try {
     request.once('error',reject);request.once('timeout',()=>request.destroy(new Error('Host check timed out')));
   });
   assert.equal(foreignHost,403);
-  assert.equal((await (await get('/api/settings')).json()).executionMode,'direct');
+  assert.equal((await (await get('/api/settings')).json()).executionAvailable,true);
+  if(process.env.CLI_SMOKE_BROWSER==='1'){
+    const {chromium,expect}=await import('@playwright/test');
+    const browser=await chromium.launch({channel:'chrome',headless:true});
+    const errors:string[]=[];
+    try{
+      const page=await browser.newPage({viewport:{width:1440,height:960}});
+      page.on('pageerror',error=>errors.push(error.message));
+      await page.goto(address);
+      await expect(page.getByRole('button',{name:'Add project',exact:true})).toBeVisible();
+      await page.getByRole('button',{name:'Settings',exact:true}).click();
+      await expect(page.getByLabel('Default approval mode for future chats')).toBeVisible();
+      await page.getByLabel('Default approval mode for future chats').selectOption('ai');
+      await expect(page.getByLabel('Default approval mode for future chats')).toHaveValue('ai');
+      assert.deepEqual(errors,[]);
+      if(process.env.CLI_SMOKE_SCREENSHOT)await page.screenshot({path:process.env.CLI_SMOKE_SCREENSHOT});
+    }finally{
+      await browser.close();
+    }
+  }
 } finally {
   if (descriptor) {
     const signed = signBackendRequest(descriptor.key, 'shutdown', descriptor.identity.instanceId);

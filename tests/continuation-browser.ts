@@ -1,9 +1,8 @@
-// Authenticated renderer, real SQLite, and real scoped reads. Provider replies
-// are controlled. The sandboxed Electron host is the existing Recovery fixture.
+// Browser, real SQLite, and scoped reads with a controlled provider.
 import path from 'node:path';
 import {mkdir,mkdtemp,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {_electron,chromium,expect,type Page} from '@playwright/test';
+import {chromium,expect,type Page} from '@playwright/test';
 import {createApp} from '../server/app.js';
 import {readConfig} from '../server/config.js';
 import {createManagedHooks} from '../server/context.js';
@@ -49,10 +48,9 @@ const auth=new TransportAuth('continuation-ui');
 const tools=new WorkspaceTools();
 const {app,runtime}=await createApp({config,store,provider,tools,hooks:createManagedHooks(provider,store,config),transportAuth:auth});
 let page:Page|undefined;
-let desktop:Awaited<ReturnType<typeof _electron.launch>>|undefined;
 let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
 const errors:string[]=[];
-const host=process.env.M33_ELECTRON==='1'?'electron':'chrome';
+const host='chrome';
 const snapshot=()=>JSON.stringify(['chats','events','state','approvals','task_queues','queue_links','inspector_requests'].map(table=>
   store.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
 try {
@@ -62,20 +60,10 @@ try {
   const before=snapshot(), count=calls.length;
   const address=await app.listen({host:'127.0.0.1',port:0});
   config.port=Number(new URL(address).port);
-  if(host==='electron') {
-    const electronHome=path.join(home,'electron');
-    await mkdir(electronHome);
-    desktop=await _electron.launch({args:[path.join(import.meta.dirname,'recovery-electron-entry.cjs')],
-      executablePath:process.env.M33_ELECTRON_EXE,cwd:home,chromiumSandbox:true,
-      env:{...process.env,M33_ELECTRON_HOME:electronHome,M33_URL:address},timeout:30000});
-    page=await desktop.firstWindow();
-    const prefs=await desktop.evaluate(({BrowserWindow})=>(BrowserWindow.getAllWindows()[0].webContents as unknown as
-      {getLastWebPreferences:()=>Record<string,unknown>}).getLastWebPreferences());
-    expect(prefs).toMatchObject({sandbox:true,contextIsolation:true,nodeIntegration:false});
-  } else {
+
     browser=await chromium.launch({channel:'chrome',headless:true});
     page=await browser.newPage({viewport:{width:1440,height:1000}});
-  }
+
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto(address);
   await page.evaluate(async code=>{
@@ -106,14 +94,7 @@ try {
   await panel.getByRole('button',{name:'Refresh recovery',exact:true}).click();
   await expect(resume).toBeEnabled();
   const screenshot=path.join(receipts,`continuation-${host}.png`);
-  if(desktop) {
-    const png=await desktop.evaluate(async({BrowserWindow})=>{
-      const image=await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined,{stayHidden:true});
-      return image.toPNG().toString('base64');
-    });
-    expect(png.length).toBeGreaterThan(1000);
-    await writeFile(screenshot,Buffer.from(png,'base64'));
-  } else await page.screenshot({path:screenshot});
+  await page.screenshot({path:screenshot});
   replies.push(nativeReply('read_file',{path:'entry.ts'}),prose,prose,prose);
   const accepted=page.waitForResponse(response=>response.url().endsWith('/control')&&response.request().method()==='POST');
   await resume.click();
@@ -132,7 +113,6 @@ try {
   await page?.screenshot({path:path.join(receipts,`continuation-${host}-failure-${Date.now()}.png`)}).catch(()=>{});
   throw error;
 } finally {
-  await desktop?.close();
   await browser?.close();
   await app.close();
   store.close();

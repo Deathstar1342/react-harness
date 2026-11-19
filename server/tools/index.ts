@@ -1,6 +1,5 @@
-import {runNativeOperation,assertNativePath} from '../native-storage.js';
+
 import { observePlanningPath, reconnaissancePath, reconnaissanceRoot } from '../repository-reconnaissance.js';
-import {ContainerShellPool} from '../container-shell.js';
 import {LocalCommands} from './local-commands.js';
 import { lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -13,9 +12,9 @@ import {assertMutationIdle,reserveMutation} from './mutations.js';
 import {validateProjectSkillResources} from '../skill-files.js';
 import { WorkspaceFiles, type FileOptions } from './files.js';
 import { allowed, hash, key, leasePath, rootPath, rootPathSync, scoped, ToolError } from './paths.js';
-import { ShellPool, gitCommand, type ShellOptions, type CommandResult } from './shell.js';
+import { gitCommand, type CommandOptions, type CommandResult } from './command-utils.js';
 import { parseJUnit, unavailableReport } from './junit.js';
-import { LinuxSandbox, type SandboxPolicy } from './sandbox.js';
+import { WorkspacePolicy, type WorkspacePolicyOptions } from './workspace-policy.js';
 export { ToolError } from './paths.js';
 
 const busyReports = new Set<string>();
@@ -23,15 +22,12 @@ function validate(action: Action): Record<string, any> {
   if (definitionFor(action.name).kind !== 'workspace') throw new ToolError('Unknown workspace tool.');
   return workspaceAction(validateAction(action)).args;
 }
-export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<Omit<ShellOptions, 'sandbox'>> { maxReportBytes?: number }
+export interface WorkspaceToolsOptions extends Partial<FileOptions>, Partial<CommandOptions> { maxReportBytes?: number }
 export class WorkspaceTools implements ToolService {
-  readonly processLifecycle='sandbox-dispatch-v1' as const;
+  readonly processLifecycle='local-dispatch-v1' as const;
   private files: WorkspaceFiles;
-  private shells: ShellPool | ContainerShellPool | LocalCommands;
-  private local?:LocalCommands;
-  private shellOptions:ShellOptions;
-  private container?:ContainerShellPool;
-  readonly sandbox = new LinuxSandbox();
+  private commands:LocalCommands;
+  readonly policy = new WorkspacePolicy();
   private disposed = false;
   private removing=new Set<string>();
   private quarantined=new Set<string>();
@@ -42,12 +38,12 @@ export class WorkspaceTools implements ToolService {
   private async mutate<T>(root:string,operation:()=>Promise<T>,owner?:symbol):Promise<T> {
     this.mutationGuard(root,owner);
     const reservation=reserveMutation(root,owner);
-    try {return await runNativeOperation(()=>{assertNativePath(root,false);return operation();});} finally {reservation.release();}
+    try {return await (()=>{return operation();})();} finally {reservation.release();}
   }
-  assertQueueIdle(root:string) {this.check();assertNativePath(root,false);assertMutationIdle(root);this.mutationGuard(root);const id=key(path.resolve(root));if(this.operations.has(id)||this.removing.has(id)||this.quarantined.has(id))throw new ToolError('Workspace operation or cleanup remains active.','CONFLICT');this.files.assertRemovable(root);}
+  assertQueueIdle(root:string) {this.check();assertMutationIdle(root);this.mutationGuard(root);const id=key(path.resolve(root));if(this.operations.has(id)||this.removing.has(id)||this.quarantined.has(id))throw new ToolError('Workspace operation or cleanup remains active.','CONFLICT');this.files.assertRemovable(root);}
   planningRoot(root: string) {
     this.check();
-    const canonical = this.sandbox.validateRoot(root);
+    const canonical = this.policy.validateRoot(root);
     if (canonical !== root || this.removing.has(key(root)) || this.quarantined.has(key(root))) {
       throw new ToolError('The registered workspace is unavailable for planning inspection.');
     }
@@ -60,9 +56,9 @@ export class WorkspaceTools implements ToolService {
     if (this.removing.has(key(root)) || this.quarantined.has(key(root))) throw new ToolError('Workspace cleanup is pending.','CONFLICT');
     this.files.assertCoderContextPath(root,relative);
   }
-  closeCommandContext(context:ToolContext) {return this.shells.closeContext(context);}
+  closeCommandContext(context:ToolContext) {return this.commands.closeContext(context);}
   private async tracked<T>(root: string, operation: () => Promise<T>): Promise<T> {
-    this.sandbox.validateRoot(root);
+    this.policy.validateRoot(root);
     const id = key(path.resolve(root));
     if(this.removing.has(id) || this.quarantined.has(id))throw new ToolError('Workspace cleanup is pending or uncertain.','CONFLICT');
     this.operations.set(id,(this.operations.get(id) ?? 0)+1);
@@ -77,15 +73,15 @@ export class WorkspaceTools implements ToolService {
     const id=key(path.resolve(root));
     if (this.operations.has(id) || this.removing.has(id) || this.quarantined.has(id)) throw new ToolError('A workspace operation is still pending or cleanup is uncertain.','CONFLICT');
     this.files.assertRemovable(root);
-    const cleanup=this.shells.removeScope(root,chatId);
+    const cleanup=this.commands.removeScope(root,chatId);
     this.removing.add(id);
     return cleanup.catch(error=>{this.quarantined.add(id);throw error;}).then(()=>{this.files.assertRemovable(root);return mutation();}).finally(()=>this.removing.delete(id));
   }
-  /** Same reservation, operation/dirty lease gate and confirmed worker drain as managed export.
+  /** Same reservation, operation/dirty lease gate and confirmed command cleanup.
    * Callback receives only the existing guarded file service; no public capability escapes. */
   checkpointScope<T>(root:string,operation:(access:import('../../shared/types.js').CheckpointAccess)=>Promise<T>):Promise<T> {
     return this.mutate(root,async()=>await this.removeScopeInternal(root,undefined,async()=>{
-      this.sandbox.validateRoot(root);this.files.assertRemovable(root);
+      this.policy.validateRoot(root);this.files.assertRemovable(root);
       return operation({read:(base,input)=>{if(base!==root)throw new ToolError('Checkpoint root mismatch');return this.files.read(base,input);},
         restore:(base,file,expected,claim)=>{if(base!==root)throw new ToolError('Checkpoint root mismatch');return this.files.restoreCheckpoint(base,file,expected,claim);}});
     }));
@@ -97,20 +93,14 @@ export class WorkspaceTools implements ToolService {
     this.maxOutputBytes = options.maxOutputBytes ?? 1_000_000;
     this.maxReportBytes = options.maxReportBytes ?? 2_000_000;
     this.files = new WorkspaceFiles({ maxFileBytes: options.maxFileBytes ?? 2_000_000, maxEntries: options.maxEntries ?? 10_000, maxSearchFiles: options.maxSearchFiles ?? 20_000, leaseMs: options.leaseMs ?? 45_000 });
-    this.shellOptions = { maxOutputBytes: this.maxOutputBytes, maxQueue: options.maxQueue ?? 16, maxSessions: options.maxSessions ?? 32, defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000, maxTimeoutMs: options.maxTimeoutMs ?? 600_000, shell: options.shell ?? '/bin/bash', sandbox:this.sandbox };
-    this.shells = new ShellPool(this.shellOptions);
+    this.commands = new LocalCommands({maxOutputBytes:this.maxOutputBytes,maxQueue:options.maxQueue??16,maxSessions:options.maxSessions??32,defaultTimeoutMs:options.defaultTimeoutMs??30000,maxTimeoutMs:options.maxTimeoutMs??600000});
   }
-  configureSandbox(policy:SandboxPolicy){
-    this.sandbox.configure(policy);
-    if(policy.localCommands){this.local??=new LocalCommands(this.shellOptions);this.shells=this.local;}
-    else if(policy.executionMode==='container'){this.container??=new ContainerShellPool();this.shells=this.container;}
-  }
-  async resetSandbox(root:string):Promise<void>{await this.removeScope(root,undefined,async()=>{if(this.container)await this.container.reset(root);else if(!this.local)this.sandbox.reset(root);});}
+  configureWorkspace(policy:WorkspacePolicyOptions){this.policy.configure(policy);}
   private check(): void { if (this.disposed) throw new ToolError('Tool service has been disposed.'); }
   read(root: string, path: string): Promise<FileSnapshot> { this.check(); return this.tracked(root,()=>this.files.read(root, path)); }
   list(root: string, path = '') { this.check(); return this.tracked(root,()=>this.files.list(root, path)); }
   save(root: string, path: string, content: string, baseHash: string | null, owner?: string) { this.check(); return this.mutate(root,()=>this.tracked(root,()=>this.files.save(root, path, content, baseHash, owner))); }
-  setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); if(this.removing.has(key(rootPathSync(root))))throw new ToolError('Workspace cleanup is pending.','CONFLICT');this.sandbox.validateRoot(root);this.files.setDirty(root, path, owner, dirty); }
+  setDirty(root: string, path: string, owner: string, dirty: boolean): void { this.check(); if(this.removing.has(key(rootPathSync(root))))throw new ToolError('Workspace cleanup is pending.','CONFLICT');this.policy.validateRoot(root);this.files.setDirty(root, path, owner, dirty); }
   restore(root: string, path: string, before: FileSnapshot, expectedHash: string | null, beforeMutation: () => void) {
     this.check();
     return this.mutate(root,()=>this.tracked(root,()=>this.files.save(root, path, before.content, expectedHash, undefined, beforeMutation, before.hash === null)));
@@ -161,11 +151,8 @@ export class WorkspaceTools implements ToolService {
     }
     if (definitionFor(action.name).command) {
       if (args.reportPath) await scoped(context.projectRoot, args.reportPath);
-      if(this.local){
-        const commandCwd=this.local.check({...context,commandCwd:args.cwd},typeof args.command==='string'?args.command:undefined);
-        return {effect:'execute',risk:'elevated',commandCwd,description:`${action.name}: local command from ${commandCwd}. Runs with your OS account permissions.`};
-      }
-      return { effect: 'execute', risk: 'elevated', description: `${action.name}: sandboxed execution can modify the selected project and private dependencies. ${this.container?'Public HTTP(S) proxy; private network targets denied.':'Registry-only network capability.'} Requires runtime authorization.` };
+      const commandCwd=this.commands.check({...context,commandCwd:args.cwd},typeof args.command==='string'?args.command:undefined);
+      return {effect:'execute',risk:'elevated',commandCwd,description:`${action.name}: local command from ${commandCwd}. Runs with your OS account permissions.`};
     }
     return { effect: 'read', risk: 'routine', description: action.name, ...(args.path !== undefined ? { path: args.path } : {}) };
   }
@@ -186,11 +173,10 @@ export class WorkspaceTools implements ToolService {
       this.check(); const args = validate(action);
       if (context.signal?.aborted) return { ok: false, output: 'Cancelled before execution.' };
       const root = rootPathSync(context.projectRoot);
-      if(this.local&&definitionFor(action.name).command){
+      if(definitionFor(action.name).command){
         const before=context.beforeCommand;
         context={...context,commandCwd:args.cwd,beforeCommand:()=>{this.files.assertRemovable(root);before?.();}};
       } else if(args.cwd!==undefined)throw new ToolError('A separate working directory is supported only for local commands.');
-      if(this.container&&definitionFor(action.name).command){const before=context.beforeCommand;context={...context,beforeCommand:binding=>{this.files.assertRemovable(root);before?.(binding);}};}
       if (definitionFor(action.name).fileMutation) {
         const changes = await this.fileChanges(root, action), change = changes[0];
         if (action.name === 'rename_file') {
@@ -200,15 +186,14 @@ export class WorkspaceTools implements ToolService {
         const result = await this.files.save(root, args.path, change.after.content, args.baseHash, context.agentId, () => {fileMutationStarted = true;}, action.name === 'delete_file');
         return {ok: true, output: `${action.name === 'delete_file' ? 'Removed' : 'Saved'} ${result.path}`, data: {...result, snapshots: [result]}};
       }
-      if(!this.container&&['run_shell','execute_python','run_tests','git_status','git_diff'].includes(action.name))this.sandbox.assertExecutionAvailable();
       switch (action.name) {
         case 'inspect_new_plan_path': {
           try {
             const relative = reconnaissancePath(args.path);
-            const observation = await runNativeOperation(() => {
+            const observation = await (() => {
               context.signal?.throwIfAborted();
               return observePlanningPath(reconnaissanceRoot(this.planningRoot(context.projectRoot)), relative);
-            });
+            })();
             return observation.state === 'absent'
               ? {ok: true, output: 'Proposed file is currently absent.', data: {path: relative, state: 'absent'}}
               : {ok: false, output: 'This file already exists. Read it and cite it as existing source.'};
@@ -221,12 +206,9 @@ export class WorkspaceTools implements ToolService {
         case 'read_file': { const file = await this.read(root, args.path); return { ok: file.hash !== null, output: file.hash === null ? `File not found: ${file.path}` : file.content, data: file }; }
         case 'list_files': { const entries = await this.list(root, args.path); return { ok: true, output: JSON.stringify(entries), data: entries }; }
         case 'search': { const result = await this.files.search(root, args.query, args.path); return { ok: true, output: JSON.stringify(result), data: result }; }
-        case 'run_shell': return this.commandResult(await this.shells.run(context, args.command, args.timeoutMs));
+        case 'run_shell': return this.commandResult(await this.commands.run(context, args.command, args.timeoutMs));
         case 'execute_python': {
-          if(this.local)return this.commandResult(await this.local.python(context,args.code,args.timeoutMs));
-          const encoded = Buffer.from(args.code).toString('base64');
-          const command = `python3 -c 'import base64; exec(compile(base64.b64decode("${encoded}"), "<workspace-python>", "exec"))'`;
-          return this.commandResult(await this.shells.run(context, command, args.timeoutMs));
+          return this.commandResult(await this.commands.python(context,args.code,args.timeoutMs));
         }
         case 'run_tests': return await this.runTests(context, args);
         case 'git_status': return await this.gitStatus(root, context.signal,context);
@@ -238,10 +220,8 @@ export class WorkspaceTools implements ToolService {
   private commandResult(result: CommandResult): ToolResult {
     return { ok: result.exitCode === 0 && !result.error && !result.cancelled && !result.timedOut, output: [result.output, result.error, result.truncated ? '[Output truncated]' : ''].filter(Boolean).join('\n'), data: result };
   }
-  private async git(root:string,args:string[],limit:number,signal?:AbortSignal,context?:ToolContext){
-    if(!this.container)return gitCommand(root,args,limit,signal,this.sandbox,this.local?.git.bind(this.local));
-    const owned={...(context??{projectRoot:root,chatId:'fixed-git',agentId:'fixed-git',signal}),agentId:(context?.agentId??'fixed-git')+':git'};
-    try{return await this.container.git(owned,args,limit);}finally{await this.container.closeContext(owned);}
+  private async git(root:string,args:string[],limit:number,signal?:AbortSignal,_context?:ToolContext){
+    return gitCommand(root,args,limit,signal,this.commands.git.bind(this.commands));
   }
   private async assertGitRoot(root: string, signal?: AbortSignal,context?:ToolContext): Promise<void> {
     if(!existsSync(path.join(root,'.git')))throw new ToolError('Git working tree must match the workspace root.');
@@ -312,7 +292,7 @@ export class WorkspaceTools implements ToolService {
       } catch (error) { report = unavailableReport(args.command, outcome, error instanceof Error ? error.message : 'JUnit report unavailable.'); }
       finally { releaseReport(); }
     };
-    try { result = await this.shells.run(context, args.command, args.timeoutMs, async () => {
+    try { result = await this.commands.run(context, args.command, args.timeoutMs, async () => {
       if (busyReports.has(target.absolute)) throw new ToolError('Another test run is writing this report. Use a distinct reportPath or wait for it to finish.');
       busyReports.add(target.absolute); acquired = true; before = await signature();
     }, captureReport); }
@@ -321,5 +301,5 @@ export class WorkspaceTools implements ToolService {
     report ??= unavailableReport(args.command, result, result.error ?? 'Test command was not executed.');
     return { ok: report.status === 'passed', output: report.output, data: { ...result, reportPath, testReport: report } };
   }
-  async dispose(): Promise<void> { this.disposed = true; await this.shells.dispose();if(this.quarantined.size)throw new ToolError('Sandbox cleanup is uncertain; retain backend ownership.','SANDBOX_CLEANUP_FAILED'); }
+  async dispose(): Promise<void> { this.disposed = true; await this.commands.dispose();if(this.quarantined.size)throw new ToolError('Command cleanup is uncertain; retain backend ownership.','COMMAND_CLEANUP_FAILED'); }
 }
