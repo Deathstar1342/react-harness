@@ -18,7 +18,7 @@ command -v node >/dev/null && command -v npm >/dev/null || {
 }
 node -e "if (Number(process.versions.node.split('.')[0]) < 24) { console.error('Node.js 24 or newer is required.'); process.exit(1); }"
 if [[ "${1:-}" == --check ]]; then
-  node --import tsx -e "if (!require('node:fs').existsSync('dist/client/index.html')) { console.error('Run npm run build or setup first.'); process.exit(1); }"
+  node --import tsx -e ""
   exit 0
 fi
 

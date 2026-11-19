@@ -5,7 +5,7 @@ import type { BackendIdentity, BackendProofRequest, BackendProof } from '../shar
 
 const protocol='abyssus-backend-v1';
 const schema=z.object({instanceId:z.uuid(),nonce:z.string().regex(/^[a-f0-9]{64}$/),expiresAt:z.number().int(),mac:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
-const proofSchema=z.object({action:z.enum(['readiness','shutdown']),identity:z.object({protocol:z.literal(protocol),instanceId:z.uuid(),profileId:z.uuid(),pid:z.number().int().positive(),platform:z.string().min(1).max(32),state:z.enum(['starting','ready','stopping','stopped','failed'])}).strict(),nonce:z.string().regex(/^[a-f0-9]{64}$/),mac:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
+const proofSchema=z.object({action:z.enum(['readiness','shutdown']),identity:z.object({protocol:z.literal(protocol),instanceId:z.uuid(),pid:z.number().int().positive(),platform:z.string().min(1).max(32),state:z.enum(['starting','ready','stopping','stopped','failed'])}).strict(),nonce:z.string().regex(/^[a-f0-9]{64}$/),mac:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
 const digest=(key:string,text:string)=>createHmac('sha256',key).update(text).digest('hex');
 const requestText=(action:string,input:Omit<BackendProofRequest,'mac'>)=>JSON.stringify([protocol,action,input.instanceId,input.nonce,input.expiresAt]);
 export function signBackendRequest(key:string,action:'readiness'|'shutdown',instanceId:string,now=Date.now()):BackendProofRequest {
@@ -26,12 +26,12 @@ export class BackendLifecycle {
   private used=new Map<string,number>();
   private shutdown?:Promise<void>;
   private failureListeners=new Set<()=>void>();
-  constructor(readonly profileId:string,key=randomBytes(32).toString('hex')) {
+  constructor(key=randomBytes(32).toString('hex')) {
     if(!/^[a-f0-9]{64}$/.test(key))throw new Error('HARNESS_LAUNCH_KEY must be 32 random bytes encoded as lowercase hex');
     this.key=key;
   }
   ready(){this.state='ready';}
-  identity():BackendIdentity{return {protocol,instanceId:this.instanceId,profileId:this.profileId,pid:process.pid,platform:process.platform,state:this.state};}
+  identity():BackendIdentity{return {protocol,instanceId:this.instanceId,pid:process.pid,platform:process.platform,state:this.state};}
   onFailure(listener:()=>void) {this.failureListeners.add(listener);if(this.state==='failed')listener();return()=>{this.failureListeners.delete(listener);};}
   stop(close:()=>Promise<void>):Promise<void> {
     if(this.shutdown)return this.shutdown;

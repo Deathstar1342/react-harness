@@ -162,7 +162,7 @@ export interface RecoveryView {
 }
 export interface PublicSettings { executionAvailable?:boolean; limitSource?:'application-budget'; providerLimits?:'unknown'; configured: boolean; models: Record<AgentRole, string>; approvalMode: ApprovalMode; maxParallelCoders: number; platform: string; protocol: string; limits: { requestsPerMinute: number; tokensPerMinute: number; tokensPerDay: number }; contextLimits: Record<AgentRole, number> }
 /** Private launcher protocol; keys and provider secrets are never included. */
-export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; profileId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }
+export interface BackendIdentity { protocol:'abyssus-backend-v1'; instanceId:string; pid:number; platform:string; state:'starting'|'ready'|'stopping'|'stopped'|'failed' }
 export interface BackendProofRequest { instanceId:string; nonce:string; expiresAt:number; mac:string }
 export interface BackendProof { action:'readiness'|'shutdown'; identity:BackendIdentity; nonce:string; mac:string }
 // M18 trusted backend/helper DTOs. These are not model actions or HTTP routes.

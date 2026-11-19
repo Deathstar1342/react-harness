@@ -4,17 +4,18 @@ Use Node.js 24 or newer. In a fresh checkout:
 
 ```sh
 npm ci
-npm run build
 npm start
 ```
 
-After that, use `npm start` and open the local address it prints. The browser opens directly on the app. Press Ctrl+C to stop the backend.
+After that, use `npm start` and open the local address it prints. Startup builds missing or stale web assets and reuses an up-to-date build. Press Ctrl+C to stop the backend.
 
 Use the checkout’s `.env` for settings. Copy `.env.example` as a starting point or use **Settings** in the browser to save your provider URL, key, and exact role model IDs. Keep `.env` private. Process environment variables still override matching entries.
 
-The app opens its existing local state automatically. It uses `%LOCALAPPDATA%\abysSUS` on Windows or `${XDG_DATA_HOME:-$HOME/.local/share}/abyssus` on Linux by default. If you already use `HARNESS_HOME` or `HARNESS_DATA_DIR`, keep the same paths in the checkout’s `.env` or process environment. Restore a missing established database before starting. Settings from an earlier profile configuration file can be copied into the checkout’s `.env` locally.
+The checkout's private `.harness/` directory holds the database, personal skills and other runtime state. Back up this directory to retain your chats and settings. Provider configuration lives in the checkout's `.env`.
 
-Optional `bash setup.sh` and `.\setup.ps1` install dependencies and build the UI. `bash start.sh` and `.\start.ps1` run `npm start` from the checkout. Setup does not start the app.
+When upgrading, stop the old backend before running `npm start`. If the checkout has no state yet, startup copies existing data from the former default location or the old `HARNESS_HOME` and `HARNESS_DATA_DIR` settings. Keep custom storage values in place for the first successful start, then remove them. The copy preserves the old files and leaves your project folders where they are. An existing `.harness/state.sqlite` takes precedence. Copy any provider values you still need from old configuration into the checkout's `.env` yourself.
+
+Optional `bash setup.sh` and `.\setup.ps1` install dependencies. `bash start.sh` and `.\start.ps1` run `npm start` from the checkout.
 
 ## Commands and approvals
 

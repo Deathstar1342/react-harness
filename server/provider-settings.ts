@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { readConfig, normalizeProviderEndpoint, type Config } from './config.js';
 import type { ProviderSettings as PublicProviderSettings, ProviderSettingsPatch } from '../shared/types.js';
 import type { Store } from './store.js';
-import { applicationHome, profilePaths } from './locations.js';
+import { installationRoot } from './locations.js';
 
 const fields = { architect: 'ARCHITECT_MODEL', coder: 'CODER_MODEL', critic: 'CRITIC_MODEL', apiKey: 'STARK_API_KEY',baseUrl:'STARK_BASE_URL' } as const;
 const value = z.string().max(1024).regex(/^[^\x00-\x1f\x7f\u2028\u2029]*$/, 'Use a single line without control characters');
@@ -51,7 +51,8 @@ export class ProviderSettingsFile {
     } catch { throw fail('Cannot safely read backend .env'); }
     finally { if (fd !== undefined) closeSync(fd); }
   }
-  config(): Config { return readConfig({...parse(this.snapshot.text), ...this.overrides},this.parent); }
+  config(): Config { return readConfig(this.values(),this.parent); }
+  values(): NodeJS.ProcessEnv { return {...parse(this.snapshot.text), ...this.overrides}; }
   lockedFields(): string[] { return Object.entries(fields).filter(([,key]) => this.overrides[key] !== undefined).map(([key]) => key); }
   write(patch: ProviderSettingsPatch) {
 
@@ -141,8 +142,12 @@ export class ProviderSettings {
   }
 }
 
-export function loadBackendConfig(env: NodeJS.ProcessEnv = process.env, filename = profilePaths(applicationHome(env)).configFile) {
+export function validateDotenvOverrides(env: NodeJS.ProcessEnv) {
   if (Object.keys(env).some(key => /^DOTENV_(?:CONFIG_)?(?:PATH|ENCODING|OVERRIDE|FAST)$/.test(key) && env[key] !== undefined)) throw new Error('Custom dotenv path, encoding, override and parser options are unsupported; use the application .env');
+}
+
+export function loadBackendConfig(env: NodeJS.ProcessEnv = process.env, filename = path.join(installationRoot,'.env')) {
+  validateDotenvOverrides(env);
   const file = new ProviderSettingsFile(filename,env);
   return {file, config:file.config()};
 }

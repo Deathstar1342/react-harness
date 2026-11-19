@@ -1,7 +1,7 @@
 import { startBackend } from './bootstrap.js';
 
 try {
-  const backend=await startBackend({web:true});
+  const backend=await startBackend({buildWeb:true});
   console.log(`Harness backend: ${backend.address}`);
   for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>{
     void backend.close().then(()=>process.exit(0),()=>{console.error('Backend shutdown failed; ownership is retained until process exit');process.exitCode=1;});

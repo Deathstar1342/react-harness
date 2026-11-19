@@ -13,8 +13,6 @@ try {
     if ($Check) { exit 0 }
     & $npm.Source ci
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & $npm.Source run build
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Output 'Ready. Run npm start from this checkout.'
 } finally {
     Pop-Location

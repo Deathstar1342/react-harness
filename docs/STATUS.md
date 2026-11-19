@@ -1,6 +1,6 @@
 # Project status
 
-The `non-tools` branch runs the web app with `npm start`. Node.js serves the built React UI on loopback. Configuration comes from the checkout’s private `.env`, with process environment overrides. Existing application state reopens automatically.
+The `non-tools` branch runs the web app with `npm start`. Startup builds missing or stale assets and serves the React UI on loopback. Configuration comes from the checkout’s private `.env`, with process environment overrides. Application state lives in `.harness/` in the checkout.
 
 Models receive ordinary Chat Completions messages. Complete JSON action replies are parsed and validated locally, with at most three model attempts per turn. Runtime approvals, file versions, editor leases, goal evidence, selected skills, request budgets, checkpoints, recovery, usage inspection and the sequential queue remain active.
 

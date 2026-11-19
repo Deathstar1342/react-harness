@@ -1,10 +1,10 @@
-import { ProfileOwnership } from '../server/profile.js';
+import { StateOwnership } from '../server/local-state.js';
 import { startBackend } from '../server/bootstrap.js';
 
 try {
   const [mode,argument]=process.argv.slice(2);
   if(mode==='lock') {
-    const owner=new ProfileOwnership(argument!);
+    const owner=new StateOwnership(argument!);
     process.send?.({ready:true});
     process.on('message',()=>{owner.close();process.exit(0);});
   } else {

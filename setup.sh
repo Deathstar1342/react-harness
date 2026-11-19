@@ -20,5 +20,4 @@ node -e "if (Number(process.versions.node.split('.')[0]) < 24) { console.error('
 if [[ "${1:-}" == --check ]]; then exit 0; fi
 
 npm ci
-npm run build
 printf '%s\n' 'Ready. Run npm start from this checkout.'

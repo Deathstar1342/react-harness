@@ -10,8 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { signBackendRequest } from '../server/lifecycle.js';
 
 const root = path.resolve(import.meta.dirname, '..');
-const home = process.env.CLI_SMOKE_HOME;
-assert(home && path.isAbsolute(home), 'Set an explicit temporary state directory');
+const stateDirectory = path.join(root, '.harness');
 const parent = await mkdtemp(path.join(tmpdir(), 'abyssus-cli-'));
 const listener = createServer();
 await new Promise<void>((resolve, reject) => {
@@ -23,11 +22,8 @@ assert(bound && typeof bound !== 'string');
 await new Promise<void>((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
 const env = {
   ...process.env,
-  HARNESS_HOME: home,
-  HARNESS_EXECUTION_MODE: undefined,
-  HARNESS_LEGACY_ROOT: undefined,
-  HARNESS_DATA_DIR: undefined,
-  HARNESS_INIT: undefined,
+  LOCALAPPDATA: parent,
+  XDG_DATA_HOME: parent,
   STARK_BASE_URL: '',
   STARK_API_KEY: '',
   HOST: '127.0.0.1',
@@ -53,7 +49,7 @@ child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
 child.stderr.resume();
 const address = 'http://127.0.0.1:' + bound.port;
 let descriptor: { key: string; identity: { instanceId: string } } | undefined;
-const filename = path.join(home, 'backend.json');
+const filename = path.join(stateDirectory, 'backend.json');
 try {
   for (let attempts = 0; !descriptor && attempts < 120; attempts++) {
     assert.equal(child.exitCode, null, 'Launcher exited before the backend was ready');
@@ -63,6 +59,8 @@ try {
   }
   assert(descriptor, 'Launcher did not publish local readiness');
   assert.doesNotMatch(stdout,/pairing code/i);
+  if (process.env.CLI_SMOKE_EXPECT_BUILD === '1') assert.match(stdout, /Building the web app/);
+  if (process.env.CLI_SMOKE_EXPECT_BUILD === '0') assert.doesNotMatch(stdout, /Building the web app/);
   const get = (route: string, headers?: HeadersInit) => fetch(address + route, { headers, signal: AbortSignal.timeout(5000) });
   const ui = await get('/');
   assert.equal(ui.status, 200);

@@ -11,7 +11,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Push-Location -LiteralPath $PSScriptRoot
 try {
     if ($Check) {
-        node --import tsx -e "if (!require('node:fs').existsSync('dist/client/index.html')) { console.error('Run npm run build or setup first.'); process.exit(1); }"
+        node --import tsx -e ""
         exit $LASTEXITCODE
     }
     & $npm.Source start

@@ -16,11 +16,10 @@ Use Node.js 24 or newer. For a fresh checkout:
 
 ```sh
 npm ci
-npm run build
 npm start
 ```
 
-After setup, run `npm start` and open the local address printed in the terminal. Optional Bash and PowerShell setup and start wrappers follow the same flow.
+After setup, run `npm start` and open the local address printed in the terminal. Startup builds missing or stale web assets. Optional Bash and PowerShell wrappers follow the same flow.
 
 Put your provider address/key and exact role models in the checkout’s private `.env` or use Settings. Existing settings are preserved. The provider receives text messages. The application decodes actions from one validated JSON object. No work credentials are needed to validate independent source/runtime behavior. Work-only STARK acceptance remains deferred.
 
@@ -28,7 +27,7 @@ Put your provider address/key and exact role models in the checkout’s private 
 
 Choose a workspace folder in Settings. Create a new project or open an existing local project folder with Import. Changes apply to the selected folder. Removing a project requires confirmation and a fresh review of its canonical path.
 
-Chats, goals, plans, approvals, skills, settings and execution receipts persist across application restarts. Missing established storage refuses startup rather than silently resetting. Old native-prototype/profile migration remains out of scope; preserve unrelated profiles.
+Chats, goals, plans, approvals, personal skills and execution receipts persist under the checkout's private `.harness/` directory. See the [setup guide](docs/setup.md) for upgrading from the former storage location.
 
 Send `/plan ...` to plan without new mutations. Send `/btw ...` or another message during a run to steer it at the next safe boundary. Pause, resume, and interrupt are available in the chat. Cancelling does not undo changes already applied. After a backend restart, resume explicitly; an uncertain command is reported instead of blindly replayed.
 

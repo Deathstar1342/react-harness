@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { applicationHome, profilePaths } from './locations.js';
+import { applicationHome } from './locations.js';
 import type { AgentRole, ApprovalMode, PublicSettings } from '../shared/types.js';
 
 export interface Config {
@@ -41,8 +41,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env, baseDirectory =
   }
   return {
     baseUrl, apiKey: env.STARK_API_KEY ?? '', streaming: env.MODEL_STREAMING !== 'false', host,
-    port: positive('PORT', 3000), dataDir: path.resolve(baseDirectory,env.HARNESS_DATA_DIR ?? profilePaths(applicationHome(env)).dataDir),
-    appHome: applicationHome(env),
+    port: positive('PORT', 3000), dataDir: path.resolve(baseDirectory,env.HARNESS_DATA_DIR ?? applicationHome(baseDirectory)),
+    appHome: env.HARNESS_HOME ?? applicationHome(baseDirectory),
     workspaceRoot: path.resolve(baseDirectory,env.HARNESS_WORKSPACE_ROOT || path.join(homedir(),'React Harness Projects')),
     models: { architect: env.ARCHITECT_MODEL ?? 'gemini-3.5-pro', coder: env.CODER_MODEL ?? 'gemini-3.5-flash-withtools', critic: env.CRITIC_MODEL ?? 'gemini-3.5-pro' },
     promptFiles,

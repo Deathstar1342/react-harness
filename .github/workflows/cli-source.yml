@@ -10,9 +10,6 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
-    env:
-      CLI_SMOKE_HOME: ${{ runner.temp }}/abyssus-cli-profile
-      HARNESS_HOME: ${{ runner.temp }}/abyssus-cli-profile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,7 +31,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./start.ps1 -Check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Native npm launch
+      - name: npm start builds and serves the web app
+        env:
+          CLI_SMOKE_EXPECT_BUILD: '1'
         run: node --import tsx tests/cli-source-smoke.ts npm
-      - name: Native wrapper launch
+      - name: Start wrapper reuses the web build
+        env:
+          CLI_SMOKE_EXPECT_BUILD: '0'
         run: node --import tsx tests/cli-source-smoke.ts

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:net';
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { startBackend } from '../server/bootstrap.js';
 import { BackendLifecycle, signBackendRequest, verifyBackendProof } from '../server/lifecycle.js';
-import { ProfileOwnership } from '../server/profile.js';
+import { StateOwnership } from '../server/local-state.js';
 import { childEnvironment } from '../server/tools/command-utils.js';
 import { Store } from '../server/store.js';
 
@@ -18,8 +18,8 @@ afterEach(async()=>{vi.restoreAllMocks();for(const fn of cleanups.splice(0).reve
 async function unusedPort() {const server=createServer();server.listen(0,'127.0.0.1');await once(server,'listening');const port=(server.address() as {port:number}).port;await new Promise<void>(resolve=>server.close(()=>resolve()));return port;}
 async function fixture() {
   const root=mkdtempSync(path.join(tmpdir(),'rh-lifecycle-'));cleanups.push(()=>rmSync(root,{recursive:true,force:true}));
-  const cwd=path.join(root,'install'),other=path.join(root,'other'),home=path.join(root,'home');mkdirSync(cwd);mkdirSync(other);
-  const options={cwd,installRoot:cwd,env:{HARNESS_HOME:home,HARNESS_INIT:'1',PORT:String(await unusedPort()),STARK_API_KEY:'synthetic-only'}};
+  const cwd=path.join(root,'install'),other=path.join(root,'other'),home=path.join(cwd,'.harness');mkdirSync(cwd);mkdirSync(other);
+  const options={installRoot:cwd,web:false,env:{LOCALAPPDATA:root,XDG_DATA_HOME:root,PORT:String(await unusedPort())}};
   return {root,cwd,other,home,options};
 }
 async function start(options:Parameters<typeof startBackend>[0]) {const backend=await startBackend(options);cleanups.push(()=>backend.close());return backend;}
@@ -49,7 +49,7 @@ it('authenticates readiness without sending the key, rejects replay, expiry, wro
   expect(response.statusCode).toBe(200);expect(verifyBackendProof(key,'readiness',request,response.json())).toBe(true);
   expect(verifyBackendProof(key,'shutdown',request,response.json())).toBe(false);
   expect(response.body).not.toContain(key);expect(response.body).not.toContain('synthetic-only');
-  const proof=response.json();proof.identity.profileId='impostor';expect(verifyBackendProof(key,'readiness',request,proof)).toBe(false);
+  const proof=response.json();proof.identity.pid+=1;expect(verifyBackendProof(key,'readiness',request,proof)).toBe(false);
   for(const [url,payload] of [
     ['/api/backend/readiness',request],
     ['/api/backend/shutdown',signBackendRequest(key,'readiness',id)],
@@ -61,59 +61,68 @@ it('authenticates readiness without sending the key, rejects replay, expiry, wro
   expect((await backend.app.inject({method:'POST',url:'/api/backend/readiness',headers:{...headers,origin:'https://evil.example'},payload:signBackendRequest(key,'readiness',id)})).statusCode).toBe(403);
   expect(childEnvironment({HARNESS_LAUNCH_KEY:key,STARK_API_KEY:'synthetic-only'})).not.toHaveProperty('HARNESS_LAUNCH_KEY');
 });
-it('keeps selected data/config across cwd changes and refuses a missing database or lost override',async()=>{
+it('uses one checkout database and settings file and refuses to replace an established missing database',async()=>{
   const t=await fixture(),first=await start(t.options);
-  const store=new Store(path.join(first.config.dataDir,'state.sqlite'));
+  expect(first.config.dataDir).toBe(t.home);
+  const store=new Store(path.join(t.home,'state.sqlite'));
   const project=store.createProject('Keep',t.other),chat=store.createChat(project.id,'Keep','review');store.close();
-  const id=first.profile.id;await first.close();
-  writeFileSync(path.join(t.other,'.env'),'STARK_API_KEY=wrong-profile');
-  const next=await start({...t.options,cwd:t.other,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT}});expect(next.profile.id).toBe(id);
-  expect((await next.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${next.auth.token}`}})).statusCode).toBe(200);
-  await next.close();
-  renameSync(path.join(next.config.dataDir,'state.sqlite'),path.join(next.config.dataDir,'retained.sqlite'));
-  await expect(startBackend(t.options)).rejects.toThrow('missing');
-  const u=await fixture(),override=path.join(u.root,'explicit');
-  const custom=await start({...u.options,env:{...u.options.env,HARNESS_DATA_DIR:override}});await custom.close();
-  await expect(startBackend(u.options)).rejects.toThrow('directory changed');
-  const deliberate=await start({...u.options,env:{...u.options.env,HARNESS_SELECT_DATA:'1'}});
-  expect(deliberate.config.dataDir).not.toBe(override);
-});
-it('migrates through startBackend, saves provider settings in stable config, and restarts without one-time flags',async()=>{
-  const t=await fixture();
-  const old=new Store(path.join(t.cwd,'.harness','state.sqlite'));
-  const project=old.createProject('Imported',t.other),chat=old.createChat(project.id,'Original','review');old.close();
-  writeFileSync(path.join(t.cwd,'.env'),'ARCHITECT_MODEL=legacy\nSTARK_API_KEY=legacy-synthetic\n');
-  const first=await start({...t.options,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT,HARNESS_LEGACY_ROOT:t.cwd}});
   const response=await first.app.inject({method:'PATCH',url:'/api/provider-settings',headers:{...headers,authorization:'Bearer '+first.auth.token},payload:{apiKey:'new-synthetic',models:{architect:'new-default'}}});
   expect(response.statusCode).toBe(200);expect(response.body).not.toContain('new-synthetic');
-  expect(readFileSync(first.profile.paths.configFile,'utf8')).toContain('new-synthetic');
-  expect(readFileSync(path.join(t.cwd,'.env'),'utf8')).toContain('legacy-synthetic');
+  expect(readFileSync(path.join(t.cwd,'.env'),'utf8')).toContain('new-synthetic');
+  expect(existsSync(path.join(t.home,'profile'))).toBe(false);
   await first.close();
-  const next=await start({...t.options,cwd:t.other,env:{HARNESS_HOME:t.home,PORT:t.options.env.PORT}});
+
+  const next=await start(t.options);
   expect(next.config.apiKey).toBe('new-synthetic');
-  const detail=(await next.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${next.auth.token}`}})).json();
-  expect(detail.chat.models.architect).toBe('legacy');
+  expect((await next.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${next.auth.token}`}})).statusCode).toBe(200);
+  await next.close();
+  renameSync(path.join(t.home,'state.sqlite'),path.join(t.home,'retained.sqlite'));
+  await expect(startBackend(t.options)).rejects.toThrow('missing');
 });
-it('failed startup never replaces a working data binding; retry after port collision remains possible',async()=>{
-  const t=await fixture(),first=await start(t.options),original=first.config.dataDir;await first.close();
-  const binding=readFileSync(path.join(first.profile.paths.profile,'data-location.json'),'utf8');
-  const server=createServer();server.listen(Number(t.options.env.PORT),'127.0.0.1');await once(server,'listening');
-  try {
-    await expect(startBackend({...t.options,env:{...t.options.env,HARNESS_SELECT_DATA:'1',HARNESS_DATA_DIR:path.join(t.root,'alternative')}})).rejects.toThrow('EADDRINUSE');
-    expect(readFileSync(path.join(first.profile.paths.profile,'data-location.json'),'utf8')).toBe(binding);
-  } finally {await new Promise<void>(resolve=>server.close(()=>resolve()));}
-  const next=await start(t.options);expect(next.config.dataDir).toBe(original);
+
+it('copies the old selected database and personal skills without using the old config',async()=>{
+  const t=await fixture(),legacy=path.join(t.root,'legacy'),profile=path.join(legacy,'profile');
+  const data=path.join(t.root,'custom-data');
+  mkdirSync(path.join(profile,'config'),{recursive:true,mode:0o700});
+  mkdirSync(path.join(legacy,'skills','sample'),{recursive:true,mode:0o700});
+  writeFileSync(path.join(profile,'config','.env'),'ARCHITECT_MODEL=ignored-old');
+  writeFileSync(path.join(legacy,'skills','sample','SKILL.md'),'saved skill');
+  mkdirSync(data,{mode:0o700});
+  const source=path.join(data,'state.sqlite'),old=new Store(source);
+  const project=old.createProject('Imported',t.other),chat=old.createChat(project.id,'Original','review');old.close();
+  writeFileSync(path.join(profile,'data-location.json'),JSON.stringify({directory:data}));
+  writeFileSync(path.join(data,'artifact.txt'),'retained evidence');
+  writeFileSync(path.join(data,'config.env'),'ARCHITECT_MODEL=ignored-copy');
+  writeFileSync(path.join(t.cwd,'.env'),'ARCHITECT_MODEL=checkout');
+  const options={...t.options,env:{...t.options.env,HARNESS_HOME:legacy}};
+  const owner=new StateOwnership(legacy);
+  try { await expect(startBackend(options)).rejects.toThrow('owned'); }
+  finally { owner.close(); }
+  expect(existsSync(t.home)).toBe(false);
+  const original=readFileSync(source);
+  const first=await start(options);
+  expect(first.config.dataDir).toBe(t.home);
+  expect(first.config.models.architect).toBe('checkout');
+  expect(readFileSync(path.join(t.home,'skills','sample','SKILL.md'),'utf8')).toBe('saved skill');
+  expect(readFileSync(path.join(t.home,'artifact.txt'),'utf8')).toBe('retained evidence');
+  expect(existsSync(path.join(t.home,'profile'))).toBe(false);
+  expect(existsSync(path.join(t.home,'config.env'))).toBe(false);
+  expect(readFileSync(source)).toEqual(original);
+  expect((await first.app.inject({url:`/api/chats/${chat.id}`,headers:{...headers,authorization:`Bearer ${first.auth.token}`}})).statusCode).toBe(200);
+  await first.close();
+  const next=await start(t.options);
+  expect(next.config.dataDir).toBe(t.home);
 });
 it('fails occupied-port startup and releases ownership without touching the unrelated listener',async()=>{
   const t=await fixture(),server=createServer();server.listen(Number(t.options.env.PORT),'127.0.0.1');await once(server,'listening');
   cleanups.push(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
   await expect(startBackend(t.options)).rejects.toThrow('EADDRINUSE');expect(server.listening).toBe(true);
-  const lock=new ProfileOwnership(t.home);lock.close();
+  const lock=new StateOwnership(t.home);lock.close();
 });
-it('rejects two different homes sharing one data override in actual backend processes',async()=>{
-  const t=await fixture(),first=await start({...t.options,env:{...t.options.env,HARNESS_DATA_DIR:path.join(t.root,'shared')}});
-  const options={...t.options,env:{...t.options.env,HARNESS_HOME:path.join(t.root,'second'),HARNESS_DATA_DIR:first.config.dataDir,PORT:String(await unusedPort())}};
-  const child=fork(fileURLToPath(new URL('./profile-worker.ts',import.meta.url)),['backend',JSON.stringify(options)],{execArgv:['--import','tsx'],stdio:['ignore','ignore','pipe','ipc']});
+it('rejects two backends using the same checkout in actual backend processes',async()=>{
+  const t=await fixture(),first=await start(t.options);
+  const options={...t.options,env:{...t.options.env,PORT:String(await unusedPort())}};
+  const child=fork(fileURLToPath(new URL('./state-worker.ts',import.meta.url)),['backend',JSON.stringify(options)],{execArgv:['--import','tsx'],stdio:['ignore','ignore','pipe','ipc']});
   cleanups.push(async()=>{if(child.exitCode===null && child.signalCode===null){const exited=once(child,'exit');child.kill();await exited;}});
   const [message]=await once(child,'message');expect(message.error).toContain('owned');
   await first.close();const next=await start(options);expect(next.config.dataDir).toBe(first.config.dataDir);
@@ -127,20 +136,20 @@ it('authenticated shutdown closes the listener and overwrites its descriptor wit
   const descriptor=readFileSync(path.join(t.home,'backend.json'),'utf8');expect(descriptor).not.toContain(backend.lifecycle.key);expect(JSON.parse(descriptor).state).toBe('stopped');
 });
 it('shutdown is idempotent, rejects new work while draining, and exposes failed drain state',async()=>{
-  const lifecycle=new BackendLifecycle('profile'),app=Fastify();let finish!:()=>void;
+  const lifecycle=new BackendLifecycle(),app=Fastify();let finish!:()=>void;
   const close=vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
   lifecycle.register(app,close);app.get('/api/work',()=>({ok:true}));lifecycle.ready();
   const first=lifecycle.stop(close),second=lifecycle.stop(close);expect(first).toBe(second);
   expect((await app.inject('/api/work')).statusCode).toBe(503);expect(close).toHaveBeenCalledTimes(1);
   finish();await first;expect(lifecycle.identity().state).toBe('stopped');await app.close();
-  const failed=new BackendLifecycle('profile');await expect(failed.stop(async()=>{throw new Error('drain failure');})).rejects.toThrow('drain failure');
+  const failed=new BackendLifecycle();await expect(failed.stop(async()=>{throw new Error('drain failure');})).rejects.toThrow('drain failure');
   expect(failed.identity().state).toBe('failed');
 });
 it('retains actual ownership during a hanging or failed close',async()=>{
   const t=await fixture(),backend=await start(t.options);
   const original=backend.app.close.bind(backend.app);let release!:()=>void;
   vi.spyOn(backend.app,'close').mockImplementation((()=>new Promise<void>(resolve=>{release=resolve;})) as typeof backend.app.close);
-  const closing=backend.close();await Promise.resolve();expect(()=>new ProfileOwnership(t.home)).toThrow('owned');
+  const closing=backend.close();await Promise.resolve();expect(()=>new StateOwnership(t.home)).toThrow('owned');
   await original();release();await closing;
-  const lock=new ProfileOwnership(t.home);lock.close();
+  const lock=new StateOwnership(t.home);lock.close();
 });
